@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.1.4",
+    "changes": [
+      { "kind": "fixed", "text": "Plays weren't sent on Linux when osu! wasn't in osu-winello's default folder." }
+    ]
+  },
+  {
     "version": "0.1.3",
     "date": "2026-10-12",
     "changes": [
