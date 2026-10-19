@@ -171,7 +171,13 @@ impl Env {
             if cfg!(windows) {
                 var("LOCALAPPDATA").map(PathBuf::from).unwrap_or(home.join("AppData").join("Local")).join("osu!")
             } else {
-                home.join(".local/share/osu-wine/osu!")
+                // osu-winello asks where to install and writes it down
+                let data = var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or(home.join(".local").join("share"));
+                std::fs::read_to_string(data.join("osuconfig").join("osupath"))
+                    .ok()
+                    .map(|p| PathBuf::from(p.trim()))
+                    .filter(|p| p.is_dir())
+                    .unwrap_or(home.join(".local/share/osu-wine/osu!"))
             }
         });
         let lazer_dir = var("LAZER_DIR").map(PathBuf::from).unwrap_or_else(|| {

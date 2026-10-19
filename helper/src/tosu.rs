@@ -143,8 +143,34 @@ fn local_path(p: &str) -> Option<PathBuf> {
     if cfg!(windows) || p.starts_with('/') {
         return Some(PathBuf::from(p));
     }
-    let rest = p.strip_prefix("Z:\\").or_else(|| p.strip_prefix("z:\\"))?;
-    Some(PathBuf::from(format!("/{}", rest.replace('\\', "/"))))
+    wine_path(p, &wine_prefixes())
+}
+
+// X:\a\b through the prefix's dosdevices/x: link. osu-winello puts osu! on D:
+fn wine_path(p: &str, prefixes: &[PathBuf]) -> Option<PathBuf> {
+    let (drive, rest) = p.split_once(":\\")?;
+    let drive = drive.to_ascii_lowercase();
+    if drive.len() != 1 || !drive.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let rest = rest.replace('\\', "/");
+    if drive == "z" {
+        return Some(PathBuf::from(format!("/{rest}")));
+    }
+    prefixes.iter().map(|w| w.join("dosdevices").join(format!("{drive}:")).join(&rest)).find(|f| f.exists())
+}
+
+// tosu runs in osu!'s prefix, which isn't ours to ask about
+fn wine_prefixes() -> Vec<PathBuf> {
+    let home = crate::home();
+    let data = crate::var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or(home.join(".local").join("share"));
+    let mut all: Vec<PathBuf> = crate::var("WINEPREFIX").map(PathBuf::from).into_iter().collect();
+    all.push(data.join("wineprefixes").join("osu-wineprefix"));
+    if let Ok(dirs) = std::fs::read_dir(data.join("wineprefixes")) {
+        all.extend(dirs.flatten().map(|d| d.path()));
+    }
+    all.push(home.join(".wine"));
+    all
 }
 
 pub(crate) fn mods_number(mods: &Value) -> i64 {
@@ -921,10 +947,29 @@ mod tests {
     fn paths() {
         if cfg!(not(windows)) {
             assert_eq!(super::local_path("Z:\\home\\a\\osu!"), Some("/home/a/osu!".into()));
-            assert_eq!(super::local_path("C:\\osu!"), None);
             assert_eq!(super::local_path("/home/a/osu!"), Some("/home/a/osu!".into()));
         }
         assert_eq!(super::local_path(""), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wine_drives() {
+        let root = std::env::temp_dir().join(format!("hashi-wine-{}", std::process::id()));
+        let game = root.join("Games").join("osu!");
+        std::fs::create_dir_all(game.join("Songs")).unwrap();
+        let prefix = root.join("prefix");
+        std::fs::create_dir_all(prefix.join("dosdevices")).unwrap();
+        std::os::unix::fs::symlink(&game, prefix.join("dosdevices").join("d:")).unwrap();
+        let prefixes = [root.join("missing"), prefix.clone()];
+        let d = prefix.join("dosdevices").join("d:");
+        assert_eq!(super::wine_path("D:\\", &prefixes), Some(d.join("")));
+        assert_eq!(super::wine_path("d:\\Songs", &prefixes), Some(d.join("Songs")));
+        assert_eq!(super::wine_path("D:\\nope", &prefixes), None);
+        assert_eq!(super::wine_path("C:\\osu!", &prefixes), None);
+        assert_eq!(super::wine_path("Z:\\home\\a", &prefixes), Some("/home/a".into()));
+        assert_eq!(super::wine_path("\\\\server\\x", &prefixes), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
