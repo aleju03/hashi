@@ -63,6 +63,8 @@ pub(crate) struct TosuState {
     pub lazer_files_dir: PathBuf,
     // stable's folder and its Songs, wherever it's installed
     pub stable_dirs: Option<(PathBuf, PathBuf)>,
+    // as tosu last reported them, a wine drive other than Z: is looked up on disk
+    stable_folders: Option<(String, String)>,
     pub last_frame_at: i64,
     pub last_frame: Option<Value>,
     prev_state: Option<String>,
@@ -97,6 +99,7 @@ impl TosuState {
             found: None,
             lazer_files_dir,
             stable_dirs: None,
+            stable_folders: None,
             last_frame_at: 0,
             last_frame: None,
             prev_state: None,
@@ -242,12 +245,16 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 t.lazer_files_dir = PathBuf::from(songs);
             }
         } else {
-            let folder = |k: &str| raw.pointer(&format!("/folders/{k}")).and_then(Value::as_str).and_then(local_path);
-            if let (Some(game), Some(songs)) = (folder("game"), folder("songs")) {
-                if t.stable_dirs.as_ref() != Some(&(game.clone(), songs.clone())) && game.is_dir() {
-                    log!("osu! is in {}, its songs in {}", game.display(), songs.display());
-                    t.stable_dirs = Some((game, songs));
+            let folder = |k: &str| raw.pointer(&format!("/folders/{k}")).and_then(Value::as_str).unwrap_or_default().to_string();
+            let folders = (folder("game"), folder("songs"));
+            if t.stable_folders.as_ref() != Some(&folders) {
+                if let (Some(game), Some(songs)) = (local_path(&folders.0), local_path(&folders.1)) {
+                    if t.stable_dirs.as_ref() != Some(&(game.clone(), songs.clone())) && game.is_dir() {
+                        log!("osu! is in {}, its songs in {}", game.display(), songs.display());
+                        t.stable_dirs = Some((game, songs));
+                    }
                 }
+                t.stable_folders = Some(folders);
             }
         }
         if t.state.as_deref() != Some(&state) || t.player != player || t.client.as_deref() != Some(client) {
