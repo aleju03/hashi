@@ -33,6 +33,7 @@ pub(crate) struct LastPlay {
     beatmap: Beatmap,
     // lazer gives paths relative to files/, by hash
     chart_file: Option<String>,
+    audio_file: Option<String>,
     // relative to Songs (or files/ on lazer), for the cover in the ui
     cover: Option<Cover>,
     // past the last note and not failed: quitting partway saves no score
@@ -310,6 +311,14 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 } else {
                     None
                 },
+                audio_file: match (str_of(files.get("audio")).filter(|x| !x.is_empty()), client == "lazer") {
+                    (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
+                    (Some(f), false) => match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), &t.stable_dirs) {
+                        (Some(folder), Some((_, songs))) => Some(songs.join(folder.replace('\\', "/")).join(f).to_string_lossy().into_owned()),
+                        _ => None,
+                    },
+                    _ => None,
+                },
                 cover: if client == "lazer" {
                     background.map(|file| Cover { lazer: Some(true), folder: None, file })
                 } else {
@@ -395,10 +404,11 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
         return log!("skip (tosu gave no beatmap checksum): {label}");
     };
     let created = g("createdAt");
+    let practice = crate::practice::is_practice(b, &md5, &crate::types::text(&bm.version));
 
     let item = {
         let mut s = b.st();
-        if s.sends_no_plays() {
+        if s.sends_no_plays() && !practice {
             drop(s);
             return log!("skip (sending plays is off): {label}");
         }
@@ -431,6 +441,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
                 keys: bm.keys.clone(),
                 cover: play.cover.clone(),
                 chart_file: play.chart_file.clone(),
+                audio_file: play.audio_file.clone(),
                 mods: mods_name(&mods),
                 player_name: or(g("playerName"), play.player_name.clone()),
                 score: g("score"),
@@ -450,6 +461,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             poll_delay: None,
             held_from: None,
             on_hold: false,
+            practice,
         };
         s.queue.items.push(item.clone());
         item

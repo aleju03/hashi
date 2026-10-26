@@ -68,6 +68,9 @@ pub struct Settings {
     pub hide_dans: bool,
     #[serde(default, rename = "onTop", skip_serializing_if = "std::ops::Not::not")]
     pub on_top: bool,
+    // the hand whose thumb plays the middle column of 5K, 7K, 9K. unset is the left
+    #[serde(default, rename = "thumbRight", skip_serializing_if = "std::ops::Not::not")]
+    pub thumb_right: bool,
     // the site's theme color: hue 0-359, saturation 0-100. unset is the default pink
     #[serde(default, rename = "themeHue", skip_serializing_if = "Option::is_none")]
     pub theme_hue: Option<u16>,
@@ -76,6 +79,11 @@ pub struct Settings {
     // the version whose changelog was read. unset on configs from before the changelog, so those see it
     #[serde(default, rename = "notesRead", skip_serializing_if = "Option::is_none")]
     pub notes_read: Option<String>,
+    #[serde(default, rename = "guideRead", skip_serializing_if = "std::ops::Not::not")]
+    pub guide_read: bool,
+    // the finger on each column, by key count ("4": ["ring", "index", "index", "middle"]). unset is the usual layout
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub fingers: std::collections::BTreeMap<String, Vec<String>>,
     #[serde(flatten)]
     pub rest: Map<String, Value>,
 }
@@ -118,6 +126,9 @@ pub struct Item {
     // the player held it back, it waits until they send it
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub on_hold: bool,
+    // a play of a practice map Hashi made: kept here for its analysis, never sent
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub practice: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -153,6 +164,9 @@ pub struct Play {
     pub cover: Option<Cover>,
     #[serde(default)]
     pub chart_file: Option<String>,
+    // the song, where tosu said it was when the play finished: lazer keeps it under a hash
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_file: Option<String>,
     #[serde(default)]
     pub mods: String,
     #[serde(default)]

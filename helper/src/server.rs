@@ -10,7 +10,7 @@ use bytes::Bytes;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::auth::{self, Attempt};
-use crate::{autostart, get_tosu, leaderboard, log, presence, queue, replays, tosu, update, Bridge, COUNTER_PATH, DEFAULT_PORT};
+use crate::{analysis, autostart, get_tosu, leaderboard, log, practice, presence, queue, replays, tosu, update, Bridge, COUNTER_PATH, DEFAULT_PORT};
 
 // built in for releases, read from disk in debug builds so edits show up right away
 #[derive(rust_embed::Embed)]
@@ -158,6 +158,12 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if let Some(id) = path.strip_prefix("/analysis/") {
+            let (status, body) = analysis::for_play(b, id).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
         if path == "/state" {
             let mut res = json(200, &b.snapshot());
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -218,12 +224,46 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let ok = b.read_notes().await;
             return saved(b, ok);
         }
+        // /practice/<play id>?from=58&to=66&repeats=4&slowest=0.85&lead=2&goal=96.9
+        if let Some(id) = path.strip_prefix("/practice/") {
+            let Some(options) = practice::Options::from_query(req.uri().query().unwrap_or("")) else { return empty(400) };
+            let (status, body) = practice::make(b, id, options).await;
+            return json(status, &body);
+        }
+        // /goals/<id>/target/<percent>
+        if let Some((goal, value)) = path.strip_prefix("/goals/").and_then(|r| r.split_once("/target/")) {
+            let Some(target) = value.parse::<f64>().ok().filter(|t| (1.0..=100.0).contains(t)) else { return empty(400) };
+            return if crate::goals::set_target(b, goal, target).await { json(200, &b.snapshot()) } else { empty(404) };
+        }
+        // /goals/<id>/dismiss
+        if let Some(goal) = path.strip_prefix("/goals/").and_then(|r| r.strip_suffix("/dismiss")) {
+            return if crate::goals::dismiss(b, goal).await { json(200, &b.snapshot()) } else { empty(404) };
+        }
+        // /finger/4/0/ring
+        if let Some(rest) = path.strip_prefix("/finger/") {
+            let parts: Vec<&str> = rest.split('/').collect();
+            let [keys, column, finger] = parts[..] else { return empty(404) };
+            let (Ok(keys), Ok(column)) = (keys.parse::<usize>(), column.parse::<usize>()) else { return empty(400) };
+            if !(1..=18).contains(&keys) || column >= keys || !analysis::FINGERS.contains(&finger) {
+                return empty(400);
+            }
+            let ok = b.set_finger(keys, column, finger).await;
+            return saved(b, ok);
+        }
+        if path == "/guide/read" {
+            let ok = b.read_guide().await;
+            return saved(b, ok);
+        }
         if path == "/show-dans/on" || path == "/show-dans/off" {
             let ok = b.set_show_dans(path == "/show-dans/on").await;
             return saved(b, ok);
         }
         if path == "/start-in-tray/on" || path == "/start-in-tray/off" {
             let ok = b.set_start_in_tray(path == "/start-in-tray/on").await;
+            return saved(b, ok);
+        }
+        if path == "/thumb/left" || path == "/thumb/right" {
+            let ok = b.set_thumb(path == "/thumb/right").await;
             return saved(b, ok);
         }
         if path == "/on-top/on" || path == "/on-top/off" {

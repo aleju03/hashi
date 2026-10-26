@@ -55,7 +55,7 @@ pub(crate) fn remove(b: &Arc<Bridge>, id: &str) -> bool {
 pub(crate) fn hold(b: &Arc<Bridge>, id: &str, on: bool) -> bool {
     {
         let mut s = b.st();
-        let Some(item) = s.queue.get_mut(id).filter(|i| ["waiting_replay", "send"].contains(&i.phase.as_str())) else { return false };
+        let Some(item) = s.queue.get_mut(id).filter(|i| !i.practice && ["waiting_replay", "send"].contains(&i.phase.as_str())) else { return false };
         item.on_hold = on;
         log!("{}: {}", title(item), if on { "on hold" } else { "sending after all" });
     }
@@ -615,6 +615,7 @@ pub(crate) fn public_item(item: &Item, origin: &str, username: Option<&str>) -> 
         },
         "phase": item.phase,
         "onHold": item.on_hold,
+        "practice": item.practice,
         "retryAt": if item.error.as_ref().is_some_and(|e| e.code == "retrying") { Some(item.next_attempt_at) } else { None },
         "receipt": r.map(|r| json!({
             "state": r.get("state"),
@@ -628,6 +629,7 @@ pub(crate) fn public_item(item: &Item, origin: &str, username: Option<&str>) -> 
         "url": r.and_then(|r| play_url(r, origin, username)),
         "rating": r.map(rating).unwrap_or(Value::Null),
         "md5": item.play.beatmap_md5,
+        "analysis": item.replay.is_some() && item.chart.is_some(),
         "rank": r.filter(|r| state_of(r) == "accepted").map(crate::leaderboard::rank).unwrap_or(Value::Null),
         // the site needed the map and put the play on no board: it has none for this map
         "noBoard": item.chart_needed == Some(true) && r.is_some_and(|r| state_of(r) == "accepted" && r.get("leaderboard").is_some_and(Value::is_null)),
@@ -640,7 +642,7 @@ pub(crate) async fn prune_queue(b: &Arc<Bridge>) -> bool {
     let (keep, pruned): (std::collections::HashSet<String>, bool) = {
         let mut s = b.st();
         let before = s.queue.items.len();
-        s.queue.items.retain(|i| !(["done", "failed", "unbound"].contains(&i.phase.as_str()) && i.captured_at < cutoff));
+        s.queue.items.retain(|i| !(["done", "failed", "unbound", "practice"].contains(&i.phase.as_str()) && i.captured_at < cutoff));
         let pruned = s.queue.items.len() != before;
         let mut keep: std::collections::HashSet<String> =
             s.queue.items.iter().flat_map(|i| [i.replay.as_ref(), i.chart.as_ref()]).flatten().map(|x| x.sha256.clone()).collect();

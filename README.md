@@ -63,6 +63,11 @@ along with where it placed on the map's leaderboard. Click a play to open it on 
 its rank to see the map's top 50. While you're picking a song, the podium button next to the gear
 opens the selected map's leaderboard. A play that hasn't been sent yet can be held back or removed.
 
+The chart icon next to a play's time opens its analysis, worked out on your computer from the
+replay: how early or late you hit and let go of long notes, each finger's and each hand's accuracy,
+how it went over the course of the map, and what stands out, with what fixing it would have been
+worth on that play. On 5K, 7K and 9K the middle column counts for the hand you pick in the settings.
+
 Closing the window quits the app. The hide to tray button keeps it running in the background using
 very little memory.
 

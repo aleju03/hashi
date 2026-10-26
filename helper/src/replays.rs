@@ -323,14 +323,23 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
             i.play.player_name = name.clone().into();
         }
         i.chart = Some(chart);
-        i.phase = if i.binding.is_some() { "send".into() } else { "unbound".into() };
-        if i.binding.is_none() {
+        i.phase = if i.practice {
+            "practice".into()
+        } else if i.binding.is_some() {
+            "send".into()
+        } else {
+            "unbound".into()
+        };
+        if i.binding.is_none() && !i.practice {
             i.error = ItemError::new("not_connected", "Not connected when this play finished.");
         }
     });
     b.save_queue().await;
     b.broadcast();
     queue::wake_queue(b, 0);
+    // spawned so sending isn't held up
+    let (b2, id2) = (b.clone(), id.to_string());
+    b.spawn(async move { crate::goals::on_play(&b2, &id2).await });
     Ok(())
 }
 

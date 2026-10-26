@@ -28,6 +28,10 @@ impl Reader<'_> {
         Ok(i32::from_le_bytes(self.take(4)?.try_into().unwrap()))
     }
 
+    fn u16(&mut self) -> Result<u16, String> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+    }
+
     fn i64(&mut self) -> Result<i64, String> {
         Ok(i64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
@@ -74,6 +78,80 @@ pub fn parse_osr(buf: &[u8]) -> Result<OsrHeader, String> {
     let frame_bytes = r.i32()?;
     let complete = frame_bytes > 0 && buf.len() >= r.o + frame_bytes as usize + 8;
     Ok(OsrHeader { mode, beatmap_md5, player_name, mods, played_at: ticks / 10000 - 62135596800000, complete })
+}
+
+pub struct Replay {
+    pub mode: u8,
+    pub mods: i64,
+    // 300, 100, 50, geki (PERFECT), katu (GOOD), miss
+    pub counts: [u32; 6],
+    // (ms since the last row, x, y) as written, x holds the pressed columns as bits
+    pub rows: Vec<(f64, f64, f64)>,
+    // what lazer adds after the frames: mods with their settings, the exact judgement counts
+    pub lazer: Option<serde_json::Value>,
+}
+
+pub fn parse_replay(buf: &[u8]) -> Result<Replay, String> {
+    let mut r = Reader { buf, o: 0 };
+    let mode = r.u8()?;
+    let version = r.i32()?;
+    r.string()?;
+    r.string()?;
+    r.string()?;
+    let mut counts = [0u32; 6];
+    for c in &mut counts {
+        *c = r.u16()? as u32;
+    }
+    let _score = r.i32()?;
+    r.take(2 + 1)?;
+    let mods = r.i32()? as u32 as i64;
+    r.string()?;
+    r.i64()?;
+    let len = r.i32()?;
+    let data = r.take(usize::try_from(len).map_err(|_| "bad frame length")?)?;
+    let rows = parse_rows(&decompress(data)?)?;
+    let mut lazer = None;
+    if version >= 30000001 && r.i64().is_ok() {
+        if let Ok(len) = r.i32() {
+            if let Some(data) = usize::try_from(len).ok().and_then(|n| r.take(n).ok()) {
+                lazer = decompress(data).ok().and_then(|text| serde_json::from_slice(&text).ok());
+            }
+        }
+    }
+    Ok(Replay { mode, mods, counts, rows, lazer })
+}
+
+fn decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = vec![];
+    // a replay's frames come to a few MB at most, this stops a crafted one from asking for gigabytes
+    let opts = lzma_rs::decompress::Options { memlimit: Some(64 << 20), ..Default::default() };
+    lzma_rs::lzma_decompress_with_options(&mut std::io::Cursor::new(data), &mut out, &opts).map_err(|e| format!("frames: {e}"))?;
+    Ok(out)
+}
+
+// "w|x|y|z," rows, the "-12345" one at the end carries the RNG seed
+fn parse_rows(text: &[u8]) -> Result<Vec<(f64, f64, f64)>, String> {
+    let text = std::str::from_utf8(text).map_err(|_| "frames aren't text")?;
+    let number = |s: &str| {
+        let s = s.trim();
+        if s.is_empty() {
+            Some(0.0)
+        } else {
+            s.parse::<f64>().ok().filter(|n| n.is_finite())
+        }
+    };
+    let mut rows = vec![];
+    for entry in text.split(',').filter(|e| !e.is_empty()) {
+        let parts: Vec<&str> = entry.split('|').collect();
+        if parts.len() < 4 || parts[0] == "-12345" {
+            continue;
+        }
+        let (Some(w), Some(x), Some(y)) = (number(parts[0]), number(parts[1]), number(parts[2])) else {
+            return Err("The replay has a corrupt input frame.".into());
+        };
+        rows.push((w, x, y));
+    }
+    Ok(rows)
 }
 
 // Data/r/<md5>-<ticks>.osr, ticks are a windows FILETIME (1601), not .NET ticks
