@@ -23,6 +23,14 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "linux": {
+      "deb": {
+        "depends": ["gstreamer1.0-plugins-good"]
+      },
+      "rpm": {
+        "depends": ["gstreamer1-plugins-good"]
+      }
+    },
     "windows": {
       "nsis": {
         "template": "windows/installer.nsi",
