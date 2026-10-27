@@ -775,7 +775,10 @@ function goalTrack(g, width = 460) {
   const lo = Math.min(g.target - 1, g.start ?? g.target - 5, ...values);
   const left = 10;
   const right = width - 30;
-  const x = (v) => left + Math.max(0, Math.min(1, (v - lo) / (g.target - lo))) * (right - left);
+  // a try that reached the target lands past the post, further the more it beat it by
+  const x = (v) => v >= g.target
+    ? right + 10 + Math.min(1, (v - g.target) / Math.max(0.5, 100 - g.target)) * 8
+    : left + Math.max(0, (v - lo) / (g.target - lo)) * (right - left);
   const y = 28;
   const root = svg("svg", {
     class: `chart goal-track${g.done ? " done" : ""}`,
@@ -807,7 +810,7 @@ function goalLine(g) {
   if (g.done) return `${pct(g.best)} ${unit}. Reached in ${g.tries} ${g.tries === 1 ? "try" : "tries"}.`;
   if (!g.tries) return `${g.target}% ${unit} to reach. Play it to start.`;
   const change = g.previous != null ? ` (${deltaText(g.last - g.previous)})` : "";
-  return `Best ${pct(g.best)}, last ${pct(g.last)}${change}, ${g.tries} ${g.tries === 1 ? "try" : "tries"}. ${accText(Math.max(0, g.target - g.best))}% to go.`;
+  return `Best ${pct(g.best)} ${unit}, last ${pct(g.last)}${change}, ${g.tries} ${g.tries === 1 ? "try" : "tries"}. ${accText(Math.max(0, g.target - g.best))}% to go.`;
 }
 
 async function dismissGoal(g) {
