@@ -12,6 +12,8 @@ mod presence;
 mod profile;
 mod queue;
 mod replays;
+mod skin;
+mod skin_render;
 mod server;
 mod tosu;
 mod types;

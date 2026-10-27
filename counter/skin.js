@@ -1,0 +1,824 @@
+// The live skin preview. The helper lays the skin out (skin_render) and sends draw ops and sprites;
+// this only draws them, the notes with the same rules as skin_render's scene.rs.
+
+const SKIN_SCROLL = "hashi-skin-scroll";
+const SKIN_SCROLL_MIN = 200;
+const SKIN_SCROLL_MAX = 1200;
+const SKIN_SCROLL_STEP = 20;
+// ?skinfreeze shows the still the helper's /skin.png draws, to check one against the other
+const SKIN_FREEZE = new URLSearchParams(location.search).has("skinfreeze");
+// how long a column stays down after a tap reaches the line
+const SKIN_TAP_PRESS_MS = 90;
+const SKIN_FRAME_MS = 1000 / 60;
+// a map starts this long before its first note, so the notes scroll in
+const SKIN_LEAD_MS = 1500;
+
+async function loadSkinScene(page) {
+  const edits = skinEditsJson(page);
+  const query = `keys=${page.keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}`;
+  const res = await fetch(`${BRIDGE}/skin/scene?${query}`);
+  if (!res.ok) throw new Error("scene");
+  const scene = await res.json();
+  // an edit only changes a few sprites, the rest are the ones already loaded
+  const load = `${page.keys} ${page.stamp}`;
+  if (page.sprites?.load !== load) page.sprites = { load, byId: new Map() };
+  const known = page.sprites.byId;
+  const images = await Promise.all(scene.sprites.map(async ([, , id], i) => {
+    if (known.has(id)) return known.get(id);
+    const img = new Image();
+    img.src = `${BRIDGE}/skin/sprite/${i}.png?${query}`;
+    try {
+      await img.decode();
+    } catch {
+      return null;
+    }
+    known.set(id, img);
+    return img;
+  }));
+  return { scene, images };
+}
+
+// a new scene for the running preview after an edit, keeping its notes and clock
+function refreshSkin(page) {
+  clearTimeout(page.editTimer);
+  page.editTimer = setTimeout(async () => {
+    const seq = (page.editSeq = (page.editSeq ?? 0) + 1);
+    let loaded = null;
+    try {
+      loaded = await loadSkinScene(page);
+    } catch {}
+    if (skinPage !== page || page.editSeq !== seq) return;
+    if (!loaded) {
+      page.error = "Couldn't draw this skin.";
+      render();
+      return;
+    }
+    const live = page.live;
+    if (!live || live.scene.columns.length !== loaded.scene.columns.length) return startSkinLive(page, loaded);
+    Object.assign(live, loaded);
+    skinLayers(live);
+    if (SKIN_FREEZE) skinFrozen(live);
+  }, 120);
+}
+
+const skinColor = (c) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${c[3] / 255})`;
+
+function skinOps(ctx, ops, images) {
+  for (const o of ops) {
+    if (o.t === "fill") {
+      ctx.globalAlpha = o.a;
+      ctx.fillStyle = skinColor(o.c);
+      ctx.fillRect(...o.r);
+      ctx.globalAlpha = 1;
+    } else if (o.t === "clear") {
+      ctx.clearRect(...o.r);
+    } else if (o.t === "poly") {
+      ctx.fillStyle = skinColor(o.c);
+      ctx.beginPath();
+      o.p.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fill();
+    } else if (o.t === "rrect") {
+      const [x, y, w, h] = o.r;
+      const r = Math.min(o.rad, w / 2, h / 2);
+      ctx.fillStyle = skinColor(o.c);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      const img = images[o.s];
+      if (!img) continue;
+      ctx.save();
+      if (o.clip) {
+        ctx.beginPath();
+        ctx.rect(...o.clip);
+        ctx.clip();
+      }
+      if (o.flip != null) {
+        ctx.translate(0, o.flip);
+        ctx.scale(1, -1);
+      }
+      if (o.add) ctx.globalCompositeOperation = "lighter";
+      ctx.drawImage(img, ...o.src, ...o.dst);
+      ctx.restore();
+    }
+  }
+}
+
+// stable starts a note's animation when it spawns, at 60 fps whatever the skin says
+function skinFrame(frames, time) {
+  if (frames.length < 2) return frames[0]?.s != null ? frames[0] : null;
+  const n = frames.length;
+  const f = frames[((Math.floor(-time / SKIN_FRAME_MS) % n) + n) % n];
+  return f.s != null ? f : null;
+}
+
+const skinMapY = (s, y) => (s.upscroll ? s.height - y : y);
+
+function skinTap(s, column, y, time, out) {
+  const c = s.columns[column];
+  const anchor = skinMapY(s, y);
+  const f = skinFrame(c.tap, time);
+  if (f) {
+    const top = s.upscroll ? anchor : anchor - f.h;
+    out.push({ t: "img", s: f.s, src: [0, 0, ...s.sprites[f.s].slice(0, 2)], dst: [c.x, top, c.w, f.h], flip: s.upscroll ? top * 2 + f.h : null });
+    return;
+  }
+  const h = Math.max(10, c.w * 0.3);
+  out.push({ t: "rrect", r: [c.x + 1, s.upscroll ? anchor : anchor - h, c.w - 2, h], rad: 4, c: c.tapColor });
+}
+
+// whole pixels, two half-covered rows over each other show as a seam at every join
+function skinTiles(top, bottom, rows, scale) {
+  const tiles = [];
+  if (!(scale > 0 && rows > 0 && bottom > top)) return tiles;
+  let y = top;
+  while (y < bottom - 0.01 && tiles.length < 4096) {
+    const n = Math.min(rows, (bottom - y) / scale);
+    const t = Math.round(y);
+    tiles.push({ top: t, height: Math.max(1, Math.round(y + n * scale) - t), rows: n });
+    y += n * scale;
+  }
+  return tiles;
+}
+
+function skinHold(s, column, headY, tailY, time, out) {
+  const c = s.columns[column];
+  const up = s.upscroll;
+  const { x, w } = c;
+  const head = skinFrame(c.head, time) ?? skinFrame(c.tap, time);
+  const tail = skinFrame(c.tail, time);
+  const headEnd = skinMapY(s, headY);
+  const tailEnd = skinMapY(s, tailY);
+  const headH = head ? head.h : Math.max(10, w * 0.3);
+  // a blank tail has no box, so the body runs right to the end line
+  const artTop = tail?.top ?? null;
+  const tailH = tail && artTop != null ? tail.h : 0;
+  const headTop = up ? headEnd : headEnd - headH;
+  const tailTop = up ? tailEnd : tailEnd - tailH;
+  const headSide = up ? headEnd + headH / 2 : headEnd - headH / 2;
+  const tailSide = up ? tailTop + tailH : tailTop;
+  let bodyTop = up ? headSide : tailSide;
+  let bodyBottom = up ? tailSide : headSide;
+  if (s.lazerBodies) {
+    const half = (tail ? tail.h : headH) / 2;
+    if (up) bodyBottom = tailEnd + half;
+    else bodyTop = tailEnd - half;
+  }
+  let visibleTop = bodyTop;
+  let visibleBottom = bodyBottom;
+  if (tailH > 0 && artTop != null && !s.lazerBodies) {
+    const centre = tailTop + tailH / 2;
+    const edge = tailTop + (up ? artTop : 1 - artTop) * tailH;
+    if (up) visibleBottom = Math.min(visibleBottom, Math.max(centre, edge + 1));
+    else visibleTop = Math.max(visibleTop, Math.min(centre, edge - 1));
+  }
+  if (visibleBottom > visibleTop) {
+    const b = c.body;
+    if (b) {
+      const fromBottom = b.style === 2 && !s.lazerBodies ? !up : up;
+      const flip = fromBottom ? bodyTop + bodyBottom : null;
+      const clip = [x, visibleTop, w, visibleBottom - visibleTop];
+      if (b.style === 0) {
+        out.push({ t: "img", s: b.s, src: [0, 0, b.sw, b.sh], dst: [x, bodyTop, w, bodyBottom - bodyTop], flip, clip });
+      } else {
+        for (const t of skinTiles(bodyTop, bodyBottom, b.sh, b.row)) {
+          out.push({ t: "img", s: b.s, src: [0, 0, b.sw, t.rows], dst: [x, t.top, w, t.height], flip, clip });
+        }
+      }
+    } else {
+      out.push({ t: "fill", r: [x + w * 0.16, visibleTop, w * 0.68, visibleBottom - visibleTop], c: s.bodyColor, a: 0.9 });
+    }
+  }
+  if (tail && tailH > 0) {
+    // lazer masks the hold at the head's centre
+    const clip = s.lazerBodies ? (up ? [x, headSide, w, s.height - headSide] : [x, 0, w, headSide]) : null;
+    out.push({ t: "img", s: tail.s, src: [0, 0, ...s.sprites[tail.s].slice(0, 2)], dst: [x, tailTop, w, tailH], flip: up ? null : tailTop * 2 + tailH, clip });
+  }
+  if (head) out.push({ t: "img", s: head.s, src: [0, 0, ...s.sprites[head.s].slice(0, 2)], dst: [x, headTop, w, headH], flip: up ? headTop * 2 + headH : null });
+  else out.push({ t: "rrect", r: [x + 1, headTop, w - 2, headH], rad: 4, c: c.headColor });
+}
+
+// the static layers drawn once each, a frame only stacks them around the notes
+function skinLayers(live) {
+  const { scene: s, images } = live;
+  const layer = (ops) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = s.width;
+    canvas.height = s.height;
+    skinOps(canvas.getContext("2d"), ops, images);
+    return canvas;
+  };
+  live.layers = { base: layer(s.base), hint: layer(s.hint), line: layer(s.line), over: layer(s.over), top: layer(s.top) };
+}
+
+function skinDraw(live, holds, taps, pressed) {
+  const { scene: s, images, ctx, layers } = live;
+  const notes = [];
+  for (const h of holds) skinHold(s, h.c, h.head, h.tail, h.t, notes);
+  for (const t of taps) skinTap(s, t.c, t.y, t.t, notes);
+  const keys = () => s.columns.forEach((c, i) => skinOps(ctx, pressed[i] ? c.keyDown : c.keyUp, images));
+  ctx.clearRect(0, 0, s.width, s.height);
+  ctx.drawImage(layers.base, 0, 0);
+  s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.light, images));
+  ctx.drawImage(layers.hint, 0, 0);
+  if (s.keysUnderNotes) keys();
+  skinOps(ctx, notes, images);
+  ctx.drawImage(layers.line, 0, 0);
+  if (!s.keysUnderNotes) keys();
+  ctx.drawImage(layers.over, 0, 0);
+  s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.lighting, images));
+  ctx.drawImage(layers.top, 0, 0);
+}
+
+function skinFrozen(live) {
+  const { frozen } = live.scene;
+  live.scene.columns.forEach((_, i) => (live.pressed[i] = i === frozen.pressed));
+  skinDraw(live, frozen.holds, frozen.taps, live.pressed);
+}
+
+function skinRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// An endless chart, the same one every time for a keymode: 170 bpm in stretches of eighths and
+// sixteenths, with long notes, chords and jacks
+function skinChart(keys, holdsOnly = false) {
+  const random = skinRandom(keys * 7919 + 7);
+  const beat = 60000 / 170;
+  const chart = { notes: [], next: 600, free: Array(keys).fill(-Infinity), last: [], div: 2, sectionEnd: 0 };
+  const pick = (t, n, avoid = []) => {
+    const open = [...Array(keys).keys()].filter((c) => chart.free[c] <= t && !avoid.includes(c));
+    const out = [];
+    while (out.length < n && open.length) out.push(open.splice(Math.floor(random() * open.length), 1)[0]);
+    return out;
+  };
+  chart.until = (to) => {
+    while (chart.next < to) {
+      const t = chart.next;
+      if (t >= chart.sectionEnd) {
+        chart.div = random() < 0.3 ? 4 : 2;
+        chart.sectionEnd = t + beat * (chart.div === 4 ? 4 : 8);
+      }
+      const step = beat / chart.div;
+      const r = random();
+      let columns = [];
+      let hold = 0;
+      if (holdsOnly) {
+        // long notes of every length, some together, with room between them to read the tails
+        columns = r < 0.3 ? [] : pick(t, random() < 0.3 ? 2 : 1, chart.last);
+        hold = beat * (0.5 + Math.floor(random() * 7) / 2);
+      } else if (r < 0.08) {
+        columns = [];
+      } else if (r < 0.22 && chart.div === 2) {
+        columns = pick(t, random() < 0.25 ? 2 : 1);
+        hold = beat * (1 + Math.floor(random() * 3));
+      } else if (r < 0.42) {
+        columns = pick(t, keys >= 6 && random() < 0.35 ? 3 : 2, chart.last);
+      } else if (r < 0.55 && chart.last.length) {
+        columns = chart.last.filter((c) => chart.free[c] <= t);
+      } else {
+        columns = pick(t, 1, chart.last);
+      }
+      for (const c of columns) {
+        chart.notes.push({ c, t, e: hold ? t + hold : null });
+        chart.free[c] = t + (hold ? hold + step : step * 0.9);
+      }
+      chart.last = columns;
+      chart.next = t + step;
+    }
+  };
+  return chart;
+}
+
+// a real map from `from` (map ms) to its end, then again from its start, 1.5 s apart
+function skinMapChart(notes, from) {
+  const list = notes.map(([c, t, e]) => ({ c, t, e })).sort((a, b) => a.t - b.t);
+  const end = Math.max(...list.map((n) => n.e ?? n.t));
+  const chart = { notes: [], i: Math.max(0, list.findIndex((n) => n.t >= from)), base: SKIN_LEAD_MS - from };
+  chart.until = (to) => {
+    for (;;) {
+      if (chart.i >= list.length) {
+        chart.base += end + SKIN_LEAD_MS - list[0].t;
+        chart.i = 0;
+      }
+      const n = list[chart.i];
+      if (n.t + chart.base >= to) return;
+      chart.notes.push({ c: n.c, t: n.t + chart.base, e: n.e == null ? null : n.e + chart.base });
+      chart.i++;
+    }
+  };
+  return chart;
+}
+
+function startSkinLive(page, loaded) {
+  const chart = page.map ? skinMapChart(page.map.notes, page.map.from) : skinChart(page.keys, page.source === "lns");
+  const live = { ...loaded, ctx: page.canvas.getContext("2d"), pressed: [], chart, now: 0, last: null };
+  skinLayers(live);
+  page.live = live;
+  (page.hitUnits ??= {})[page.keys] = loaded.scene.hitUnits;
+  if (!SKIN_FREEZE) {
+    loadSkinTiming(page);
+    loadSkinImages(page);
+  }
+  if (SKIN_FREEZE) {
+    skinFrozen(live);
+    return;
+  }
+  requestAnimationFrame((at) => skinTick(page, live, at));
+}
+
+// runs while this page shows this scene, and rests while the window is hidden
+function skinTick(page, live, at) {
+  if (skinPage !== page || page.live !== live) return;
+  if (document.hidden) {
+    live.last = null;
+    document.addEventListener("visibilitychange", () => requestAnimationFrame((t) => skinTick(page, live, t)), { once: true });
+    return;
+  }
+  if (page.playing && live.last != null) live.now += Math.min(at - live.last, 100);
+  live.last = at;
+  skinStep(live, page.scroll);
+  requestAnimationFrame((t) => skinTick(page, live, t));
+}
+
+function skinStep(live, scroll) {
+  const s = live.scene;
+  const { now, chart } = live;
+  const speed = s.hitY / scroll;
+  // far enough ahead for a tail cap or an upscroll note entering past the edge
+  chart.until(now + (s.height * 1.5) / speed);
+  chart.notes = chart.notes.filter((n) => (n.e ?? n.t + SKIN_TAP_PRESS_MS) >= now);
+  const pressed = live.pressed;
+  s.columns.forEach((_, i) => (pressed[i] = false));
+  const holds = [];
+  const taps = [];
+  for (const n of chart.notes) {
+    if (n.e != null) {
+      if (n.t <= now) pressed[n.c] = true;
+      // a hold being held sticks to the line while its body drains through it
+      holds.push({ c: n.c, head: s.hitY - Math.max(0, n.t - now) * speed, tail: s.hitY - (n.e - now) * speed, t: n.t - now });
+    } else if (n.t <= now) {
+      pressed[n.c] = true;
+    } else {
+      taps.push({ c: n.c, y: s.hitY - (n.t - now) * speed, t: n.t - now });
+    }
+  }
+  taps.sort((a, b) => a.y - b.y);
+  skinDraw(live, holds, taps, pressed);
+}
+
+const SKIN_CUT_STEP = 5;
+const SKIN_FADE_STEP = 20;
+const SKIN_PALETTE = ["#ffffff", "#b8b8c4", "#ff4d6a", "#ff9a3c", "#ffd84a", "#9be564", "#3ddc97", "#38d6e8", "#4fa8ff", "#6a6cff", "#a970ff", "#ff6ad5"];
+// stable's default column layout: 1 and 2 mirrored from the edges in, S in the middle of odd keymodes
+const SKIN_CLASSIC = { 1: "#ffffff", 2: "#4fa8ff", S: "#ffd84a" };
+const SKIN_PARTS = [["notes", "Notes"], ["heads", "Heads"], ["bodies", "Bodies"], ["tails", "Tails"]];
+
+// the page's edits for the keymode on screen, kept per keymode while it's open
+function skinEdit(page) {
+  page.edits ??= {};
+  return (page.edits[page.keys] ??= {
+    cut: null, fade: null, colors: [], parts: { notes: true, heads: true, bodies: true, tails: true }, pick: null,
+    // the skin's own images by part, per column, and which part and columns the grid picks for
+    swap: {}, swapPart: "note", swapCols: [],
+  });
+}
+
+// a note covers the field down to the judgement line in the scroll time, so a time is a length
+const skinUnits = (page, ms) => (ms * page.hitUnits[page.keys]) / page.scroll;
+const skinMsOf = (page, units) => (units * page.scroll) / page.hitUnits[page.keys];
+
+function skinEditsJson(page) {
+  const e = page.edits?.[page.keys];
+  if (!e || !page.hitUnits?.[page.keys]) return "";
+  const keys = page.keys;
+  const out = {};
+  if (e.cut) out.cut = e.cut.map((ms) => (ms == null ? null : Math.round(skinUnits(page, ms) * 100) / 100));
+  if (e.fade) out.fade = { length: Math.round(skinUnits(page, e.fade.ms) * 100) / 100, from: e.fade.from, round: !!e.fade.round };
+  if (e.colors.some(Boolean)) {
+    out.colors = Array.from({ length: keys }, (_, c) => e.colors[c] ?? null);
+    out.parts = e.parts;
+  }
+  const swapped = Object.entries(e.swap ?? {}).filter(([, cols]) => cols.some(Boolean));
+  if (swapped.length) {
+    out.swaps = Array.from({ length: keys }, (_, c) => {
+      const one = Object.fromEntries(swapped.filter(([, cols]) => cols[c]).map(([part, cols]) => [part, cols[c]]));
+      return Object.keys(one).length ? one : null;
+    });
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : "";
+}
+
+// the skin's own cut per column in ms at the preview's scroll time, null for no body art
+function skinCutNow(page) {
+  return page.live.scene.cutNow.map((u) => (u == null ? null : Math.round(skinMsOf(page, u))));
+}
+
+async function loadSkinTiming(page) {
+  const keys = page.keys;
+  if (page.timing?.keys === keys) return;
+  page.timing = { keys, data: null };
+  const play = page.play ? `&play=${encodeURIComponent(page.play.id)}` : "";
+  try {
+    page.timing.data = await (await fetch(`${BRIDGE}/skin/timing?keys=${keys}${play}`)).json();
+  } catch {}
+  if (skinPage === page) render();
+}
+
+const skinLate = (ms) => (Math.abs(ms) < 0.5 ? "on time" : `${Math.round(Math.abs(ms))} ms ${ms > 0 ? "late" : "early"}`);
+
+// Late releases mean the visible end reached the line too soon for this player's habit, so the cut
+// grows by as much; early ones shrink it, down to none
+function skinSuggestion(page) {
+  const t = page.timing?.keys === page.keys ? page.timing.data : null;
+  if (!t) return null;
+  const now = skinCutNow(page);
+  if (!now.some((v) => v != null)) return { text: "This skin has no long note body to cut." };
+  const where = t.fromPlay ? "in this play" : `over your last ${t.plays} ${page.keys}K ${t.plays === 1 ? "play" : "plays"}`;
+  if (!t.n) return { text: t.fromPlay ? "No long notes were held in this play." : `No long notes held in your recent ${page.keys}K plays.` };
+  const sure = t.columns.filter((c) => c.n >= 20);
+  const spread = sure.length > 1 ? Math.max(...sure.map((c) => c.mean)) - Math.min(...sure.map((c) => c.mean)) : 0;
+  const per = spread >= 15 && sure.length === t.columns.length;
+  if (!per && Math.abs(t.mean) < 5) return { text: `You let go ${skinLate(t.mean)} on average ${where}. That's centred, nothing to change.` };
+  const cut = now.map((v, c) => (v == null ? null : Math.max(0, Math.round(v + (per ? t.columns[c].mean : t.mean)))));
+  const text = per
+    ? `Your columns let go differently ${where}: ${t.columns.map((c, i) => `${i + 1}: ${skinLate(c.mean)}`).join(", ")}.`
+    : `You let go ${skinLate(t.mean)} on average ${where}.`;
+  return { text, cut, now };
+}
+
+const skinCutText = (cuts) => {
+  const set = cuts.filter((v) => v != null);
+  if (!set.length) return "none";
+  return set.every((v) => v === set[0]) ? `${set[0]} ms` : cuts.map((v) => (v == null ? "–" : v)).join(" / ") + " ms";
+};
+
+function skinChange(page, change) {
+  change(skinEdit(page));
+  page.saved = null;
+  refreshSkin(page);
+  render();
+}
+
+function skinStepper(label, text, down, up, onDown, onUp) {
+  return el("div", { class: "segs", title: label },
+    el("button", { class: "seg", disabled: !down, "aria-label": `Less ${label.toLowerCase()}`, onclick: onDown }, "−"),
+    el("span", { class: "skin-scroll" }, text),
+    el("button", { class: "seg", disabled: !up, "aria-label": `More ${label.toLowerCase()}`, onclick: onUp }, "+"));
+}
+
+function skinLongNotes(page) {
+  const e = skinEdit(page);
+  const now = skinCutNow(page);
+  if (!now.some((v) => v != null)) return part("skin-lns", null, el("p", { class: "caption" }, "This skin has no long note body to change."));
+  const cut = e.cut ?? now;
+  const px = (ms) => Math.round(skinUnits(page, ms));
+  const shown = cut.filter((v) => v != null);
+  const same = shown.every((v) => v === shown[0]);
+  const step = (d) => skinChange(page, (x) => (x.cut = (x.cut ?? now).map((v) => (v == null ? null : Math.max(0, v + d)))));
+  const hint = skinSuggestion(page);
+  const fade = e.fade;
+  return part("skin-lns", null,
+    el("p", { class: "caption" },
+      `The body ends ${skinCutText(now)} before the tail`, same && shown[0] != null && ` (${px(now.find((v) => v != null))} px)`,
+      e.cut ? `, ${skinCutText(cut)} after your change.` : "."),
+    el("div", { class: "skin-tools" },
+      skinStepper("Cut", same ? `${shown[0]} ms · ${px(shown[0])} px` : "per column", Math.max(...shown) > 0, true, () => step(-SKIN_CUT_STEP), () => step(SKIN_CUT_STEP)),
+      e.cut && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.cut = null)) }, "Keep the skin's")),
+    hint && el("p", { class: "caption" }, hint.text,
+      hint.cut && ` Cut ${skinCutText(hint.now)} → ${skinCutText(hint.cut)}. `,
+      hint.cut && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.cut = hint.cut)) }, "Use this")),
+    el("div", { class: "skin-tools" },
+      segs([["off", "No fade"], ["on", "Fade"]], fade ? "on" : "off", (v) => skinChange(page, (x) => (x.fade = v === "on" ? { ms: 120, from: 0 } : null)), "Fade"),
+      fade && skinStepper("Fade length", `over ${fade.ms} ms`, fade.ms > SKIN_FADE_STEP, fade.ms < 600,
+        () => skinChange(page, (x) => (x.fade.ms -= SKIN_FADE_STEP)), () => skinChange(page, (x) => (x.fade.ms += SKIN_FADE_STEP))),
+      fade && skinStepper("Fade start", `from ${Math.round(fade.from * 100)}%`, fade.from > 0, fade.from < 1,
+        () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from - 0.1) * 10) / 10)), () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from + 0.1) * 10) / 10))),
+      fade && segs([[false, "Flat end"], [true, "Round end"]], !!fade.round, (v) => skinChange(page, (x) => (x.fade.round = v)), "The shape of the body's end")));
+}
+
+const SKIN_WHEEL = 150;
+
+function hsvToHex(h, sat, v) {
+  const f = (n) => {
+    const k = (n + h / 60) % 6;
+    return Math.round(255 * (v - v * sat * Math.max(0, Math.min(k, 4 - k, 1))));
+  };
+  return `#${[f(5), f(3), f(1)].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexToHsv(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex ?? "");
+  if (!m) return null;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  const h = d === 0 ? 0 : max === r ? ((g - b) / d + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return { h: h * 60, s: max ? d / max : 0, v: max };
+}
+
+// any colour: hue around the wheel, saturation out from its middle, brightness on the bar under it.
+// built once per page and kept, a redraw mid-drag would drop the pointer; the preview follows on release
+function skinWheel(page) {
+  if (page.wheel) return page.wheel;
+  const dpr = devicePixelRatio || 1;
+  const size = SKIN_WHEEL;
+  const wheel = el("canvas", { class: "skin-wheel", width: size * dpr, height: size * dpr, style: `width: ${size}px; height: ${size}px` });
+  const bar = el("canvas", { class: "skin-bar", width: size * dpr, height: 14 * dpr, style: `width: ${size}px; height: 14px` });
+  const swatch = el("span", { class: "skin-swatch big" });
+  const hex = el("input", { class: "skin-hex", maxlength: 7, spellcheck: "false", "aria-label": "Hex colour" });
+  const state = { h: 0, s: 0, v: 1 };
+  const base = (() => {
+    const c = document.createElement("canvas");
+    c.width = c.height = size * dpr;
+    const ctx = c.getContext("2d");
+    const img = ctx.createImageData(c.width, c.height);
+    const r = c.width / 2;
+    for (let y = 0; y < c.height; y++) {
+      for (let x = 0; x < c.width; x++) {
+        const dx = x + 0.5 - r;
+        const dy = y + 0.5 - r;
+        const d = Math.hypot(dx, dy) / r;
+        if (d > 1) continue;
+        const color = hsvToHex((Math.atan2(dy, dx) * 180) / Math.PI + 360, d, 1);
+        const i = (y * c.width + x) * 4;
+        for (let k = 0; k < 3; k++) img.data[i + k] = parseInt(color.slice(1 + k * 2, 3 + k * 2), 16);
+        img.data[i + 3] = Math.round(255 * Math.min(1, (1 - d) * r));
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return c;
+  })();
+  const color = () => hsvToHex(state.h, state.s, state.v);
+  const draw = () => {
+    const w = wheel.getContext("2d");
+    w.clearRect(0, 0, wheel.width, wheel.height);
+    w.drawImage(base, 0, 0);
+    w.fillStyle = `rgba(0, 0, 0, ${1 - state.v})`;
+    w.beginPath();
+    w.arc(wheel.width / 2, wheel.height / 2, wheel.width / 2, 0, Math.PI * 2);
+    w.fill();
+    const a = (state.h * Math.PI) / 180;
+    const mark = (cx, cy) => {
+      w.lineWidth = 2 * dpr;
+      w.strokeStyle = "#fff";
+      w.beginPath();
+      w.arc(cx, cy, 6 * dpr, 0, Math.PI * 2);
+      w.stroke();
+      w.strokeStyle = "rgba(0, 0, 0, 0.5)";
+      w.beginPath();
+      w.arc(cx, cy, 8 * dpr, 0, Math.PI * 2);
+      w.stroke();
+    };
+    mark(wheel.width / 2 + Math.cos(a) * state.s * wheel.width / 2, wheel.height / 2 + Math.sin(a) * state.s * wheel.height / 2);
+    const b = bar.getContext("2d");
+    const g = b.createLinearGradient(0, 0, bar.width, 0);
+    g.addColorStop(0, "#000");
+    g.addColorStop(1, hsvToHex(state.h, state.s, 1));
+    b.clearRect(0, 0, bar.width, bar.height);
+    b.fillStyle = g;
+    b.fillRect(0, 0, bar.width, bar.height);
+    b.fillStyle = "#fff";
+    b.fillRect(Math.round(state.v * (bar.width - 3 * dpr)), 0, 3 * dpr, bar.height);
+    swatch.style.setProperty("--swatch", color());
+    if (document.activeElement !== hex) hex.value = color();
+  };
+  const drag = (node, move) => {
+    node.addEventListener("pointerdown", (e) => {
+      node.setPointerCapture(e.pointerId);
+      move(e);
+      const onMove = (m) => move(m);
+      node.addEventListener("pointermove", onMove);
+      node.addEventListener("pointerup", () => {
+        node.removeEventListener("pointermove", onMove);
+        page.wheel.commit?.(color());
+      }, { once: true });
+    });
+  };
+  drag(wheel, (e) => {
+    const box = wheel.getBoundingClientRect();
+    const dx = e.clientX - box.left - box.width / 2;
+    const dy = e.clientY - box.top - box.height / 2;
+    state.h = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+    state.s = Math.min(1, Math.hypot(dx, dy) / (box.width / 2));
+    draw();
+  });
+  drag(bar, (e) => {
+    const box = bar.getBoundingClientRect();
+    state.v = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+    draw();
+  });
+  hex.addEventListener("change", () => {
+    const value = hex.value.trim().startsWith("#") ? hex.value.trim() : `#${hex.value.trim()}`;
+    const hsv = hexToHsv(value);
+    if (!hsv) return draw();
+    Object.assign(state, hsv);
+    hex.blur();
+    draw();
+    page.wheel.commit?.(color());
+  });
+  const node = el("div", { class: "skin-picker" }, wheel, el("div", { class: "skin-picker-side" }, swatch, hex, bar));
+  page.wheel = {
+    node,
+    hex,
+    shown: null,
+    // the wheel shows the colour it's about without anything else moving
+    show(value) {
+      if (value === this.shown) return;
+      this.shown = value;
+      const hsv = hexToHsv(value);
+      if (hsv) Object.assign(state, hsv);
+      draw();
+    },
+  };
+  draw();
+  return page.wheel;
+}
+
+function skinColours(page) {
+  const e = skinEdit(page);
+  const keys = page.keys;
+  const layout = (c) => (keys % 2 === 1 && c === Math.floor(keys / 2) ? "S" : (c < keys / 2 ? c : keys - 1 - c) % 2 === 0 ? "1" : "2");
+  const preset = (pick) => skinChange(page, (x) => (x.colors = Array.from({ length: keys }, (_, c) => pick(c, x.colors))));
+  // a colour goes on the picked column, or on every column with none picked
+  const paint = (color) => skinChange(page, (x) => {
+    if (x.pick != null) x.colors[x.pick] = color;
+    else x.colors = Array(keys).fill(color);
+  });
+  return part("skin-colours", null,
+    el("p", { class: "caption" }, e.pick == null ? "A colour goes on every column, or pick one column first." : `Column ${e.pick + 1}. Click it again for every column.`),
+    el("div", { class: "skin-swatches" }, Array.from({ length: keys }, (_, c) => el("button", {
+      class: `skin-swatch${e.pick === c ? " on" : ""}${e.colors[c] ? "" : " none"}`,
+      style: e.colors[c] ? `--swatch: ${e.colors[c]}` : "",
+      title: `Column ${c + 1}`,
+      "aria-pressed": String(e.pick === c),
+      onclick: () => { e.pick = e.pick === c ? null : c; render(); },
+    }, c + 1))),
+    (() => {
+      const wheel = skinWheel(page);
+      wheel.commit = paint;
+      // a redraw moves the field, which drops its focus mid-typing
+      if (document.activeElement === wheel.hex) {
+        const [from, to] = [wheel.hex.selectionStart, wheel.hex.selectionEnd];
+        requestAnimationFrame(() => {
+          wheel.hex.focus();
+          wheel.hex.setSelectionRange(from, to);
+        });
+      }
+      wheel.show((e.pick != null ? e.colors[e.pick] : e.colors.find(Boolean)) ?? "#ffffff");
+      return wheel.node;
+    })(),
+    el("div", { class: "skin-swatches palette" },
+      SKIN_PALETTE.map((color) => el("button", { class: "skin-swatch", style: `--swatch: ${color}`, title: color, onclick: () => paint(color) })),
+      el("button", { class: "skin-swatch none", title: "The skin's own", onclick: () => paint(null) }, "–")),
+    el("div", { class: "skin-tools" },
+      el("span", { class: "skin-label" }, "Goes on"),
+      el("div", { class: "segs", title: "What the colour goes on" }, SKIN_PARTS.map(([key, text]) => el("button", {
+        class: `seg${e.parts[key] ? " on" : ""}`,
+        "aria-pressed": String(e.parts[key]),
+        onclick: () => skinChange(page, (x) => (x.parts[key] = !x.parts[key])),
+      }, text)))),
+    el("div", { class: "skin-tools" },
+      el("div", { class: "segs" },
+        el("button", { class: "seg", title: "The right half takes the left half's colours", onclick: () => preset((c, colors) => colors[c < keys / 2 ? c : keys - 1 - c] ?? null) }, "Mirror the left"),
+        el("button", { class: "seg", title: "White and blue, gold in the middle", onclick: () => preset((c) => SKIN_CLASSIC[layout(c)]) }, "Classic"),
+        el("button", { class: "seg", disabled: !e.colors.some(Boolean), onclick: () => preset(() => null) }, "Clear all"))));
+}
+
+// combo and score digits, which a skin.ini's fonts point at, not its notes or keys
+const SKIN_FONT = /^(?:[0-9]|comma|dot|percent|x)$/i;
+const SKIN_SWAP_PARTS = [["note", "Notes"], ["head", "Heads"], ["body", "Bodies"], ["tail", "Tails"], ["key", "Keys"], ["keyDown", "Keys down"]];
+
+async function loadSkinImages(page) {
+  if (page.images?.stamp === page.stamp) return;
+  page.images = { stamp: page.stamp, list: null };
+  try {
+    page.images.list = (await (await fetch(`${BRIDGE}/skin/images?at=${page.stamp}`)).json()).images ?? [];
+  } catch {
+    page.images.list = [];
+  }
+  if (skinPage === page) render();
+}
+
+// the image a column's part shows now, the swap if there is one
+const skinInUse = (page, e, part, c) => e.swap[part]?.[c] ?? page.live.scene.own[c]?.[part] ?? null;
+const skinSame = (a, b) => a != null && b != null && a.toLowerCase().replaceAll("/", "\\") === b.toLowerCase().replaceAll("/", "\\");
+
+function skinParts(page) {
+  const e = skinEdit(page);
+  const keys = page.keys;
+  const list = page.images?.list;
+  const cols = e.swapCols.length ? e.swapCols : [...Array(keys).keys()];
+  const which = e.swapPart;
+  const pick = (path) => skinChange(page, (x) => {
+    x.swap[which] ??= [];
+    for (const c of cols) x.swap[which][c] = path;
+  });
+  const tile = (img) => el("button", {
+    class: `skin-thumb${cols.every((c) => skinSame(skinInUse(page, e, which, c), img.path)) ? " on" : ""}`,
+    title: `${img.path}${img.frames > 1 ? `, ${img.frames} frames` : ""}`,
+    onclick: () => pick(img.path),
+  }, el("img", {
+    src: `${BRIDGE}/skin/thumb?path=${encodeURIComponent(img.path)}&at=${page.stamp}`,
+    alt: "",
+    loading: "lazy",
+    onerror: (ev) => {
+      ev.target.parentNode.classList.add("empty");
+      if (!page.blanks.has(img.path)) {
+        page.blanks.add(img.path);
+        render();
+      }
+    },
+  }));
+  // blank art only means something as a tail, an invisible one, and one of it is enough
+  page.blanks ??= new Set();
+  let blankShown = false;
+  // a font is ten digit frames, -0 to -9, often with -x, -comma, -dot or -percent beside it
+  const fonts = new Set((list ?? []).flatMap((img) => {
+    const m = /^(.*)-(?:x|comma|dot|percent)$/i.exec(img.path);
+    return m ? [m[1].toLowerCase(), img.path.toLowerCase()] : [];
+  }));
+  const shown = (img) => {
+    const font = fonts.has(img.path.toLowerCase()) || img.frames === 10 || SKIN_FONT.test(img.path.split(/[\\/]/).pop());
+    if (font && !cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path))) return false;
+    if (!page.blanks.has(img.path)) return true;
+    if (which !== "tail" || blankShown) return cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path));
+    return (blankShown = true);
+  };
+  const folders = [];
+  for (const img of (list ?? []).filter(shown)) {
+    if (folders.at(-1)?.name !== img.folder) folders.push({ name: img.folder, images: [] });
+    folders.at(-1).images.push(img);
+  }
+  const own = cols.every((c) => !e.swap[which]?.[c]);
+  return part("skin-parts", null,
+    el("div", { class: "skin-tools" },
+      segs(SKIN_SWAP_PARTS, which, (p) => { e.swapPart = p; render(); }, "Part")),
+    el("p", { class: "caption" }, e.swapCols.length ? `Column ${e.swapCols.map((c) => c + 1).join(", ")}.` : "Every column, or pick columns."),
+    el("div", { class: "skin-swatches" }, Array.from({ length: keys }, (_, c) => el("button", {
+      class: `skin-swatch none${e.swapCols.includes(c) ? " on" : ""}`,
+      title: `Column ${c + 1}`,
+      "aria-pressed": String(e.swapCols.includes(c)),
+      onclick: () => {
+        e.swapCols = e.swapCols.includes(c) ? e.swapCols.filter((x) => x !== c) : [...e.swapCols, c].sort((a, b) => a - b);
+        render();
+      },
+    }, c + 1))),
+    !list ? el("p", { class: "caption" }, "Finding the skin's images…") : el("div", { class: "skin-thumbs" },
+      el("button", { class: `skin-thumb own${own ? " on" : ""}`, title: "The skin's own", onclick: () => pick(null) }, "The skin's own"),
+      folders.map((f) => [f.name && el("p", { class: "skin-folder" }, f.name), f.images.map(tile)])));
+}
+
+async function skinWrite(page, path) {
+  const keys = page.keys;
+  const edits = skinEditsJson(page);
+  page.applying = true;
+  page.saved = null;
+  render();
+  let note;
+  try {
+    const query = path === "apply" ? `?keys=${keys}&edits=${encodeURIComponent(edits)}` : "";
+    const res = await fetch(`${BRIDGE}/skin/${path}${query}`, { method: "POST" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error);
+    if (path === "apply") delete page.edits[keys];
+    else page.edits = {};
+    const reload = page.info.client === "lazer"
+      ? "Finish editing in lazer's skin editor to bring it in."
+      : "In osu!, press Ctrl+Alt+Shift+S to reload the skin.";
+    note = { ok: true, text: `${path === "apply" ? "Saved to the skin." : "Put the skin back as it was."} ${reload}` };
+  } catch (e) {
+    note = { ok: false, text: e.message || "Couldn't change the skin." };
+  }
+  if (skinPage !== page) return;
+  page.applying = false;
+  await loadSkin();
+  page.saved = note;
+  render();
+}
+
+function skinEditor(page) {
+  const changed = !!skinEditsJson(page);
+  const tab = page.tab ?? "lns";
+  return el("div", { class: "skin-editor" },
+    el("div", { class: "skin-tools skin-tabs" },
+      segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colours"]], tab, (t) => { page.tab = t; render(); }, "Edit")),
+    tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : skinColours(page),
+    el("div", { class: "skin-tools apply" },
+      el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply") }, "Apply to skin"),
+      page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes")),
+    page.saved && el("p", { class: `status ${page.saved.ok ? "good" : "bad"}` }, page.saved.text));
+}

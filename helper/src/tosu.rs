@@ -64,6 +64,8 @@ pub(crate) struct TosuState {
     pub lazer_files_dir: PathBuf,
     // stable's folder and its Songs, wherever it's installed
     pub stable_dirs: Option<(PathBuf, PathBuf)>,
+    // the skin's folder name, stable's
+    pub skin: Option<String>,
     // as tosu last reported them, a wine drive other than Z: is looked up on disk
     stable_folders: Option<(String, String)>,
     pub last_frame_at: i64,
@@ -100,6 +102,7 @@ impl TosuState {
             found: None,
             lazer_files_dir,
             stable_dirs: None,
+            skin: None,
             stable_folders: None,
             last_frame_at: 0,
             last_frame: None,
@@ -241,6 +244,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             .unwrap_or_else(|| "unknown".into());
         let player = str_of(raw.pointer("/profile/name"));
         let client = if raw.get("client").and_then(Value::as_str) == Some("lazer") { "lazer" } else { "stable" };
+        t.skin = str_of(raw.pointer("/folders/skin")).filter(|x| !x.is_empty());
         if client == "lazer" {
             if let Some(songs) = raw.pointer("/folders/songs").and_then(Value::as_str).filter(|x| !x.is_empty()) {
                 t.lazer_files_dir = PathBuf::from(songs);

@@ -98,6 +98,14 @@ async fn handle(State(b): State<Arc<Bridge>>, req: Request) -> Response<Body> {
     res
 }
 
+// ?keys=7&at=<when the page loaded the skin>&edits=<json>, `at` only telling loads apart
+fn skin_query(req: &Request) -> Option<(usize, String, String)> {
+    let query: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+    let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+    let keys = get("keys")?.parse::<usize>().ok().filter(|k| (1..=10).contains(k))?;
+    Some((keys, get("at").unwrap_or_default(), get("edits").unwrap_or_default()))
+}
+
 async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body> {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
@@ -169,6 +177,92 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if path == "/skin/chart" {
+            let play = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "play").map(|(_, v)| v.into_owned());
+            let (status, body) = crate::skin::chart(b, play.as_deref()).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        // ?keys=7, or &play=<id> for that play's own
+        if path == "/skin/timing" {
+            let query: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+            let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+            let Some(keys) = get("keys").and_then(|k| k.parse::<usize>().ok()).filter(|k| (1..=10).contains(k)) else { return empty(400) };
+            let mut res = json(200, &crate::skin::timing(b, keys, get("play").as_deref()).await);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        if path == "/skin" {
+            let mut res = json(200, &crate::skin::info(b));
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        // the skin's images, and one as a thumbnail: /skin/thumb?path=aleju\White&at=..
+        if path == "/skin/images" || path == "/skin/thumb" {
+            let query: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+            let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_default();
+            let Ok(found) = crate::skin::current(b) else { return empty(404) };
+            let (at, reference) = (get("at"), get("path"));
+            if path == "/skin/images" {
+                return match tokio::task::spawn_blocking(move || crate::skin_render::images(&found.dir, &at)).await {
+                    Ok(Ok(v)) => json(200, &v),
+                    Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                    Err(_) => empty(500),
+                };
+            }
+            return match tokio::task::spawn_blocking(move || crate::skin_render::thumb(&found.dir, &at, &reference)).await {
+                Ok(Some(bytes)) => Response::builder()
+                    .header(header::CONTENT_TYPE, "image/png")
+                    .header(header::CACHE_CONTROL, "max-age=3600")
+                    .body(Body::from(bytes))
+                    .unwrap(),
+                _ => empty(404),
+            };
+        }
+        if path == "/skin/scene" {
+            let (Some((keys, at, edits)), Ok(found)) = (skin_query(&req), crate::skin::current(b)) else { return empty(404) };
+            return match tokio::task::spawn_blocking(move || crate::skin_render::scene(&found.dir, keys, &at, &edits)).await {
+                Ok(Ok(scene)) => {
+                    let mut res = json(200, &scene);
+                    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+                    res
+                }
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
+        // /skin/sprite/<id>.png?keys=7&at=.., the same query as the scene it belongs to
+        if let Some(id) = path.strip_prefix("/skin/sprite/").and_then(|r| r.strip_suffix(".png")) {
+            let (Ok(id), Some((keys, at, edits)), Ok(found)) = (id.parse::<usize>(), skin_query(&req), crate::skin::current(b)) else { return empty(404) };
+            return match tokio::task::spawn_blocking(move || crate::skin_render::sprite(&found.dir, keys, &at, &edits, id)).await {
+                Ok(Ok(Some(bytes))) => Response::builder()
+                    .header(header::CONTENT_TYPE, "image/png")
+                    .header(header::CACHE_CONTROL, "max-age=3600")
+                    .body(Body::from(bytes))
+                    .unwrap(),
+                Ok(Ok(None)) => empty(404),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
+        if path == "/skin.png" {
+            let (Some((keys, at, edits)), Ok(found)) = (skin_query(&req), crate::skin::current(b)) else { return empty(404) };
+            let draw = move || match edits.is_empty() {
+                true => crate::skin_render::render(&found.dir, keys),
+                false => crate::skin_render::render_edited(&found.dir, keys, &at, &edits),
+            };
+            return match tokio::task::spawn_blocking(draw).await {
+                Ok(Ok(bytes)) => Response::builder()
+                    .header(header::CONTENT_TYPE, "image/png")
+                    // the page asks again with a new ?at= to see changes, redraws reuse this one
+                    .header(header::CACHE_CONTROL, "max-age=3600")
+                    .body(Body::from(bytes))
+                    .unwrap(),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
         if path == "/state" {
             let mut res = json(200, &b.snapshot());
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -223,6 +317,22 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             return match tosu::set_dashboard(b, path == "/tosu-dashboard/on").await {
                 Ok(()) => json(200, &b.snapshot()),
                 Err(e) => json(500, &serde_json::json!({ "error": e })),
+            };
+        }
+        // /skin/apply?keys=7&edits=<json>, /skin/undo
+        if path == "/skin/apply" || path == "/skin/undo" {
+            let Ok(found) = crate::skin::current(b) else { return empty(404) };
+            let query = skin_query(&req);
+            let undo = path == "/skin/undo";
+            let work = move || match (undo, query) {
+                (true, _) => crate::skin_render::undo(&found.dir).map(|()| serde_json::json!({})),
+                (false, Some((keys, _, edits))) => crate::skin_render::apply(&found.dir, keys, &edits),
+                (false, None) => Err("No keymode given.".into()),
+            };
+            return match tokio::task::spawn_blocking(work).await {
+                Ok(Ok(v)) => json(200, &v),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
             };
         }
         if path == "/notes/read" {

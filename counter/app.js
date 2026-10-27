@@ -592,7 +592,7 @@ function openBoard(map, follow = false, mine = false, variant = map) {
   settingsOpen = notesOpen = false;
   analysis = maker = null;
   dropTrainer();
-  profilePage = null;
+  skinPage = profilePage = null;
   clearTimeout(boardTimer);
   board = {
     map, follow, mine, md5: map.md5, speed: variant.speed ?? null, mods: variant.mods ?? [],
@@ -895,7 +895,7 @@ function toggleGoals() {
     settingsOpen = notesOpen = false;
     analysis = maker = null;
     dropTrainer();
-    profilePage = null;
+    skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);
     try { localStorage.setItem(GOALS_SEEN, JSON.stringify((snapshot.goals ?? []).filter((g) => g.done).map(goalSeenKey))); } catch {}
@@ -915,12 +915,148 @@ function goalsView() {
     goals.length > 0 && el("div", { class: "goals" }, goals.map((g) => goalEntry(g))));
 }
 
+let skinPage = null;
+const SKIN_KEYS = [4, 5, 6, 7, 8, 9, 10].map((k) => [k, `${k}K`]);
+const SKIN_WHY = {
+  lazer: "In lazer, open the skin editor, then File, Edit externally. Hashi shows the skin while that's open.",
+  missing: "Hashi can't find this skin's folder in osu!'s Skins.",
+  unknown: "Open osu! with tosu running to see your skin here.",
+};
+
+// from: a play to watch (id), where in its map to start (map ms), and the analysis to go back to
+function openSkin(from = null) {
+  const back = from && analysis;
+  settingsOpen = goalsOpen = notesOpen = false;
+  profilePage = null;
+  analysis = maker = null;
+  dropTrainer();
+  board = null;
+  clearTimeout(boardTimer);
+  const keys = Math.round(snapshot.plays[0]?.play.keys ?? 4);
+  skinPage = {
+    source: from ? "play" : "mix", play: from, back, map: null,
+    keys: keys >= 4 && keys <= 10 ? keys : 4, info: null, stamp: Date.now(), loading: true, error: null,
+    // kept across renders so the running preview isn't torn down by every update
+    canvas: el("canvas", { class: "skin-shot", width: 1280, height: 720 }),
+    live: null, playing: true, scroll: stored(SKIN_SCROLL, 480),
+  };
+  render();
+  loadSkin();
+}
+
+function closeSkin() {
+  const back = skinPage?.back;
+  skinPage = null;
+  if (back) analysis = back;
+  render();
+}
+
+async function skinSource(p, source) {
+  p.source = source;
+  p.map = null;
+  p.error = null;
+  if (source === "mix" || source === "lns") return showSkin(p);
+  p.loading = true;
+  render();
+  try {
+    const query = source === "play" ? `?play=${encodeURIComponent(p.play.id)}` : "";
+    const res = await fetch(`${BRIDGE}/skin/chart${query}`);
+    const body = await res.json();
+    if (skinPage !== p || p.source !== source) return;
+    if (!res.ok) throw new Error(body.error);
+    p.map = { ...body, from: source === "play" ? p.play.from : body.notes[0][1] };
+    p.keys = body.keys;
+  } catch (e) {
+    if (skinPage !== p) return;
+    p.source = "mix";
+    p.error = e.message || "Couldn't read the map.";
+  }
+  showSkin(p);
+}
+
+async function loadSkin() {
+  const page = skinPage;
+  page.stamp = Date.now();
+  page.loading = true;
+  page.error = null;
+  render();
+  try {
+    page.info = await (await fetch(`${BRIDGE}/skin`)).json();
+  } catch {
+    page.error = "Couldn't reach Hashi's helper.";
+  }
+  if (skinPage !== page) return;
+  if (page.info?.found) return ["mix", "lns"].includes(page.source) ? showSkin(page) : skinSource(page, page.source);
+  page.loading = false;
+  render();
+}
+
+async function showSkin(page) {
+  const keys = page.keys;
+  page.loading = true;
+  render();
+  let loaded = null;
+  try {
+    loaded = await loadSkinScene(page);
+  } catch {}
+  if (skinPage !== page || page.keys !== keys) return;
+  page.loading = false;
+  page.error = loaded ? null : "Couldn't draw this skin.";
+  if (loaded) startSkinLive(page, loaded);
+  render();
+}
+
+function skinScroll(p, by) {
+  p.scroll = Math.min(SKIN_SCROLL_MAX, Math.max(SKIN_SCROLL_MIN, p.scroll + by));
+  store(SKIN_SCROLL, p.scroll);
+  // cuts and fades are set in ms, so their length on the skin follows the scroll time
+  if (skinEditsJson(p)) refreshSkin(p);
+  render();
+}
+
+function skinView() {
+  const p = skinPage;
+  const info = p.info;
+  p.canvas.classList.toggle("loading", p.loading);
+  p.canvas.setAttribute("aria-label", info?.found ? `${info.name} in ${p.keys}K` : "");
+  return el("div", { class: "skin-page" },
+    el("div", { class: "head" },
+      el("p", { class: "say" }, "Your skin"),
+      el("button", { class: "link", onclick: closeSkin }, p.back ? "Back to the analysis" : "Back to plays")),
+    info?.found && el("p", { class: "caption" }, info.name, info.client === "lazer" && " (lazer)"),
+    info && !info.found && el("p", { class: "caption" }, SKIN_WHY[info.why] ?? SKIN_WHY.unknown),
+    p.error && el("p", { class: "status bad" }, p.error),
+    // the preview and its controls, kept in view beside the editor on a wide window
+    info?.found && el("div", { class: "skin-stage" },
+    el("div", { class: "skin-tools" },
+      segs(SKIN_KEYS, p.keys, (keys) => {
+        p.keys = keys;
+        if (p.source !== "lns") p.source = "mix";
+        p.map = null;
+        showSkin(p);
+      }, "Keys"),
+      el("button", { class: "link", disabled: p.loading, onclick: loadSkin }, "Load again")),
+    !SKIN_FREEZE && el("div", { class: "skin-tools" },
+      segs([["mix", "Generated"], ["lns", "Long notes"], ["selected", "Selected map"], ...(p.play ? [["play", "This play"]] : [])], p.source, (s) => skinSource(p, s), "Notes"),
+      p.map && el("span", { class: "skin-map" }, `${p.map.title ?? "Unknown"}${p.map.version ? ` [${p.map.version}]` : ""}`)),
+    !SKIN_FREEZE && el("div", { class: "skin-tools" },
+      el("div", { class: "segs" },
+        el("button", { class: "seg", onclick: () => { p.playing = !p.playing; render(); } }, p.playing ? "Pause" : "Play")),
+      el("div", { class: "segs", title: "How long a note takes from the top to the judgement line" },
+        el("button", { class: "seg", disabled: p.scroll <= SKIN_SCROLL_MIN, "aria-label": "Faster", onclick: () => skinScroll(p, -SKIN_SCROLL_STEP) }, "−"),
+        el("span", { class: "skin-scroll" }, `${p.scroll} ms`),
+        el("button", { class: "seg", disabled: p.scroll >= SKIN_SCROLL_MAX, "aria-label": "Slower", onclick: () => skinScroll(p, SKIN_SCROLL_STEP) }, "+"))),
+    p.canvas),
+    info?.found && p.live && !SKIN_FREEZE && skinEditor(p));
+}
+
 let profilePage = null;
 
 function openProfile() {
   settingsOpen = goalsOpen = notesOpen = false;
   analysis = maker = null;
   dropTrainer();
+  skinPage = null;
   board = null;
   clearTimeout(boardTimer);
   profilePage = { data: null, error: null, keys: null, node: null, openedAt: Date.now() };
@@ -1832,6 +1968,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 function openAnalysis(p) {
   goalsOpen = false;
+  skinPage = null;
   settingsOpen = notesOpen = false;
   board = null;
   clearTimeout(boardTimer);
@@ -1976,6 +2113,7 @@ function scorecard(d, tip, since) {
             (t.marked || t.drill) && el("div", { class: "jumps" },
               t.marked && el("button", { class: "link jump", onclick: showPractice }, "Show it on the chart"),
               t.marked && !d.practiceRun && el("button", { class: "link jump", onclick: () => openMaker(d) }, "Make a practice map"),
+              t.marked && d.practice && el("button", { class: "link jump", onclick: () => openSkin({ id: analysis.id, from: (d.offset + d.practice.from) * 1000 * d.rate }) }, "Watch it in your skin"),
               t.drill && el("button", { class: "link jump", onclick: () => openTrainer(d, d.columns[t.drill.columns[0]].hand, t.drill.columns) }, "Practice it here"))),
           t.gain != null && el("span", {
             class: "gain",
@@ -2759,7 +2897,7 @@ function openNotes() {
   settingsOpen = false;
   analysis = maker = null;
   dropTrainer();
-  profilePage = null;
+  skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);
   lockedHint = null;
@@ -2937,6 +3075,11 @@ function settings(c, host, reconnect) {
         onclick: () => snapshot.thumb !== side && action(`thumb/${side}`),
       }, side === "left" ? "Left" : "Right")))),
     snapshot.theme && themeSetting(),
+    el("div", { class: "setting" },
+      el("div", { class: "text" },
+        el("span", { class: "title" }, "Your skin"),
+        el("span", { class: "line" }, "The skin you have on in osu!.")),
+      el("button", { class: "key", onclick: () => openSkin() }, "Preview")),
     el("p", { class: "about" }, `Hashi ${snapshot.version}`,
       shownNotes().length > 0 && [" · ", el("button", { class: "link", onclick: openNotes }, "What's new")],
       snapshot.update && !snapshot.update.step
@@ -2951,7 +3094,7 @@ function toggleSettings() {
     notesOpen = false;
     analysis = maker = null;
     dropTrainer();
-    profilePage = null;
+    skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);
   }
@@ -3044,6 +3187,8 @@ function home(c, host) {
         ? goalsView()
       : profilePage
         ? profileView()
+      : skinPage
+        ? skinView()
       : board
         ? boardView()
       : maker
@@ -3107,7 +3252,7 @@ function render() {
     settingsOpen = notesOpen = false;
     analysis = maker = null;
     dropTrainer();
-    profilePage = null;
+    skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);
   }
@@ -3123,8 +3268,8 @@ function render() {
 
   if (atHome) {
     app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion())));
-    const view = settingsOpen ? "settings" : notesOpen ? "notes" : goalsOpen ? "goals" : profilePage ? "profile" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
-    document.documentElement.classList.toggle("roomy", !!analysis && ROOMY.matches);
+    const view = settingsOpen ? "settings" : notesOpen ? "notes" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
+    document.documentElement.classList.toggle("roomy", !!(analysis || skinPage) && ROOMY.matches);
     if (view !== shownView) (document.documentElement.classList.contains("framed") ? app : document.scrollingElement).scrollTop = 0;
     shownView = view;
     fitPage();
