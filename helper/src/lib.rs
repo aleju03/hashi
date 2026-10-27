@@ -409,6 +409,14 @@ impl Bridge {
             "thumb": if s.config.settings.as_ref().is_some_and(|x| x.thumb_right) { "right" } else { "left" },
             "unreadNotes": s.config.settings.as_ref().and_then(|x| x.notes_read.as_deref()) != Some(VERSION),
             "guideRead": s.config.settings.as_ref().is_some_and(|x| x.guide_read),
+            // what to tell someone whose metronome stays silent
+            "soundHelp": if !cfg!(target_os = "linux") {
+                None
+            } else if std::env::var_os("APPIMAGE").is_some_and(|p| !p.is_empty()) {
+                Some("appimage")
+            } else {
+                Some("gstreamer")
+            },
             "goals": goals::public(self),
             "plays": items.into_iter().map(|i| queue::public_item(i, &self.env.origin, profile.as_deref())).collect::<Vec<_>>(),
         })

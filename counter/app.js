@@ -1074,6 +1074,10 @@ const RAMP_TICKS = 16;
 const RAMP_BPM = 10;
 const DIVISIONS = [[1, "1/1"], [2, "1/2"], [4, "1/4"]];
 const UPCOMING = 8;
+const NO_SOUND = {
+  gstreamer: "No sound. Hashi plays it through GStreamer, and its good plugins aren't installed: gst-plugins-good, or gstreamer1.0-plugins-good on Ubuntu and Debian. Install them, then restart Hashi.",
+  appimage: "No sound. The AppImage can't play it on this system. The .deb or .rpm can, with GStreamer's good plugins installed.",
+};
 
 const scroller = () => (document.documentElement.classList.contains("framed") ? app : document.scrollingElement);
 
@@ -1177,9 +1181,18 @@ function startMetronome() {
   m.recent = [];
   m.next = m.ctx.currentTime + 0.3;
   m.timer = setInterval(scheduleTicks, 25);
+  m.silent = false;
   scheduleTicks();
   requestAnimationFrame(followTicks);
   trainer.refresh?.();
+  // webkitgtk without an audio sink leaves the context interrupted, its clock never moves
+  const started = m.ctx.currentTime;
+  setTimeout(() => {
+    if (trainer?.metro !== m || !m.running || m.ctx.currentTime - started > 0.2) return;
+    stopMetronome();
+    m.silent = true;
+    trainer.refresh?.();
+  }, 1000);
 }
 
 function stopMetronome() {
@@ -1340,7 +1353,8 @@ function metronomeBar(t) {
       if (m.running) m.next = (m.queue.at(-1)?.at ?? m.ctx.currentTime) + 60 / m.bpm / m.div;
       saveTempo();
       t.refresh();
-    }, "Patterns mix in a key alone now and then, like a jumpjack"));
+    }, "Patterns mix in a key alone now and then, like a jumpjack"),
+    m.silent && el("p", { class: "trainer-silent" }, NO_SOUND[snapshot.soundHelp] ?? "No sound. Check that your computer has a working audio output."));
 }
 
 const noteText = (t, note) => (note === "chord" ? `${t.labels[0] ?? "?"}${t.labels[1] ?? "?"}` : t.labels[note] ?? "?");

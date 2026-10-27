@@ -969,6 +969,7 @@ a.title:hover, a.title:focus-visible, .who .name .profile:hover, .who .name .pro
 .trainer-metro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 18px 0 4px; }
 .trainer-go { height: 30px; padding: 0 16px; border: 0; border-radius: 9px; background: var(--accent); color: var(--osu-b5); font-weight: 800; cursor: pointer; }
 .trainer-go.on { background: var(--osu-b3); color: #fff; }
+.trainer-silent { flex-basis: 100%; margin: 4px 0 0; font-size: 13px; line-height: 1.45; color: var(--warn); }
 .trainer-tempo { display: inline-flex; align-items: center; gap: 4px; padding: 2px; border-radius: 9px; background: var(--osu-b4); font-size: 12px; }
 .trainer-tempo span { margin-right: 4px; color: var(--osu-f1); }
 .trainer-bpm { width: 52px; height: 24px; border: 0; border-radius: 7px; background: var(--osu-b3); color: #fff; font: inherit; font-weight: 700; text-align: center; }
