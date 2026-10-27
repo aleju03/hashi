@@ -413,17 +413,56 @@ fn most_common_beat(points: &[Point], end: f64) -> f64 {
 }
 
 fn open_in_osu(b: &Bridge, item: &Item, file: &Path) {
-    let exe = if item.play.is_lazer() {
-        std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("osulazer").join("current").join("osu!.exe"))
+    let run = |exe: &Path, args: &[&std::ffi::OsStr]| std::process::Command::new(exe).args(args).arg(file).spawn().is_ok();
+    let started = if cfg!(windows) {
+        let exe = if item.play.is_lazer() {
+            std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("osulazer").join("current").join("osu!.exe"))
+        } else {
+            b.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe"))
+        };
+        exe.filter(|e| e.is_file()).is_some_and(|e| run(&e, &[]))
+    } else if item.play.is_lazer() {
+        // a second lazer hands the file to the one running
+        running_lazer().is_some_and(|e| run(&e, &[]))
     } else {
-        b.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe"))
+        osu_wine().is_some_and(|e| run(&e, &["--osuhandler".as_ref()]))
     };
-    let started = exe.filter(|e| e.is_file()).is_some_and(|e| std::process::Command::new(e).arg(file).spawn().is_ok());
+    // xdg-open without a desktop goes by the bytes, an .osz is a zip there and opens in the file manager.
+    // gio goes by the extension, which osu!'s handlers register
+    let started = started || (cfg!(target_os = "linux") && run(Path::new("gio"), &["open".as_ref()]));
     if !started {
         if let Err(e) = open::that_detached(file) {
             log!("practice map: couldn't open {}: {e}", file.display());
         }
     }
+}
+
+// osu-winello's launcher, whose --osuhandler gives a file to the stable running in wine
+fn osu_wine() -> Option<PathBuf> {
+    let local = crate::home().join(".local").join("bin").join("osu-wine");
+    if local.is_file() {
+        return Some(local);
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?).map(|d| d.join("osu-wine")).find(|p| p.is_file())
+}
+
+// the AppImage the running lazer came from, or the program itself
+fn running_lazer() -> Option<PathBuf> {
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let dir = entry.path();
+        if !std::fs::read_to_string(dir.join("comm")).is_ok_and(|c| c.trim() == "osu!") {
+            continue;
+        }
+        let environ = std::fs::read(dir.join("environ")).unwrap_or_default();
+        let appimage = environ.split(|c| *c == 0).find_map(|v| v.strip_prefix(b"APPIMAGE=")).map(|v| PathBuf::from(String::from_utf8_lossy(v).into_owned()));
+        if let Some(p) = appimage.filter(|p| p.is_file()) {
+            return Some(p);
+        }
+        if let Ok(exe) = std::fs::read_link(dir.join("exe")) {
+            return Some(exe);
+        }
+    }
+    None
 }
 
 struct Pcm {
