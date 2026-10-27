@@ -283,8 +283,8 @@ function bridge(rows, pose) {
       <circle class="lamp stop" cx="130" cy="145" r="4.5" style="${loop(1000)}"/>
       <circle class="lamp go" cx="130" cy="159" r="4.5"/>
     </g>
-    ${notes.map((style) => `<g class="note" style="${style}"><rect x="-10" y="-9" width="20" height="9" rx="4.5"/></g>`).join("")}
-    ${overs.map((style) => `<g class="note over" style="${style}"><rect x="-10" y="-9" width="20" height="9" rx="4.5"/></g>`).join("")}
+    ${notes.map((style) => `<g class="note" style="${style}"><rect x="-11" y="-7" width="22" height="7" rx="1.5"/></g>`).join("")}
+    ${overs.map((style) => `<g class="note over" style="${style}"><rect x="-11" y="-7" width="22" height="7" rx="1.5"/></g>`).join("")}
     <g class="sign is-${rows.osu.state}">
       <path class="line" d="M30 186v14"/>
       <circle cx="30" cy="164" r="22"/>
@@ -312,9 +312,9 @@ function riverbed() {
     <g class="fish" style="--from: ${-reach + 250}px; --to: ${reach + 150}px; ${loop(44 * (reach * 2 - 100))}"><path d="M-10 0q9-9 19 0q-10 9-19 0zM-10 0l-7-5v10z"/><circle cx="4" cy="-1" r="1"/></g>
     <path class="line" d="M${-reach} 66q25-5 50 0${"t50 0".repeat(reach / 25 + 7)}"/>
     <path class="line" d="M322 65q-5-8 0-15t0-14M333 65q4-7 0-12t1-11M58 66q-4-6 0-11t-1-9"/>
-    <rect class="sunk" x="172" y="55" width="20" height="9" rx="4.5" transform="rotate(-9 182 60)"/>
-    <rect class="sunk" x="196" y="56" width="20" height="9" rx="4.5" transform="rotate(6 206 60)"/>
-    <rect class="sunk" x="183" y="45" width="20" height="9" rx="4.5" transform="rotate(-24 193 50)"/>
+    <rect class="sunk" x="148" y="57" width="22" height="7" rx="1.5" transform="rotate(-5 159 61)"/>
+    <rect class="sunk" x="196" y="58" width="22" height="7" rx="1.5" transform="rotate(3 207 62)"/>
+    <rect class="sunk" x="241" y="56" width="22" height="7" rx="1.5" transform="rotate(-12 252 60)"/>
   </g></svg>`;
   return node;
 }
@@ -353,13 +353,12 @@ function shore(boat = false, adrift = null) {
       <g transform="translate(0 -56)"><g class="fish" style="--from: -40px; --to: ${width + 40}px; ${loop(88 * (width + 80))}"><path d="M-10 0q9-9 19 0q-10 9-19 0zM-10 0l-7-5v10z"/><circle cx="4" cy="-1" r="1"/></g></g>
       <path class="line" d="M28 0q-5-10 0-19t0-17t1-12M40 0q4-9 0-15t1-13M52 0q-3-6 0-11"/>
       <svg x="64%" overflow="visible">
-        <rect class="sunk" x="-10" y="-14" width="20" height="9" rx="4.5" transform="rotate(-9 0 -10)"/>
-        <rect class="sunk" x="14" y="-13" width="20" height="9" rx="4.5" transform="rotate(6 24 -9)"/>
-        <rect class="sunk" x="2" y="-24" width="20" height="9" rx="4.5" transform="rotate(-24 12 -20)"/>
+        <rect class="sunk" x="-34" y="-11" width="22" height="7" rx="1.5" transform="rotate(-5 -23 -7)"/>
+        <rect class="sunk" x="6" y="-10" width="22" height="7" rx="1.5" transform="rotate(4 17 -6)"/>
       </svg>
       <svg x="100%" overflow="visible">
         <path class="line" d="M-32 0q-4-9 0-16t0-14t1-10M-44 0q4-7 0-12t1-10"/>
-        <rect class="sunk" x="-96" y="-15" width="20" height="9" rx="4.5" transform="rotate(-14 -86 -11)"/>
+        <rect class="sunk" x="-98" y="-12" width="22" height="7" rx="1.5" transform="rotate(-10 -87 -8)"/>
       </svg>
     </svg>
   </g></svg>`;
