@@ -9,6 +9,7 @@ mod leaderboard;
 mod osr;
 mod practice;
 mod presence;
+mod profile;
 mod queue;
 mod replays;
 mod server;

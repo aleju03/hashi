@@ -164,6 +164,11 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if path == "/profile" {
+            let mut res = json(200, &crate::profile::summary(b).await);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
         if path == "/state" {
             let mut res = json(200, &b.snapshot());
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

@@ -167,6 +167,11 @@ fn fingers(keys: usize, thumb_left: bool, own: Option<&[String]>) -> Vec<(Hand, 
     out
 }
 
+// (hand, finger) for each column
+pub(crate) fn column_fingers(keys: usize, thumb_left: bool, own: Option<&[String]>) -> Vec<(&'static str, &'static str)> {
+    fingers(keys, thumb_left, own).into_iter().map(|(h, f)| (hand_name(h), f)).collect()
+}
+
 pub(crate) fn usual_finger_names(keys: usize) -> Vec<String> {
     usual_fingers(keys, true).into_iter().map(|(_, f)| f.to_string()).collect()
 }

@@ -636,9 +636,11 @@ pub(crate) fn public_item(item: &Item, origin: &str, username: Option<&str>) -> 
     })
 }
 
-// keep finished plays 30 days. true if any went
+pub(crate) const KEEP_DAYS: i64 = 30;
+
+// keep finished plays KEEP_DAYS. true if any went
 pub(crate) async fn prune_queue(b: &Arc<Bridge>) -> bool {
-    let cutoff = crate::iso_from_ms(now_ms() - 30 * 24 * 3600_000);
+    let cutoff = crate::iso_from_ms(now_ms() - KEEP_DAYS * 24 * 3600_000);
     let (keep, pruned): (std::collections::HashSet<String>, bool) = {
         let mut s = b.st();
         let before = s.queue.items.len();
