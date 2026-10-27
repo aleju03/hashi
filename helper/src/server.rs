@@ -17,7 +17,7 @@ use crate::{analysis, autostart, get_tosu, leaderboard, log, practice, presence,
 #[folder = "../counter/"]
 struct Counter;
 
-const WINDOW_ACTIONS: [&str; 6] = ["show", "hide", "minimize", "close", "drag", "opened"];
+const WINDOW_ACTIONS: [&str; 7] = ["show", "hide", "minimize", "maximize", "close", "drag", "opened"];
 
 fn counter_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
