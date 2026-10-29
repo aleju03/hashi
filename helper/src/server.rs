@@ -27,7 +27,7 @@ fn counter_type(path: &str) -> &'static str {
         "json" => "application/json",
         "png" => "image/png",
         "svg" => "image/svg+xml",
-        "ttf" => "font/ttf",
+        "woff2" => "font/woff2",
         "txt" => "text/plain",
         _ => "application/octet-stream",
     }

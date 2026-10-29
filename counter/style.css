@@ -1,6 +1,9 @@
 /* palette from mania tracker's styles.css */
 
-@font-face { font-family: "Outfit"; font-weight: 100 900; src: url("fonts/Outfit.ttf") format("truetype"); }
+@font-face { font-family: "Tracker Round"; font-weight: 400; src: url("fonts/TrackerRound-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Tracker Round"; font-weight: 600; src: url("fonts/TrackerRound-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Tracker Round"; font-weight: 700; src: url("fonts/TrackerRound-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Tracker Round"; font-weight: 800; src: url("fonts/TrackerRound-Bold.woff2") format("woff2"); }
 
 :root {
   --hue: 333;
@@ -28,7 +31,7 @@ html, body {
   min-height: 100%;
   background: var(--osu-b5);
   color: #fff;
-  font-family: "Outfit", "Inter", "Helvetica Neue", Tahoma, Arial, sans-serif;
+  font-family: "Tracker Round", "Inter", "Helvetica Neue", Tahoma, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

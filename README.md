@@ -108,4 +108,4 @@ Uninstall it the usual way; on Windows the uninstaller asks whether to delete yo
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The Outfit font in `counter/fonts` is under the SIL Open Font License.
+MIT, see [LICENSE](LICENSE). Tracker Round in `counter/fonts`, built on Outfit, is under the SIL Open Font License.

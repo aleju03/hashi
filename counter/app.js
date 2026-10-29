@@ -2384,7 +2384,7 @@ function scatter(d, tip) {
     const x = (t) => pad.l + (t / Math.max(1, d.length)) * plotW;
     const y = (o) => pad.t + plotH / 2 + (Math.max(-reach, Math.min(reach, o)) / reach) * (plotH / 2);
     layout = { x, y };
-    ctx.font = `10px Outfit, sans-serif`;
+    ctx.font = `10px "Tracker Round", sans-serif`;
     ctx.lineWidth = 1;
     ctx.fillStyle = c.muted;
     ctx.textAlign = "right";
