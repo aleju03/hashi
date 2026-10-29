@@ -11,6 +11,7 @@ mod practice;
 mod presence;
 mod profile;
 mod queue;
+mod realm;
 mod replays;
 mod skin;
 mod skin_render;

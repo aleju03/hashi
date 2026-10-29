@@ -260,7 +260,7 @@ impl Skin {
         }
     }
 
-    fn ini(&self) -> Option<String> {
+    pub(super) fn ini(&self) -> Option<String> {
         let bytes = std::fs::read(self.ini.as_ref()?).ok()?;
         Some(String::from_utf8_lossy(&bytes).into_owned())
     }
@@ -502,7 +502,7 @@ fn to_srgb(profile: &ColorProfile, rgba: &mut [u8]) {
 }
 
 // 8-bit RGB/RGBA, chunky, uncompressed strips: what Photoshop writes by default
-fn tiff(b: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub(super) fn tiff(b: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let le = b.starts_with(b"II");
     let u16_at = |o: usize| -> Option<u32> {
         let s: [u8; 2] = b.get(o..o + 2)?.try_into().ok()?;

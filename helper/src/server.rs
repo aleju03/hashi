@@ -319,14 +319,50 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
                 Err(e) => json(500, &serde_json::json!({ "error": e })),
             };
         }
+        // /skin/apply-new?keys=7&edits=<json>&name=..
+        if path == "/skin/apply-new" {
+            let (Ok(found), Some((keys, _, edits))) = (crate::skin::current(b), skin_query(&req)) else { return empty(404) };
+            if !found.stored {
+                return empty(404);
+            }
+            let name = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "name").map(|(_, v)| v.into_owned()).unwrap_or_default();
+            let b = b.clone();
+            return match tokio::task::spawn_blocking(move || crate::skin::apply_as_new(&b, &found, keys, &edits, &name)).await {
+                Ok(Ok(v)) => json(200, &v),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
+        // /skin/fix, for a lazer skin open in Edit externally
+        if path == "/skin/fix" {
+            let Ok(found) = crate::skin::current(b) else { return empty(404) };
+            if found.stored || found.client != "lazer" {
+                return empty(404);
+            }
+            return match tokio::task::spawn_blocking(move || crate::skin_render::fix_tiffs(&found.dir)).await {
+                Ok(Ok(n)) => json(200, &serde_json::json!({ "fixed": n })),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
         // /skin/apply?keys=7&edits=<json>, /skin/undo
         if path == "/skin/apply" || path == "/skin/undo" {
             let Ok(found) = crate::skin::current(b) else { return empty(404) };
+            // its files are linked to lazer's own, writing them would change lazer's copies
+            if found.stored {
+                return json(422, &serde_json::json!({ "error": "To save to a lazer skin, open lazer's skin editor, then File, Edit externally." }));
+            }
             let query = skin_query(&req);
             let undo = path == "/skin/undo";
             let work = move || match (undo, query) {
                 (true, _) => crate::skin_render::undo(&found.dir).map(|()| serde_json::json!({})),
-                (false, Some((keys, _, edits))) => crate::skin_render::apply(&found.dir, keys, &edits),
+                (false, Some((keys, _, edits))) => crate::skin_render::apply(&found.dir, keys, &edits).and_then(|v| {
+                    // lazer takes this folder back in and can't read TIFFs
+                    if found.client == "lazer" {
+                        crate::skin_render::fix_tiffs(&found.dir)?;
+                    }
+                    Ok(v)
+                }),
                 (false, None) => Err("No keymode given.".into()),
             };
             return match tokio::task::spawn_blocking(work).await {

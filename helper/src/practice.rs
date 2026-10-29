@@ -135,7 +135,7 @@ async fn build(b: &Arc<Bridge>, id: &str, o: Options) -> Result<Value, String> {
     if let Some(goal) = made.goal {
         crate::goals::record(b, crate::goals::Seen { kind: "practice", md5: &made.md5, title: &made.title, version: &made.version, target: goal, play: None, opens: true }).await;
     }
-    open_in_osu(b, &item, Path::new(&made.file));
+    open_in_osu(b, item.play.is_lazer(), Path::new(&made.file));
     Ok(json!({ "version": made.version, "file": made.file, "md5": made.md5 }))
 }
 
@@ -412,16 +412,16 @@ fn most_common_beat(points: &[Point], end: f64) -> f64 {
     spans.iter().max_by(|x, y| x.1.total_cmp(&y.1)).map_or(500.0, |s| s.0)
 }
 
-fn open_in_osu(b: &Bridge, item: &Item, file: &Path) {
+pub(crate) fn open_in_osu(b: &Bridge, lazer: bool, file: &Path) {
     let run = |exe: &Path, args: &[&std::ffi::OsStr]| std::process::Command::new(exe).args(args).arg(file).spawn().is_ok();
     let started = if cfg!(windows) {
-        let exe = if item.play.is_lazer() {
+        let exe = if lazer {
             std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("osulazer").join("current").join("osu!.exe"))
         } else {
             b.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe"))
         };
         exe.filter(|e| e.is_file()).is_some_and(|e| run(&e, &[]))
-    } else if item.play.is_lazer() {
+    } else if lazer {
         // a second lazer hands the file to the one running
         running_lazer().is_some_and(|e| run(&e, &[]))
     } else {
@@ -432,7 +432,7 @@ fn open_in_osu(b: &Bridge, item: &Item, file: &Path) {
     let started = started || (cfg!(target_os = "linux") && run(Path::new("gio"), &["open".as_ref()]));
     if !started {
         if let Err(e) = open::that_detached(file) {
-            log!("practice map: couldn't open {}: {e}", file.display());
+            log!("couldn't open {} in osu!: {e}", file.display());
         }
     }
 }

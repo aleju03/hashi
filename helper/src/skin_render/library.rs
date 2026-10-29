@@ -96,6 +96,7 @@ pub(crate) fn images(dir: &Path, at: &str) -> Result<Value, String> {
             *entry = (stem.to_string(), true, path.clone());
         }
     }
+    let used = used_as(&lib.skin);
     let mut out = vec![];
     for (lower, (stem, hd, path)) in &stems {
         let animation = frame(lower).filter(|(b, _)| stems.contains_key(&format!("{b}-0")));
@@ -108,12 +109,126 @@ pub(crate) fn images(dir: &Path, at: &str) -> Result<Value, String> {
         };
         let (w, h) = size(path).unwrap_or((0, 0));
         let folder = name.rsplit_once('/').map_or("", |(f, _)| f);
-        out.push(json!({ "path": name.replace('/', "\\"), "folder": folder.replace('/', "\\"), "w": w, "h": h, "hd": hd, "frames": frames }));
+        let roles = roles(name, w, h, &used);
+        out.push(json!({ "path": name.replace('/', "\\"), "folder": folder.replace('/', "\\"), "w": w, "h": h, "hd": hd, "frames": frames, "roles": roles }));
     }
     let key = |v: &Value| (v["folder"].as_str().unwrap_or("").to_lowercase(), v["path"].as_str().unwrap_or("").to_lowercase());
     out.sort_by_key(key);
     out.truncate(MAX_IMAGES);
     Ok(json!({ "images": out }))
+}
+
+// what each image skin.ini points at is used as, in any keymode, by its name as written there
+fn used_as(skin: &Skin) -> HashMap<String, Vec<&'static str>> {
+    let mut used: HashMap<String, Vec<&'static str>> = HashMap::new();
+    let Some(text) = skin.ini() else { return used };
+    for block in super::ini::parse(&text).mania {
+        for (key, value) in &block {
+            let role = if let Some(rest) = key.strip_prefix("NoteImage") {
+                match rest.trim_start_matches(|c: char| c.is_ascii_digit()) {
+                    "" => "note",
+                    "H" => "head",
+                    "L" => "body",
+                    "T" => "tail",
+                    _ => continue,
+                }
+            } else if let Some(rest) = key.strip_prefix("KeyImage") {
+                match rest.trim_start_matches(|c: char| c.is_ascii_digit()) {
+                    "" => "key",
+                    "D" => "keyDown",
+                    _ => continue,
+                }
+            } else {
+                continue;
+            };
+            let value = value.replace('\\', "/").to_lowercase();
+            let value = value.strip_suffix(".png").unwrap_or(&value);
+            let roles = used.entry(strip_2x(value).0.to_string()).or_default();
+            if !roles.contains(&role) {
+                roles.push(role);
+            }
+        }
+    }
+    used
+}
+
+// What an image is likely for: how skin.ini uses it, else osu!'s own name for it or words in its
+// path, else its shape. Empty when nothing says.
+fn roles(name: &str, w: u32, h: u32, used: &HashMap<String, Vec<&'static str>>) -> Vec<&'static str> {
+    let lower = name.to_lowercase();
+    if let Some(roles) = used.get(&lower) {
+        return roles.clone();
+    }
+    let file = lower.rsplit('/').next().unwrap_or(&lower);
+    // mania-note1, mania-noteSH, mania-key2D
+    if let Some(rest) = file.strip_prefix("mania-note") {
+        return vec![match rest.trim_start_matches(['1', '2', 's']) {
+            "h" => "head",
+            "l" => "body",
+            "t" => "tail",
+            _ => "note",
+        }];
+    }
+    if let Some(rest) = file.strip_prefix("mania-key") {
+        return vec![if rest.ends_with('d') { "keyDown" } else { "key" }];
+    }
+    if file.starts_with("mania-") || file.starts_with("lighting") {
+        return vec![];
+    }
+    // the file's own name says more than its shape, which says more than the folder it's in
+    let (folder, file) = name.rsplit_once('/').unwrap_or(("", name));
+    if let Some(role) = role_by_words(&words(file)) {
+        return vec![role];
+    }
+    if w > 0 && h >= w.saturating_mul(3) && (h >= w.saturating_mul(6) || h >= 1000) {
+        return vec!["body"];
+    }
+    // a receptor stands taller than it's wide, its ring at the bottom of the image
+    if w > 0 && h * 10 >= w * 16 {
+        return vec!["key"];
+    }
+    role_by_words(&words(folder)).into_iter().collect()
+}
+
+// split at anything not a letter and where case or digits change: "NoteL2" is note l 2
+fn words(name: &str) -> Vec<String> {
+    let mut words: Vec<String> = vec![];
+    let mut last: Option<char> = None;
+    for c in name.chars() {
+        let split = match last {
+            None => true,
+            Some(p) => !c.is_alphanumeric() || !p.is_alphanumeric() || p.is_ascii_digit() != c.is_ascii_digit() || (p.is_lowercase() && c.is_uppercase()),
+        };
+        if c.is_alphanumeric() {
+            if split || words.is_empty() {
+                words.push(String::new());
+            }
+            words.last_mut().unwrap().extend(c.to_lowercase());
+        }
+        last = Some(c);
+    }
+    words
+}
+
+fn role_by_words(words: &[String]) -> Option<&'static str> {
+    let has = |list: &[&str]| words.iter().any(|w| list.contains(&w.as_str()));
+    let noted = has(&["note", "notes", "n"]);
+    if has(&["key", "keys", "receptor", "receptors"]) && !noted {
+        return Some(if has(&["d", "down", "pressed", "press", "hit", "on"]) { "keyDown" } else { "key" });
+    }
+    if has(&["tail", "tails", "end"]) || (noted && has(&["t"])) {
+        return Some("tail");
+    }
+    if has(&["head", "heads"]) || (noted && has(&["h"])) {
+        return Some("head");
+    }
+    if has(&["body", "bodies", "hold", "holds", "ln", "long"]) || (noted && has(&["l"])) {
+        return Some("body");
+    }
+    if noted || has(&["circle", "circles", "bar", "bars", "arrow", "arrows"]) {
+        return Some("note");
+    }
+    None
 }
 
 // A small picture of an image. A tall strip such as a Percy body shows its first visible rows

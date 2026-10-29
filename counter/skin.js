@@ -255,10 +255,10 @@ function skinRandom(seed) {
 
 // An endless chart, the same one every time for a keymode: 170 bpm in stretches of eighths and
 // sixteenths, with long notes, chords and jacks
-function skinChart(keys, holdsOnly = false) {
+function skinChart(keys, holdsOnly = false, start = 600) {
   const random = skinRandom(keys * 7919 + 7);
   const beat = 60000 / 170;
-  const chart = { notes: [], next: 600, free: Array(keys).fill(-Infinity), last: [], div: 2, sectionEnd: 0 };
+  const chart = { notes: [], next: start, free: Array(keys).fill(-Infinity), last: [], div: 2, sectionEnd: 0 };
   const pick = (t, n, avoid = []) => {
     const open = [...Array(keys).keys()].filter((c) => chart.free[c] <= t && !avoid.includes(c));
     const out = [];
@@ -303,11 +303,12 @@ function skinChart(keys, holdsOnly = false) {
   return chart;
 }
 
-// a real map from `from` (map ms) to its end, then again from its start, 1.5 s apart
-function skinMapChart(notes, from) {
+// a real map from `from` (map ms) to its end, then again from its start, 1.5 s apart.
+// `from` plays at `start` on the preview's clock
+function skinMapChart(notes, from, start = SKIN_LEAD_MS) {
   const list = notes.map(([c, t, e]) => ({ c, t, e })).sort((a, b) => a.t - b.t);
   const end = Math.max(...list.map((n) => n.e ?? n.t));
-  const chart = { notes: [], i: Math.max(0, list.findIndex((n) => n.t >= from)), base: SKIN_LEAD_MS - from };
+  const chart = { notes: [], i: Math.max(0, list.findIndex((n) => n.t >= from)), base: start - from };
   chart.until = (to) => {
     for (;;) {
       if (chart.i >= list.length) {
@@ -321,6 +322,27 @@ function skinMapChart(notes, from) {
     }
   };
   return chart;
+}
+
+// new notes start just above the screen, so the ones already on it play out
+function swapSkinChart(page) {
+  const live = page.live;
+  const s = live.scene;
+  const start = live.now + (s.height * 1.5) / (s.hitY / page.scroll);
+  const carried = live.chart.notes.filter((n) => n.t < start);
+  const chart = page.map ? skinMapChart(page.map.notes, page.map.from, start) : skinChart(page.keys, page.source === "lns", start);
+  // nothing new lands on a column until its carried notes have cleared it
+  const busy = Array(s.columns.length).fill(-Infinity);
+  for (const n of carried) busy[n.c] = Math.max(busy[n.c], (n.e ?? n.t) + 100);
+  const until = chart.until;
+  chart.notes = carried;
+  chart.until = (to) => {
+    const from = chart.notes.length;
+    until(to);
+    const added = chart.notes.splice(from).filter((n) => n.t >= busy[n.c]);
+    chart.notes.push(...added);
+  };
+  live.chart = chart;
 }
 
 function startSkinLive(page, loaded) {
@@ -344,12 +366,20 @@ function startSkinLive(page, loaded) {
 function skinTick(page, live, at) {
   if (skinPage !== page || page.live !== live) return;
   if (document.hidden) {
-    live.last = null;
+    live.last = live.fpsFrom = null;
+    live.frames = 0;
     document.addEventListener("visibilitychange", () => requestAnimationFrame((t) => skinTick(page, live, t)), { once: true });
     return;
   }
   if (page.playing && live.last != null) live.now += Math.min(at - live.last, 100);
   live.last = at;
+  live.frames = (live.frames ?? 0) + 1;
+  live.fpsFrom ??= at;
+  if (at - live.fpsFrom >= 500) {
+    if (page.fpsNode) page.fpsNode.textContent = `${Math.round((live.frames * 1000) / (at - live.fpsFrom))} fps`;
+    live.frames = 0;
+    live.fpsFrom = at;
+  }
   skinStep(live, page.scroll);
   requestAnimationFrame((t) => skinTick(page, live, t));
 }
@@ -385,7 +415,7 @@ const SKIN_FADE_STEP = 20;
 const SKIN_PALETTE = ["#ffffff", "#b8b8c4", "#ff4d6a", "#ff9a3c", "#ffd84a", "#9be564", "#3ddc97", "#38d6e8", "#4fa8ff", "#6a6cff", "#a970ff", "#ff6ad5"];
 // stable's default column layout: 1 and 2 mirrored from the edges in, S in the middle of odd keymodes
 const SKIN_CLASSIC = { 1: "#ffffff", 2: "#4fa8ff", S: "#ffd84a" };
-const SKIN_PARTS = [["notes", "Notes"], ["heads", "Heads"], ["bodies", "Bodies"], ["tails", "Tails"]];
+const SKIN_PARTS = [["notes", "Notes"], ["heads", "LN Heads"], ["bodies", "LN Bodies"], ["tails", "LN Tails"]];
 
 // the page's edits for the keymode on screen, kept per keymode while it's open
 function skinEdit(page) {
@@ -700,7 +730,9 @@ function skinColours(page) {
 
 // combo and score digits, which a skin.ini's fonts point at, not its notes or keys
 const SKIN_FONT = /^(?:[0-9]|comma|dot|percent|x)$/i;
-const SKIN_SWAP_PARTS = [["note", "Notes"], ["head", "Heads"], ["body", "Bodies"], ["tail", "Tails"], ["key", "Keys"], ["keyDown", "Keys down"]];
+// images that suit a part besides its own: a head is often the note, a tail cap often the head
+const SKIN_NEAR_ROLES = { note: ["head"], head: ["note"], body: [], tail: ["head", "note"], key: ["keyDown"], keyDown: ["key"] };
+const SKIN_SWAP_PARTS = [["note", "Notes"], ["head", "LN Heads"], ["body", "LN Bodies"], ["tail", "LN Tails"], ["key", "Receptors"], ["keyDown", "Receptors down"]];
 
 async function loadSkinImages(page) {
   if (page.images?.stamp === page.stamp) return;
@@ -758,15 +790,25 @@ function skinParts(page) {
     if (which !== "tail" || blankShown) return cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path));
     return (blankShown = true);
   };
-  const folders = [];
-  for (const img of (list ?? []).filter(shown)) {
-    if (folders.at(-1)?.name !== img.folder) folders.push({ name: img.folder, images: [] });
-    folders.at(-1).images.push(img);
-  }
+  const near = SKIN_NEAR_ROLES[which];
+  const fits = (img) => img.roles?.some((r) => r === which || near.includes(r))
+    || cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path))
+    || (which === "tail" && page.blanks.has(img.path));
+  const visible = (list ?? []).filter(shown);
+  const likely = visible.filter(fits);
+  const rest = likely.length ? visible.filter((img) => !fits(img)) : [];
+  const grouped = (images) => {
+    const folders = [];
+    for (const img of images) {
+      if (folders.at(-1)?.name !== img.folder) folders.push({ name: img.folder, images: [] });
+      folders.at(-1).images.push(img);
+    }
+    return folders.map((f) => [f.name && el("p", { class: "skin-folder" }, f.name), f.images.map(tile)]);
+  };
   const own = cols.every((c) => !e.swap[which]?.[c]);
   return part("skin-parts", null,
     el("div", { class: "skin-tools" },
-      segs(SKIN_SWAP_PARTS, which, (p) => { e.swapPart = p; render(); }, "Part")),
+      segs(SKIN_SWAP_PARTS, which, (p) => { e.swapPart = p; page.otherImages = false; render(); }, "Part")),
     el("p", { class: "caption" }, e.swapCols.length ? `Column ${e.swapCols.map((c) => c + 1).join(", ")}.` : "Every column, or pick columns."),
     el("div", { class: "skin-swatches" }, Array.from({ length: keys }, (_, c) => el("button", {
       class: `skin-swatch none${e.swapCols.includes(c) ? " on" : ""}`,
@@ -779,7 +821,21 @@ function skinParts(page) {
     }, c + 1))),
     !list ? el("p", { class: "caption" }, "Finding the skin's images…") : el("div", { class: "skin-thumbs" },
       el("button", { class: `skin-thumb own${own ? " on" : ""}`, title: "The skin's own", onclick: () => pick(null) }, "The skin's own"),
-      folders.map((f) => [f.name && el("p", { class: "skin-folder" }, f.name), f.images.map(tile)])));
+      grouped(likely.length ? likely : visible),
+      rest.length > 0 && el("button", { class: "link skin-others", onclick: () => { page.otherImages = !page.otherImages; render(); } },
+        `${page.otherImages ? "Hide" : "Show"} other images (${rest.length})`),
+      page.otherImages && grouped(rest)));
+}
+
+// lazer takes a moment to import the skin and switch to it
+async function skinImported(name) {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      if ((await (await fetch(`${BRIDGE}/skin`)).json()).name === name) return true;
+    } catch {}
+  }
+  return false;
 }
 
 async function skinWrite(page, path) {
@@ -790,16 +846,34 @@ async function skinWrite(page, path) {
   render();
   let note;
   try {
-    const query = path === "apply" ? `?keys=${keys}&edits=${encodeURIComponent(edits)}` : "";
+    const name = path === "apply-new" ? `&name=${encodeURIComponent(page.newName ?? "")}` : "";
+    const query = path === "undo" ? "" : `?keys=${keys}&edits=${encodeURIComponent(edits)}${name}`;
     const res = await fetch(`${BRIDGE}/skin/${path}${query}`, { method: "POST" });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error);
+    if (path === "apply-new") {
+      const switched = await skinImported(body.name);
+      if (switched) {
+        page.edits = {};
+        page.newName = null;
+      }
+      note = switched
+        ? { ok: true, text: `Lazer switched to “${body.name}”.` }
+        : { ok: false, text: `Sent “${body.name}” to lazer, but it hasn't switched to it. Is lazer open?` };
+      if (skinPage !== page) return;
+      page.applying = false;
+      if (switched) await loadSkin();
+      page.saved = note;
+      render();
+      return;
+    }
     if (path === "apply") delete page.edits[keys];
-    else page.edits = {};
+    else if (path === "undo") page.edits = {};
     const reload = page.info.client === "lazer"
       ? "Finish editing in lazer's skin editor to bring it in."
       : "In osu!, press Ctrl+Alt+Shift+S to reload the skin.";
-    note = { ok: true, text: `${path === "apply" ? "Saved to the skin." : "Put the skin back as it was."} ${reload}` };
+    const done = { apply: "Saved to the skin.", fix: "Saved them as PNGs.", undo: "Put the skin back as it was." }[path];
+    note = { ok: true, text: `${done} ${reload}` };
   } catch (e) {
     note = { ok: false, text: e.message || "Couldn't change the skin." };
   }
@@ -810,6 +884,38 @@ async function skinWrite(page, path) {
   render();
 }
 
+function skinUnreadable(page) {
+  const list = page.info.unreadable;
+  const names = list.slice(0, 3).join(", ") + (list.length > 3 ? ` and ${list.length - 3} more` : "");
+  const what = list.length === 1 ? `${names}. It's a TIFF with a .png name` : `${list.length} images, TIFFs with .png names: ${names}`;
+  return el("div", { class: "skin-tools skin-warn" },
+    el("p", { class: "caption" }, `Lazer can't read ${what}, so it draws nothing there.`),
+    el("button", {
+      class: "key go",
+      disabled: page.applying || page.loading,
+      title: page.info.stored ? "Saved as a new skin with any changes below, lazer switches to it" : "",
+      onclick: () => skinWrite(page, page.info.stored ? "apply-new" : "fix"),
+    }, page.info.stored ? "Fix as a new skin" : "Fix"));
+}
+
+// kept across redraws, which would drop its focus and caret mid-typing
+function skinNameField(page) {
+  const input = (page.nameField ??= el("input", {
+    class: "skin-name", type: "text", spellcheck: "false", maxlength: 120, "aria-label": "The new skin's name",
+    oninput: (ev) => (page.newName = ev.target.value),
+  }));
+  if (page.newName == null) input.value = page.info.newName ?? "";
+  input.placeholder = page.info.newName ?? "";
+  if (document.activeElement === input) {
+    const [from, to] = [input.selectionStart, input.selectionEnd];
+    requestAnimationFrame(() => {
+      input.focus();
+      input.setSelectionRange(from, to);
+    });
+  }
+  return input;
+}
+
 function skinEditor(page) {
   const changed = !!skinEditsJson(page);
   const tab = page.tab ?? "lns";
@@ -817,8 +923,13 @@ function skinEditor(page) {
     el("div", { class: "skin-tools skin-tabs" },
       segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colours"]], tab, (t) => { page.tab = t; render(); }, "Edit")),
     tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : skinColours(page),
-    el("div", { class: "skin-tools apply" },
-      el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply") }, "Apply to skin"),
-      page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes")),
+    page.info?.stored
+      ? [el("div", { class: "skin-tools apply" },
+        skinNameField(page),
+        el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply-new") }, "Save as a new skin")),
+      el("p", { class: "caption" }, "Lazer imports it and switches to it. To change this skin itself, use File, Edit externally in lazer's skin editor.")]
+      : el("div", { class: "skin-tools apply" },
+        el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply") }, "Apply to skin"),
+        page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes")),
     page.saved && el("p", { class: `status ${page.saved.ok ? "good" : "bad"}` }, page.saved.text));
 }

@@ -14,7 +14,7 @@ use serde_json::Value;
 use tiny_skia::BlendMode;
 
 pub(crate) use library::{images, thumb};
-pub(crate) use write::{apply, edited, undo};
+pub(crate) use write::{apply, edited, fix_tiffs, pack, tiffs, undo};
 
 use canvas::{tinted, Draw, Texture};
 use ini::{hex, Rgba};
