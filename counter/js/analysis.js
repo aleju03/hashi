@@ -132,7 +132,7 @@ function scorecard(d, tip, since) {
             (t.marked || t.drill) && el("div", { class: "jumps" },
               t.marked && el("button", { class: "link jump", onclick: showPractice }, "Show it on the chart"),
               t.marked && !d.practiceRun && el("button", { class: "link jump", onclick: () => openMaker(d) }, "Make a practice map"),
-              t.marked && d.practice && el("button", { class: "link jump", onclick: () => openSkin({ id: analysis.id, from: (d.offset + d.practice.from) * 1000 * d.rate }) }, "Watch it in your skin"),
+              t.marked && d.practice && el("button", { class: "link jump", onclick: () => openSkin({ id: analysis.id, keys: d.keys, from: (d.offset + d.practice.from) * 1000 * d.rate }) }, "Watch it in your skin"),
               t.drill && el("button", { class: "link jump", onclick: () => openTrainer(d, d.columns[t.drill.columns[0]].hand, t.drill.columns) }, "Practice it here"))),
           t.gain != null && el("span", {
             class: "gain",

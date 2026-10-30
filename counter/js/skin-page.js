@@ -18,7 +18,8 @@ function openSkin(from = null) {
   dropTrainer();
   board = null;
   clearTimeout(boardTimer);
-  const keys = Math.round(snapshot.plays[0]?.play.keys ?? 4);
+  // the play it's opened from, else the map selected in osu!, else the latest play
+  const keys = Math.round((from ? from.keys : null) ?? snapshot.tosu.map?.keys ?? snapshot.plays[0]?.play.keys ?? 4);
   skinPage = {
     source: from ? "play" : "mix", play: from, back, map: null,
     keys: keys >= 4 && keys <= 10 ? keys : 4, info: null, stamp: Date.now(), loading: true, error: null,
