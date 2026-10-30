@@ -132,6 +132,9 @@ pub struct Item {
     // a play of a practice map Hashi made: kept here for its analysis, never sent
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub practice: bool,
+    // finished while sending was off: kept here for its analysis, never sent
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kept: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]

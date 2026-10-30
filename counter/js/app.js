@@ -157,7 +157,9 @@ function home(c, host) {
             el("p", { class: "say" }, snapshot.sendPlays ? "No plays yet." : "Sending plays is off."),
             el("p", { class: "lead" }, snapshot.sendPlays
               ? "Finish a mania map and it shows up here."
-              : "The maps you finish stay off your profile. Turn it back on in the settings."),
+              : snapshot.analysis
+                ? "The maps you finish stay off your profile, but still show up here with their analysis."
+                : "The maps you finish stay off your profile. Turn it back on in the settings."),
             waiting(), el("i"), el("i"), el("i")));
 }
 

@@ -415,7 +415,8 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
 
     let item = {
         let mut s = b.st();
-        if s.sends_no_plays() && !practice {
+        let kept = s.sends_no_plays() && !practice;
+        if kept && !s.analyzes() {
             drop(s);
             return log!("skip (sending plays is off): {label}");
         }
@@ -469,6 +470,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             held_from: None,
             on_hold: false,
             practice,
+            kept,
         };
         s.queue.items.push(item.clone());
         item

@@ -50,7 +50,6 @@ function openNotes() {
   skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);
-  lockedHint = null;
   if (snapshot.unreadNotes) action("notes/read");
   render();
 }

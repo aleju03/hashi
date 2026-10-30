@@ -55,7 +55,7 @@ pub(crate) fn remove(b: &Arc<Bridge>, id: &str) -> bool {
 pub(crate) fn hold(b: &Arc<Bridge>, id: &str, on: bool) -> bool {
     {
         let mut s = b.st();
-        let Some(item) = s.queue.get_mut(id).filter(|i| !i.practice && ["waiting_replay", "send"].contains(&i.phase.as_str())) else { return false };
+        let Some(item) = s.queue.get_mut(id).filter(|i| !i.practice && !i.kept && ["waiting_replay", "send"].contains(&i.phase.as_str())) else { return false };
         item.on_hold = on;
         log!("{}: {}", title(item), if on { "on hold" } else { "sending after all" });
     }
@@ -644,7 +644,7 @@ pub(crate) async fn prune_queue(b: &Arc<Bridge>) -> bool {
     let (keep, pruned): (std::collections::HashSet<String>, bool) = {
         let mut s = b.st();
         let before = s.queue.items.len();
-        s.queue.items.retain(|i| !(["done", "failed", "unbound", "practice"].contains(&i.phase.as_str()) && i.captured_at < cutoff));
+        s.queue.items.retain(|i| !(["done", "failed", "unbound", "practice", "kept"].contains(&i.phase.as_str()) && i.captured_at < cutoff));
         let pruned = s.queue.items.len() != before;
         let mut keep: std::collections::HashSet<String> =
             s.queue.items.iter().flat_map(|i| [i.replay.as_ref(), i.chart.as_ref()]).flatten().map(|x| x.sha256.clone()).collect();

@@ -128,11 +128,6 @@ button {
   filter: var(--wobble);
 }
 
-.switch.locked {
-  opacity: 0.6;
-  cursor: default;
-}
-
 .switch {
   position: relative;
   flex-shrink: 0;

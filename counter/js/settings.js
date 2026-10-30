@@ -141,38 +141,28 @@ function toggle(title, on, path, note, cls = "") {
     }, el("i")));
 }
 
-// plays, live status or both: never neither, then the app would do nothing
-let lockedHint = null;
-
 function sharing() {
   const p = snapshot.presence;
   const plays = snapshot.sendPlays;
   const live = p.enabled;
   const liveAvailable = p.status !== "unsupported";
   const liveNote = p.status === "error" ? p.message : PRESENCE_NOTES[p.status];
-  const hint = "Keep one of them on, or nothing is sent.";
-  const row = (key, title, on, locked, can, next, line, cls) => el("div", { class: `setting${lockedHint === key ? " is-error" : cls}` },
+  const choice = (sendPlays, shareLive) => (sendPlays ? (shareLive ? "both" : "plays") : shareLive ? "live" : "none");
+  const row = (title, on, can, next, line, cls) => el("div", { class: `setting${cls}` },
     el("div", { class: "text" },
       el("span", { class: "title" }, title),
-      lockedHint === key ? el("span", { class: "line" }, hint) : line && el("span", { class: "line" }, line)),
+      line && el("span", { class: "line" }, line)),
     el("button", {
-      class: `switch${on ? " on" : ""}${locked ? " locked" : ""}`,
+      class: `switch${on ? " on" : ""}`,
       role: "switch",
       "aria-checked": String(on),
       "aria-label": title,
       disabled: slow || (!on && !can),
-      onclick: () => {
-        if (locked) {
-          lockedHint = key;
-          return render();
-        }
-        action(`sharing/${next}`);
-      },
+      onclick: () => action(`sharing/${next}`),
     }, el("i")));
   return [
-    row("plays", "Send my plays", plays, plays && !(live && liveAvailable), true, plays ? "live" : live ? "both" : "plays",
-      !plays && "Off. The maps you finish aren't sent.", ""),
-    row("live", "Share my live status", live, live && !plays, liveAvailable, live ? "plays" : plays ? "both" : "live",
+    row("Send my plays", plays, true, choice(!plays, live), !plays && `Off. The maps you finish aren't sent${snapshot.analysis ? ", only analyzed here" : ""}.`, ""),
+    row("Share my live status", live, liveAvailable, choice(plays, !live),
       live ? liveNote : p.status === "unsupported" && liveNote, live ? ` is-${p.status}` : ""),
   ];
 }
@@ -243,6 +233,5 @@ function toggleSettings() {
     board = null;
     clearTimeout(boardTimer);
   }
-  lockedHint = null;
   render();
 }

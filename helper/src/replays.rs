@@ -325,12 +325,14 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
         i.chart = Some(chart);
         i.phase = if i.practice {
             "practice".into()
+        } else if i.kept {
+            "kept".into()
         } else if i.binding.is_some() {
             "send".into()
         } else {
             "unbound".into()
         };
-        if i.binding.is_none() && !i.practice {
+        if i.binding.is_none() && !i.practice && !i.kept {
             i.error = ItemError::new("not_connected", "Not connected when this play finished.");
         }
     });

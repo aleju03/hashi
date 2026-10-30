@@ -299,12 +299,13 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let ok = tosu::set_tosu_autostart(b, path == "/tosu-autostart/on").await;
             return saved(b, ok);
         }
-        // /sharing/both, /sharing/plays, /sharing/live
+        // /sharing/both, /sharing/plays, /sharing/live, /sharing/none
         if let Some(choice) = path.strip_prefix("/sharing/") {
             let Some((plays, live)) = (match choice {
                 "both" => Some((true, true)),
                 "plays" => Some((true, false)),
                 "live" => Some((false, true)),
+                "none" => Some((false, false)),
                 _ => None,
             }) else {
                 return empty(404);

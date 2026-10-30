@@ -41,7 +41,6 @@ async function action(name) {
   if (busy) return;
   busy = true;
   unsaved = null;
-  lockedHint = null;
   const dim = setTimeout(() => {
     slow = true;
     render();

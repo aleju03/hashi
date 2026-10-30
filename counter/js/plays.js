@@ -5,6 +5,7 @@ function playStatus(p) {
   const r = p.receipt;
   const retryAt = p.retryAt && `Trying again at ${time(new Date(p.retryAt).toISOString())}`;
   if (p.phase === "practice") return { kind: "done", label: "Practice", detail: "Kept in Hashi, not sent" };
+  if (p.phase === "kept") return { kind: "off", label: "Not sent", detail: "Sending plays was off. Kept in Hashi." };
   if (p.onHold) return { kind: "wait", label: "On hold", detail: "Not sent until you send it." };
   if (!snapshot.sendPlays && p.phase === "send") return { kind: "wait", label: "Not sending", detail: "Sending plays is off." };
   if (p.phase === "waiting_replay") return { kind: "spin", label: "Waiting for replay" };
