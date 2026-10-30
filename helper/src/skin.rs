@@ -247,10 +247,14 @@ fn selected_chart(b: &Bridge) -> Option<PathBuf> {
 
 // notes for the preview to play: [column, time, end or null] in the map's own milliseconds
 pub(crate) async fn chart(b: &std::sync::Arc<Bridge>, play: Option<&str>) -> (u16, Value) {
+    let mut replay = None;
     let bytes = match play {
         Some(id) => {
-            let chart = b.st().queue.items.iter().find(|i| i.id == id).and_then(|i| i.chart.clone());
-            let Some(chart) = chart else { return (404, json!({ "error": "That play has no chart here." })) };
+            let item = b.st().queue.items.iter().find(|i| i.id == id).cloned();
+            let Some((chart, item)) = item.and_then(|i| Some((i.chart.clone()?, i))) else { return (404, json!({ "error": "That play has no chart here." })) };
+            if let Some(r) = &item.replay {
+                replay = crate::replays::read_blob(b, r).await.ok().map(|r| (r, item.play.is_lazer()));
+            }
             crate::replays::read_blob(b, &chart).await.ok()
         }
         None => match selected_chart(b) {
@@ -266,7 +270,15 @@ pub(crate) async fn chart(b: &std::sync::Arc<Bridge>, play: Option<&str>) -> (u1
         Err(_) => return (422, json!({ "error": "That isn't a mania map." })),
     };
     let meta = |k: &str| text.lines().find_map(|l| l.trim().strip_prefix(k)).map(|v| v.trim().to_string());
-    let notes: Vec<Value> = chart.notes.iter().map(|n| json!([n.column, n.time, if n.is_hold { json!(n.end_time) } else { Value::Null }])).collect();
+    // a play's notes as it was played: Inverse, Hold Off, Mirror and Random change them
+    let played = match replay {
+        Some((replay, lazer)) => {
+            let chart_bytes = bytes.clone();
+            tokio::task::spawn_blocking(move || crate::analysis::judge_play(&replay, &chart_bytes, lazer).ok().map(|j| j.notes)).await.ok().flatten()
+        }
+        None => None,
+    };
+    let notes: Vec<Value> = played.as_deref().unwrap_or(&chart.notes).iter().map(|n| json!([n.column, n.time, if n.is_hold { json!(n.end_time) } else { Value::Null }])).collect();
     (200, json!({ "keys": chart.keys, "title": meta("Title:"), "version": meta("Version:"), "notes": notes }))
 }
 
