@@ -240,12 +240,18 @@ fn link(v: i64) -> Option<i64> {
     (v != 0).then(|| v - 1)
 }
 
+// a list's links are the keys themselves, not one up like a single link; negative ones point at
+// an object that's gone
+fn listed(v: i64) -> Option<i64> {
+    (v >= 0).then_some(v)
+}
+
 impl Realm {
     fn key_list(&self, at: i64) -> Option<Vec<Option<i64>>> {
         let n = self.node(usize::try_from(at).ok()?)?;
         let a = self.ints_of(&n, true);
         if !n.inner {
-            return Some(a.into_iter().map(link).collect());
+            return Some(a.into_iter().map(listed).collect());
         }
         // an inner node: offsets, its children, then the tree's size
         let mut out = vec![];
@@ -289,3 +295,4 @@ pub(crate) fn skin_names(realm: &Realm) -> Option<Vec<String>> {
         _ => None,
     }).collect())
 }
+
