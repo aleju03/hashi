@@ -59,6 +59,8 @@ pub(crate) fn parse_variant(query: &str) -> Option<(Option<String>, Vec<String>)
                     mods.push(m);
                 }
             }
+            // the filters, read by parse_filters
+            "offset" | "country" | "q" | "friends" => {}
             _ => return None,
         }
     }
@@ -67,17 +69,56 @@ pub(crate) fn parse_variant(query: &str) -> Option<(Option<String>, Vec<String>)
     Some((speed, mods))
 }
 
+pub(crate) const PAGE: u32 = 50;
+const MAX_OFFSET: u32 = 5000;
+
+// which players, and which page of them: a country's or the friends loaded on the site re-ranked
+// among themselves, or a name search that keeps everyone's place
+#[derive(Default, Debug, PartialEq)]
+pub(crate) struct Filters {
+    pub offset: u32,
+    pub country: Option<String>,
+    pub q: Option<String>,
+    pub friends: bool,
+}
+
+pub(crate) fn parse_filters(query: &str) -> Option<Filters> {
+    let mut f = Filters::default();
+    for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+        match &*k {
+            "offset" => f.offset = v.parse().ok().filter(|o| o % PAGE == 0 && *o <= MAX_OFFSET)?,
+            "country" if v.is_empty() => {}
+            "country" => f.country = Some(v.to_uppercase()).filter(|c| c.len() == 2 && c.chars().all(|c| c.is_ascii_alphabetic())),
+            "q" => f.q = Some(v.trim().to_string()).filter(|q| !q.is_empty() && q.chars().count() <= 32),
+            "friends" => f.friends = v == "1",
+            _ => {}
+        }
+        if k == "country" && !v.is_empty() && f.country.is_none() {
+            return None;
+        }
+    }
+    Some(f)
+}
+
 // (status, body) for the page
-pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mods: Vec<String>) -> (u16, Value) {
+pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mods: Vec<String>, f: Filters) -> (u16, Value) {
     let md5 = md5.to_lowercase();
     if b.st().connection.status != "connected" {
         return (409, json!({ "error": "Connect to Mania Tracker to see leaderboards." }));
     }
-    let query = [speed.map(|sp| format!("speed={sp}")), (!mods.is_empty()).then(|| format!("mods={}", mods.join(",")))]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("&");
+    let enc = |s: &str| url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>();
+    let query = [
+        speed.map(|sp| format!("speed={sp}")),
+        (!mods.is_empty()).then(|| format!("mods={}", mods.join(","))),
+        (f.offset > 0).then(|| format!("offset={}", f.offset)),
+        f.country.map(|c| format!("country={c}")),
+        f.q.map(|q| format!("q={}", enc(&q))),
+        f.friends.then(|| "friends=1".to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("&");
     let key = format!("{md5}?{query}");
     if let Some((at, v)) = b.st().boards.fetched.get(&key) {
         if now_ms() - at < FRESH_MS {
@@ -96,6 +137,9 @@ pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mod
     }
     if res.status == 404 {
         return (200, json!({ "unsupported": true }));
+    }
+    if res.status == 409 && code == "friends_not_loaded" {
+        return (200, json!({ "friendsNotLoaded": true }));
     }
     if res.status == 429 {
         return (429, json!({ "error": "Opened too many leaderboards in a minute. Try again in a moment." }));
@@ -172,7 +216,22 @@ fn public_board(body: &Value, origin: &str) -> Value {
         "self": body.get("self").and_then(entry),
         "speed": board_speed(body),
         "mods": board_mods(body),
+        "offset": body.get("offset").and_then(Value::as_u64).unwrap_or(0),
+        "country": country(body.get("country")),
+        "q": str_field(body, "q"),
+        "friends": body.get("friends").and_then(Value::as_bool).unwrap_or(false),
+        // only on the first page of the whole board
+        "countries": body.get("countries").and_then(Value::as_array).map(|l| {
+            l.iter()
+                .filter_map(|c| Some(json!({ "code": country(c.get("code")).as_str()?, "count": c.get("count").and_then(Value::as_u64)? })))
+                .collect::<Vec<_>>()
+        }),
+        "selfCountry": country(body.get("self_country")),
     })
+}
+
+fn country(v: Option<&Value>) -> Value {
+    v.and_then(Value::as_str).filter(|c| c.len() == 2 && c.chars().all(|c| c.is_ascii_alphabetic())).map(|c| Value::from(c.to_uppercase())).unwrap_or(Value::Null)
 }
 
 fn board_speed(v: &Value) -> Value {
@@ -248,5 +307,21 @@ mod tests {
         assert_eq!(p("speed=ht&mods=nr,IN,IN"), Some((Some("ht".into()), vec!["IN".into(), "NR".into()])));
         assert_eq!(p("speed=x"), None);
         assert_eq!(p("mods=EZ"), None);
+        assert_eq!(p("mods=IN&offset=50&country=cr&q=a%20b&friends=1"), Some((None, vec!["IN".into()])));
+    }
+
+    #[test]
+    fn filters() {
+        let f = super::parse_filters;
+        assert_eq!(f(""), Some(super::Filters::default()));
+        assert_eq!(
+            f("offset=100&country=cr&q=%20pl0x%20&friends=1"),
+            Some(super::Filters { offset: 100, country: Some("CR".into()), q: Some("pl0x".into()), friends: true })
+        );
+        assert_eq!(f("offset=25"), None);
+        assert_eq!(f("offset=5050"), None);
+        assert_eq!(f("country=CRI"), None);
+        assert_eq!(f("country="), Some(super::Filters::default()));
+        assert_eq!(f("q=%20%20").map(|x| x.q), Some(None));
     }
 }

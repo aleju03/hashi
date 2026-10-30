@@ -6,7 +6,8 @@
       { "kind": "new", "text": "Don't want it? Turn off Analysis in the settings." },
       { "kind": "changed", "text": "Sending plays and sharing your live status can both be off. Plays you finish then stay in Hashi for their analysis." },
       { "kind": "new", "text": "Open your skin in its own window at the size osu! draws it. It changes as you edit." },
-      { "kind": "new", "text": "Change your skin's HitPosition, ColumnStart and judgement line, and line the notes up with the receptors." }
+      { "kind": "new", "text": "Change your skin's HitPosition, ColumnStart and judgement line, and line the notes up with the receptors." },
+      { "kind": "new", "text": "Leaderboards can show your country, your friends or a player you look for, and go past the top 50." }
     ]
   },
   {

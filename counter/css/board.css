@@ -241,3 +241,117 @@
 .grade.d {
   color: #ff5a5a;
 }
+
+.board-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.board-filters .segs .icon {
+  display: grid;
+}
+
+.board-pick {
+  position: relative;
+}
+
+.board-pick .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.board-countries {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 190px;
+  max-height: 264px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.board-countries::-webkit-scrollbar {
+  width: 6px;
+}
+
+.board-countries::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--osu-b3);
+}
+
+.board-countries button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--osu-f1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-countries button:hover,
+.board-countries button.on {
+  background: var(--osu-b3);
+  color: #fff;
+}
+
+.board-countries b {
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.board-search {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.board .flag {
+  width: 18px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+.board-filters .seg:has(.flag),
+.board-countries button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.board .lead .link {
+  color: var(--osu-f1);
+}
+
+.board .lead .link:hover {
+  color: #fff;
+}

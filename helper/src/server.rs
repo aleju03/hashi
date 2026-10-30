@@ -165,8 +165,9 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             if !leaderboard::valid_md5(md5) {
                 return empty(404);
             }
-            let Some((speed, mods)) = leaderboard::parse_variant(req.uri().query().unwrap_or("")) else { return empty(400) };
-            let (status, body) = leaderboard::board(b, md5, speed, mods).await;
+            let query = req.uri().query().unwrap_or("");
+            let (Some((speed, mods)), Some(filters)) = (leaderboard::parse_variant(query), leaderboard::parse_filters(query)) else { return empty(400) };
+            let (status, body) = leaderboard::board(b, md5, speed, mods, filters).await;
             let mut res = json(status, &body);
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
