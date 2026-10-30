@@ -5,6 +5,7 @@ mod beatmap;
 mod get_tosu;
 mod goals;
 mod judge;
+pub mod lazer;
 mod leaderboard;
 mod osr;
 mod practice;

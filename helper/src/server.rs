@@ -360,10 +360,15 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         // /skin/fix, for a lazer skin open in Edit externally
         if path == "/skin/fix" {
             let Ok(found) = crate::skin::current(b) else { return empty(404) };
-            if found.stored || found.client != "lazer" {
+            if found.client != "lazer" {
                 return empty(404);
             }
-            return match tokio::task::spawn_blocking(move || crate::skin_render::fix_tiffs(&found.dir)).await {
+            let b2 = b.clone();
+            let work = move || match found.stored {
+                true => crate::lazer::save(&b2, &found, |dir| crate::skin_render::fix_tiffs(dir).map(|n| serde_json::json!(n))).map(|v| v.as_u64().unwrap_or(0) as usize),
+                false => crate::skin_render::fix_tiffs(&found.dir),
+            };
+            return match tokio::task::spawn_blocking(work).await {
                 Ok(Ok(n)) => json(200, &serde_json::json!({ "fixed": n })),
                 Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
                 Err(_) => empty(500),
@@ -372,23 +377,23 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         // /skin/apply?keys=7&edits=<json>, /skin/undo
         if path == "/skin/apply" || path == "/skin/undo" {
             let Ok(found) = crate::skin::current(b) else { return empty(404) };
-            // its files are linked to lazer's own, writing them would change lazer's copies
-            if found.stored {
-                return json(422, &serde_json::json!({ "error": "To save to a lazer skin, open lazer's skin editor, then File, Edit externally." }));
-            }
             let query = skin_query(&req);
             let undo = path == "/skin/undo";
-            let work = move || match (undo, query) {
-                (true, _) => crate::skin_render::undo(&found.dir).map(|()| serde_json::json!({})),
-                (false, Some((keys, _, edits))) => crate::skin_render::apply(&found.dir, keys, &edits).and_then(|v| {
-                    // lazer takes this folder back in and can't read TIFFs
-                    if found.client == "lazer" {
-                        crate::skin_render::fix_tiffs(&found.dir)?;
+            let lazer = found.client == "lazer";
+            let change = move |dir: &std::path::Path| match (undo, query) {
+                (true, _) => crate::skin_render::undo(dir).map(|()| serde_json::json!({})),
+                (false, Some((keys, _, edits))) => crate::skin_render::apply(dir, keys, &edits).and_then(|v| {
+                    // lazer can't read TIFFs
+                    if lazer {
+                        crate::skin_render::fix_tiffs(dir)?;
                     }
                     Ok(v)
                 }),
                 (false, None) => Err("No keymode given.".into()),
             };
+            let b2 = b.clone();
+            // a lazer skin Hashi read out of lazer's database is saved back into it
+            let work = move || if found.stored { crate::lazer::save(&b2, &found, change) } else { change(&found.dir) };
             return match tokio::task::spawn_blocking(work).await {
                 Ok(Ok(v)) => json(200, &v),
                 Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),

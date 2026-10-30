@@ -884,9 +884,11 @@ async function skinWrite(page, path) {
     }
     if (path === "apply") delete page.edits[keys];
     else if (path === "undo") page.edits = {};
-    const reload = page.info.client === "lazer"
-      ? "Finish editing in lazer's skin editor to bring it in."
-      : "In osu!, press Ctrl+Alt+Shift+S to reload the skin.";
+    const reload = page.info.client !== "lazer"
+      ? "In osu!, press Ctrl+Alt+Shift+S to reload the skin."
+      : page.info.stored
+        ? "In lazer, switch to another skin and back to see it."
+        : "Finish editing in lazer's skin editor to bring it in.";
     const done = { apply: "Saved to the skin.", fix: "Saved them as PNGs.", undo: "Put the skin back as it was." }[path];
     note = { ok: true, text: `${done} ${reload}` };
   } catch (e) {
@@ -908,9 +910,9 @@ function skinUnreadable(page) {
     el("button", {
       class: "key go",
       disabled: page.applying || page.loading,
-      title: page.info.stored ? "Saved as a new skin with any changes below, lazer switches to it" : "",
-      onclick: () => skinWrite(page, page.info.stored ? "apply-new" : "fix"),
-    }, page.info.stored ? "Fix as a new skin" : "Fix"));
+      title: page.info.saves ? "" : "Saved as a new skin with any changes below, lazer switches to it",
+      onclick: () => skinWrite(page, page.info.saves ? "fix" : "apply-new"),
+    }, page.info.saves ? "Fix" : "Fix as a new skin"));
 }
 
 // kept across redraws, which would drop its focus and caret mid-typing
@@ -1007,13 +1009,18 @@ function skinEditor(page) {
     el("div", { class: "skin-tools skin-tabs" },
       segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colours"], ["stage", "Stage"]], tab, (t) => { page.tab = t; render(); }, "Edit")),
     tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : tab === "stage" ? skinStage(page) : skinColours(page),
-    page.info?.stored
+    page.info?.stored && !page.info.saves
       ? [el("div", { class: "skin-tools apply" },
         skinNameField(page),
         el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply-new") }, "Save as a new skin")),
       el("p", { class: "caption" }, "Lazer imports it and switches to it. To change this skin itself, use File, Edit externally in lazer's skin editor.")]
-      : el("div", { class: "skin-tools apply" },
+      : [el("div", { class: "skin-tools apply" },
         el("button", { class: "key go", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply") }, "Apply to skin"),
-        page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes")),
+        page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes"),
+        page.info?.stored && !page.asNew && el("button", { class: "link", disabled: page.applying, onclick: () => { page.asNew = true; render(); } }, "Save as a new skin instead")),
+      page.info?.stored && page.asNew && el("div", { class: "skin-tools apply" },
+        skinNameField(page),
+        el("button", { class: "key", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply-new") }, "Save as a new skin")),
+      page.info?.stored && el("p", { class: "caption" }, "Saved straight into lazer's copy of the skin. Lazer shows it once you switch to another skin and back.")],
     page.saved && el("p", { class: `status ${page.saved.ok ? "good" : "bad"}` }, page.saved.text));
 }

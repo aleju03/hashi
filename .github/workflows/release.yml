@@ -45,9 +45,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
+      # builds lazer-writer/, which saves into lazer skins. lazer's .NET runs it, not this one
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
 
       - uses: tauri-apps/tauri-action@v0
         env:
+          HASHI_LAZER_WRITER: required
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""

@@ -2422,6 +2422,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "image",
+ "libloading",
  "lzma-rs",
  "md-5",
  "moxcms",

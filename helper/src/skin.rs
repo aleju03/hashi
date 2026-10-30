@@ -116,6 +116,11 @@ struct Stored {
 
 static STORED: Mutex<Option<Stored>> = Mutex::new(None);
 
+// a write to lazer's database doesn't always move its file's modified time, so a save says it
+pub(crate) fn forget_stored() {
+    *STORED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
 // the skin lazer is set to, out of its database into a folder of links to lazer's own files
 fn lazer_stored(b: &Bridge) -> Result<Found, &'static str> {
     let files = b.st().tosu.lazer_files_dir.clone();
@@ -169,7 +174,7 @@ pub(crate) fn apply_as_new(b: &Bridge, found: &Found, keys: usize, edits: &str, 
     Ok(json!({ "name": name }))
 }
 
-fn lazer_skin_id(root: &Path) -> Option<uuid::Uuid> {
+pub(crate) fn lazer_skin_id(root: &Path) -> Option<uuid::Uuid> {
     let text = std::fs::read_to_string(root.join("game.ini")).ok()?;
     text.lines().find_map(|l| {
         let (k, v) = l.split_once('=')?;
@@ -224,6 +229,8 @@ pub(crate) fn info(b: &Bridge) -> Value {
             "client": f.client,
             "edited": crate::skin_render::edited(&f.dir),
             "stored": f.stored,
+            // straight into lazer's database, without Edit externally
+            "saves": !f.stored || crate::lazer::can_save(),
             "unreadable": if f.client == "lazer" { crate::skin_render::tiffs(&f.dir) } else { vec![] },
             "newName": f.stored.then(|| new_name(&f)),
             // changes when Edit externally starts or ends

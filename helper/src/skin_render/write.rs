@@ -155,7 +155,7 @@ pub(crate) fn fix_tiffs(dir: &Path) -> Result<usize, String> {
     Ok(list.len())
 }
 
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)?.flatten() {
         let path = e.path();
