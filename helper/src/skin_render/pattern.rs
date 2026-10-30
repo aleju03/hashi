@@ -1,6 +1,8 @@
-use super::{HEIGHT, WIDTH};
+use super::HEIGHT;
 
 const STAGE_MAX_FRACTION: f64 = 0.94;
+// where a skin without ColumnStart puts the stage
+pub(super) const COLUMN_START: f64 = 136.0;
 pub(super) const HIT_LINE_MIN_FRACTION: f64 = 0.62;
 const SCROLL_TOP_FRACTION: f64 = 0.04;
 // the synthetic notes have no clock, so their animation frame comes from height at about the
@@ -15,17 +17,17 @@ pub(super) struct Layout {
     pub scale: f64,
 }
 
-pub(super) fn layout(widths: &[f64], column_width: f64, spacing: f64, column_start: Option<f64>, keys: usize) -> Layout {
+pub(super) fn layout(widths: &[f64], column_width: f64, spacing: f64, column_start: Option<f64>, keys: usize, width: f64) -> Layout {
     let raw: Vec<f64> = (0..keys).map(|c| widths.get(c).copied().unwrap_or(column_width).max(8.0)).collect();
     let spacing = spacing.max(0.0);
     let raw_stage = raw.iter().sum::<f64>() + spacing * (keys - 1) as f64;
     // skin units are 480ths of the screen height, so on a 16:9 card ColumnStart lands where it
     // does in game
-    let scale = (HEIGHT / 480.0).min(WIDTH * STAGE_MAX_FRACTION / raw_stage);
+    let scale = (HEIGHT / 480.0).min(width * STAGE_MAX_FRACTION / raw_stage);
     let lane_widths: Vec<f64> = raw.iter().map(|w| w * scale).collect();
     let gap = spacing * scale;
     let stage_width = lane_widths.iter().sum::<f64>() + gap * (keys - 1) as f64;
-    let stage_x = (column_start.unwrap_or(136.0) * scale).min(WIDTH - stage_width).max(0.0);
+    let stage_x = (column_start.unwrap_or(COLUMN_START) * scale).min(width - stage_width).max(0.0);
     let mut lane_xs = Vec::with_capacity(keys);
     let mut x = stage_x;
     for w in &lane_widths {
@@ -122,12 +124,12 @@ pub(super) struct Triangle {
 
 // one equilateral triangle per cell of a jittered grid with a ring past every edge, largest
 // first, the way lazer layers its menu triangles
-pub(super) fn backdrop() -> Vec<Triangle> {
+pub(super) fn backdrop(width: f64) -> Vec<Triangle> {
     const SIDE: f64 = 215.0;
     const COLUMNS: i32 = 12;
     const ROWS: i32 = 7;
     let mut random = mulberry32(0x5eed);
-    let cell_w = WIDTH / COLUMNS as f64;
+    let cell_w = width / COLUMNS as f64;
     let cell_h = HEIGHT / ROWS as f64;
     let mut field = vec![];
     for row in -1..=ROWS {

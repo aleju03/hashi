@@ -7,15 +7,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::background::TELL;
 
 const MAIN: &str = "main";
 const OPENING: &str = "opening";
+const SKIN: &str = "skin";
 
 static HELPER_PORT: OnceLock<u16> = OnceLock::new();
+static COUNTER_URL: OnceLock<String> = OnceLock::new();
 // windows: the background goes first, this one has to stay until the installer is started
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
@@ -68,6 +70,7 @@ pub fn run(args: &[String]) {
     if let Some(port) = port_of(&args.url) {
         let _ = HELPER_PORT.set(port);
     }
+    let _ = COUNTER_URL.set(args.url.clone());
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
@@ -191,6 +194,41 @@ fn trim_context_menu(w: &WebviewWindow) {
     });
 }
 
+// The skin preview at the size osu! draws it, pixel for pixel: `1440x900`, or `screen` when the
+// game fills the screen. One that doesn't fit goes fullscreen, the closest there is to the game.
+fn skin_window(app: &AppHandle, size: &str) {
+    if let Some(w) = app.get_webview_window(SKIN) {
+        let _ = w.destroy();
+    }
+    let Some(base) = COUNTER_URL.get() else { return };
+    let monitor = app.get_webview_window(MAIN).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| app.primary_monitor().ok().flatten());
+    let screen = monitor.as_ref().map(|m| *m.size());
+    let scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor());
+    let wanted = size.split_once('x').and_then(|(w, h)| Some(PhysicalSize::new(w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)));
+    let Some(px) = wanted.or(screen) else { return };
+    let full = wanted.is_none() || screen.is_some_and(|s| px.width >= s.width || px.height >= s.height);
+    let Ok(url) = format!("{base}?skin-window={}x{}", px.width, px.height).parse() else { return };
+    let window = WebviewWindowBuilder::new(app, SKIN, WebviewUrl::External(url))
+        .title(format!("Hashi · your skin at {}×{}", px.width, px.height))
+        .inner_size(f64::from(px.width) / scale, f64::from(px.height) / scale)
+        // fixed in size, so tiling window managers float it at that size
+        .resizable(false)
+        .fullscreen(full)
+        .center()
+        .background_color(tauri::window::Color(0, 0, 0, 255))
+        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+        .build();
+    match window {
+        Ok(w) => {
+            if !full {
+                let _ = w.set_size(px);
+            }
+            let _ = w.set_focus();
+        }
+        Err(e) => eprintln!("no skin window: {e}"),
+    }
+}
+
 // the main window loads hidden behind it and comes up once the animation is done
 fn opening(app: &AppHandle, url: &str) {
     let splash = WebviewWindowBuilder::new(app, OPENING, WebviewUrl::External(format!("{url}?opening").parse().expect("counter url")))
@@ -277,6 +315,12 @@ fn command(app: &AppHandle, line: &str) {
         "drag" => {
             if let Some(w) = app.get_webview_window(MAIN) {
                 let _ = w.start_dragging();
+            }
+        }
+        "skin-window" => skin_window(app, rest),
+        "skin-close" => {
+            if let Some(w) = app.get_webview_window(SKIN) {
+                let _ = w.destroy();
             }
         }
         "update" => {

@@ -46,6 +46,10 @@ async function watchSkin(page) {
     if (skinPage !== page || page.loading || page.applying) continue;
     const was = page.info ?? {};
     if (info.found !== was.found || info.folder !== was.folder || info.why !== was.why) loadSkin();
+    else if (JSON.stringify(info.gameSize) !== JSON.stringify(was.gameSize)) {
+      page.info.gameSize = info.gameSize;
+      render();
+    }
   }
 }
 
@@ -132,9 +136,26 @@ function skinScroll(p, by) {
   render();
 }
 
+// what the game size window follows, sent when it changes
+function skinShare(p) {
+  if (!p.info?.gameSize) return;
+  const state = JSON.stringify({
+    keys: p.keys, at: p.stamp, edits: p.live ? skinEditsJson(p) : "", source: p.source,
+    play: p.source === "play" ? p.play?.id : null, from: p.map?.from ?? null, scroll: p.scroll, playing: p.playing,
+  });
+  if (state === p.shared) return;
+  p.shared = state;
+  fetch(`${BRIDGE}/skin/live?state=${encodeURIComponent(state)}`, { method: "POST" }).catch(() => {});
+}
+
+function gameSizeText(size) {
+  return size === "screen" ? "Open in a full screen window" : `Open in a ${size.width}×${size.height} window`;
+}
+
 function skinView() {
   const p = skinPage;
   const info = p.info;
+  skinShare(p);
   p.canvas.classList.toggle("loading", p.loading);
   p.canvas.setAttribute("aria-label", info?.found ? `${info.name} in ${p.keys}K` : "");
   return el("div", { class: "skin-page" },
@@ -155,6 +176,11 @@ function skinView() {
         p.want = p.source;
         showSkin(p);
       }, "Keys"),
+      info.gameSize && el("button", {
+        class: "link",
+        title: "In a window the size osu! draws at, following your changes here",
+        onclick: () => fetch(`${BRIDGE}/window/skin`, { method: "POST" }).catch(() => {}),
+      }, gameSizeText(info.gameSize)),
       el("button", { class: "link", disabled: p.loading, onclick: loadSkin }, "Load again")),
     !SKIN_FREEZE && el("div", { class: "skin-tools" },
       segs([["mix", "Generated"], ["lns", "Long notes"], ["selected", "Selected map"], ...(p.play ? [["play", "This play"]] : [])], p.source, (s) => skinSource(p, s), "Notes"),

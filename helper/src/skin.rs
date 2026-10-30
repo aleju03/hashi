@@ -228,9 +228,74 @@ pub(crate) fn info(b: &Bridge) -> Value {
             "newName": f.stored.then(|| new_name(&f)),
             // changes when Edit externally starts or ends
             "folder": f.dir.to_string_lossy(),
+            // only with a window to open it in
+            "gameSize": b.opts.on_window.as_ref().and_then(|_| game_size(b)).map(|g| match g {
+                GameSize::Pixels(w, h) => json!({ "width": w, "height": h }),
+                GameSize::Screen => json!("screen"),
+            }),
         }),
         Err(why) => json!({ "found": false, "why": why }),
     }
+}
+
+pub(crate) enum GameSize {
+    Pixels(u32, u32),
+    // fullscreen at the screen's own size, or lazer's borderless
+    Screen,
+}
+
+// the size osu! draws at: lazer's framework.ini says, stable's settings come through tosu
+pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
+    let (lazer, lazer_dir, resolution) = {
+        let s = b.st();
+        let frame = s.tosu.last_frame.as_ref();
+        let lazer = s.tosu.client.as_deref() == Some("lazer") || frame.and_then(|f| f.get("client")).and_then(Value::as_str) == Some("lazer");
+        (lazer, s.tosu.lazer_files_dir.parent().map(Path::to_path_buf), frame.and_then(|f| f.pointer("/settings/resolution")).cloned())
+    };
+    let fits = |w: f64, h: f64| (320.0..=16384.0).contains(&w) && (240.0..=16384.0).contains(&h);
+    let pixels = |w: f64, h: f64| fits(w, h).then(|| GameSize::Pixels(w as u32, h as u32));
+    if lazer {
+        if let Some(text) = lazer_dir.and_then(|d| std::fs::read_to_string(d.join("framework.ini")).ok()) {
+            let get = |key: &str| text.lines().find_map(|l| l.split_once('=').filter(|(k, _)| k.trim() == key).map(|(_, v)| v.trim().to_string()));
+            // 9999x9999 is the screen's own size
+            let size = |key: &str| get(key).and_then(|v| v.split_once('x').and_then(|(w, h)| pixels(w.trim().parse().ok()?, h.trim().parse().ok()?)));
+            match get("WindowMode").as_deref() {
+                Some("Windowed") => return size("WindowedSize"),
+                Some("Fullscreen") => return Some(size("SizeFullscreen").unwrap_or(GameSize::Screen)),
+                Some("Borderless") => return Some(GameSize::Screen),
+                _ => {}
+            }
+        }
+    }
+    let r = resolution?;
+    let n = |k: &str| r.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    if r.get("fullscreen").and_then(Value::as_bool) == Some(true) {
+        return Some(pixels(n("widthFullscreen"), n("heightFullscreen")).unwrap_or(GameSize::Screen));
+    }
+    pixels(n("width"), n("height"))
+}
+
+// what the main window's skin page has on screen, for the game size window to follow
+static LIVE: Mutex<Option<String>> = Mutex::new(None);
+
+pub(crate) fn live() -> Value {
+    LIVE.lock().unwrap_or_else(|e| e.into_inner()).as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null)
+}
+
+pub(crate) fn set_live(b: &Bridge, state: &str) -> bool {
+    let Some(v) = serde_json::from_str::<Value>(state).ok().filter(Value::is_object) else { return false };
+    let text = v.to_string();
+    *LIVE.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
+    let _ = b.events.send(Arc::from(format!("event: skin\ndata: {text}\n\n")));
+    true
+}
+
+// the line that opens the game size window
+pub(crate) fn window_line(b: &Bridge) -> Option<String> {
+    Some(match game_size(b)? {
+        GameSize::Pixels(w, h) => format!("skin-window {w}x{h}"),
+        GameSize::Screen => "skin-window screen".into(),
+    })
 }
 
 // the map osu! has selected, from tosu's last report

@@ -14,8 +14,10 @@ const SKIN_FRAME_MS = 1000 / 60;
 const SKIN_LEAD_MS = 1500;
 
 async function loadSkinScene(page) {
-  const edits = skinEditsJson(page);
-  const query = `keys=${page.keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}`;
+  // the game size window takes the main window's edits as they are
+  const edits = page.editsJson ?? skinEditsJson(page);
+  const aspect = page.aspect ? `&aspect=${page.aspect}` : "";
+  const query = `keys=${page.keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}${aspect}`;
   const res = await fetch(`${BRIDGE}/skin/scene?${query}`);
   if (!res.ok) throw new Error("scene");
   const scene = await res.json();
@@ -204,36 +206,41 @@ function skinHold(s, column, headY, tailY, time, out) {
   else out.push({ t: "rrect", r: [x + 1, headTop, w - 2, headH], rad: 4, c: c.headColor });
 }
 
-// the static layers drawn once each, a frame only stacks them around the notes
+// the static layers drawn once each, a frame only stacks them around the notes. k is screen pixels
+// per scene unit, above 1 in the game size window
 function skinLayers(live) {
-  const { scene: s, images } = live;
+  const { scene: s, images, k } = live;
   const layer = (ops) => {
     const canvas = document.createElement("canvas");
-    canvas.width = s.width;
-    canvas.height = s.height;
-    skinOps(canvas.getContext("2d"), ops, images);
+    canvas.width = Math.round(s.width * k);
+    canvas.height = Math.round(s.height * k);
+    const ctx = canvas.getContext("2d");
+    ctx.scale(k, k);
+    skinOps(ctx, ops, images);
     return canvas;
   };
   live.layers = { base: layer(s.base), hint: layer(s.hint), line: layer(s.line), over: layer(s.over), top: layer(s.top) };
 }
 
 function skinDraw(live, holds, taps, pressed) {
-  const { scene: s, images, ctx, layers } = live;
+  const { scene: s, images, ctx, layers, k } = live;
   const notes = [];
   for (const h of holds) skinHold(s, h.c, h.head, h.tail, h.t, notes);
   for (const t of taps) skinTap(s, t.c, t.y, t.t, notes);
   const keys = () => s.columns.forEach((c, i) => skinOps(ctx, pressed[i] ? c.keyDown : c.keyUp, images));
+  const stack = (layer) => ctx.drawImage(layer, 0, 0, s.width, s.height);
+  ctx.setTransform(k, 0, 0, k, 0, 0);
   ctx.clearRect(0, 0, s.width, s.height);
-  ctx.drawImage(layers.base, 0, 0);
+  stack(layers.base);
   s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.light, images));
-  ctx.drawImage(layers.hint, 0, 0);
+  stack(layers.hint);
   if (s.keysUnderNotes) keys();
   skinOps(ctx, notes, images);
-  ctx.drawImage(layers.line, 0, 0);
+  stack(layers.line);
   if (!s.keysUnderNotes) keys();
-  ctx.drawImage(layers.over, 0, 0);
+  stack(layers.over);
   s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.lighting, images));
-  ctx.drawImage(layers.top, 0, 0);
+  stack(layers.top);
 }
 
 function skinFrozen(live) {
@@ -347,11 +354,11 @@ function swapSkinChart(page) {
 
 function startSkinLive(page, loaded) {
   const chart = page.map ? skinMapChart(page.map.notes, page.map.from) : skinChart(page.keys, page.source === "lns");
-  const live = { ...loaded, ctx: page.canvas.getContext("2d"), pressed: [], chart, now: 0, last: null };
+  const live = { ...loaded, ctx: page.canvas.getContext("2d"), k: page.k ?? 1, pressed: [], chart, now: 0, last: null };
   skinLayers(live);
   page.live = live;
   (page.hitUnits ??= {})[page.keys] = loaded.scene.hitUnits;
-  if (!SKIN_FREEZE) {
+  if (!SKIN_FREEZE && !page.window) {
     loadSkinTiming(page);
     loadSkinImages(page);
   }

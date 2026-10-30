@@ -17,7 +17,7 @@ use crate::{analysis, autostart, get_tosu, leaderboard, log, practice, presence,
 #[folder = "../counter/"]
 struct Counter;
 
-const WINDOW_ACTIONS: [&str; 7] = ["show", "hide", "minimize", "maximize", "close", "drag", "opened"];
+const WINDOW_ACTIONS: [&str; 8] = ["show", "hide", "minimize", "maximize", "close", "drag", "opened", "skin-close"];
 
 fn counter_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
@@ -96,6 +96,11 @@ async fn handle(State(b): State<Arc<Bridge>>, req: Request) -> Response<Body> {
         res.headers_mut().insert(header::VARY, HeaderValue::from_static("origin"));
     }
     res
+}
+
+// &aspect=1.6 lays the skin out for a screen that shape instead of 16:9
+fn skin_aspect(req: &Request) -> Option<f64> {
+    url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "aspect").and_then(|(_, v)| v.parse().ok())
 }
 
 // ?keys=7&at=<when the page loaded the skin>&edits=<json>, `at` only telling loads apart
@@ -193,6 +198,11 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if path == "/skin/live" {
+            let mut res = json(200, &crate::skin::live());
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
         if path == "/skin" {
             let mut res = json(200, &crate::skin::info(b));
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -222,7 +232,8 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         }
         if path == "/skin/scene" {
             let (Some((keys, at, edits)), Ok(found)) = (skin_query(&req), crate::skin::current(b)) else { return empty(404) };
-            return match tokio::task::spawn_blocking(move || crate::skin_render::scene(&found.dir, keys, &at, &edits)).await {
+            let aspect = skin_aspect(&req);
+            return match tokio::task::spawn_blocking(move || crate::skin_render::scene(&found.dir, keys, &at, &edits, aspect)).await {
                 Ok(Ok(scene)) => {
                     let mut res = json(200, &scene);
                     res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -235,7 +246,8 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         // /skin/sprite/<id>.png?keys=7&at=.., the same query as the scene it belongs to
         if let Some(id) = path.strip_prefix("/skin/sprite/").and_then(|r| r.strip_suffix(".png")) {
             let (Ok(id), Some((keys, at, edits)), Ok(found)) = (id.parse::<usize>(), skin_query(&req), crate::skin::current(b)) else { return empty(404) };
-            return match tokio::task::spawn_blocking(move || crate::skin_render::sprite(&found.dir, keys, &at, &edits, id)).await {
+            let aspect = skin_aspect(&req);
+            return match tokio::task::spawn_blocking(move || crate::skin_render::sprite(&found.dir, keys, &at, &edits, aspect, id)).await {
                 Ok(Ok(Some(bytes))) => Response::builder()
                     .header(header::CONTENT_TYPE, "image/png")
                     .header(header::CACHE_CONTROL, "max-age=3600")
@@ -277,6 +289,16 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
 
     // POSTs need the counter's origin
     if method == Method::POST && has_origin {
+        if path == "/window/skin" {
+            let Some(line) = crate::skin::window_line(b) else { return empty(404) };
+            b.window_action(&line);
+            return empty(204);
+        }
+        // /skin/live?state=<json>
+        if path == "/skin/live" {
+            let state = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "state").map(|(_, v)| v.into_owned());
+            return empty(if state.is_some_and(|s| crate::skin::set_live(b, &s)) { 204 } else { 400 });
+        }
         if let Some(name) = path.strip_prefix("/window/") {
             if !WINDOW_ACTIONS.contains(&name) {
                 return empty(404);

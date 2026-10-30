@@ -22,6 +22,7 @@ use load::{Asset, Profile, Settings};
 use pattern::{Layout, HIT_LINE_MIN_FRACTION};
 use scene::{Body, Column, Frame, Op, Scene};
 
+// a 16:9 card; another screen's shape keeps the height and changes the width
 const WIDTH: f64 = 1280.0;
 const HEIGHT: f64 = 720.0;
 // skin art is authored in a 768-tall space and the stage in a 480-tall one
@@ -38,7 +39,7 @@ const PINK: Rgba = [255, 102, 171, 255];
 pub(crate) fn render(dir: &Path, keys: usize) -> Result<Vec<u8>, String> {
     let keys = keys.clamp(1, 10);
     let (settings, profile) = load::import(dir, keys)?;
-    Builder::new(&settings, &profile, keys).scene().png()
+    Builder::new(&settings, &profile, keys, WIDTH).scene().png()
 }
 
 // the skin as loaded, which every edit starts from
@@ -52,9 +53,10 @@ struct Base {
 type Slot<T> = Mutex<Option<(String, Arc<T>)>>;
 
 // The page asks for a scene and then each of its sprites, and again on every edit. One skin load
-// is kept for those, and the scene of the latest edit.
+// is kept for those, and the latest scenes: the game size window asks for its own shape.
 static BASE: Slot<Base> = Mutex::new(None);
-static SCENE: Slot<Scene> = Mutex::new(None);
+static SCENES: Mutex<Vec<(String, Arc<Scene>)>> = Mutex::new(Vec::new());
+const SCENES_KEPT: usize = 4;
 
 fn slot<T>(slot: &Slot<T>, key: String, make: impl FnOnce() -> Result<T, String>) -> Result<Arc<T>, String> {
     let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
@@ -69,38 +71,54 @@ fn slot<T>(slot: &Slot<T>, key: String, make: impl FnOnce() -> Result<T, String>
     Ok(v)
 }
 
-fn cached(dir: &Path, keys: usize, at: &str, edits: &str) -> Result<Arc<Scene>, String> {
+fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<Arc<Scene>, String> {
     let keys = keys.clamp(1, 10);
     let base_key = format!("{}\n{keys}\n{at}", dir.display());
-    slot(&SCENE, format!("{base_key}\n{edits}"), || {
+    let key = format!("{base_key}\n{width}\n{edits}");
+    if let Some((_, s)) = SCENES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key) {
+        return Ok(s.clone());
+    }
+    let scene = Arc::new({
         let base = slot(&BASE, base_key, || {
             let skin = load::Skin::open(dir);
             let (settings, profile) = load::import_from(&skin, keys)?;
             Ok(Base { settings, profile, skin, sources: Default::default() })
         })?;
         let (profile, _, _) = edit::apply(&base.profile, &edit::Edits::parse(edits), keys, &base.skin, &base.sources, false);
-        let mut builder = Builder::new(&base.settings, &profile, keys);
+        let mut builder = Builder::new(&base.settings, &profile, keys, width);
         // recoloured notes would tint the backdrop, which should stay the skin's while it's edited
         builder.accent = skin_accent(&base.profile);
         let mut scene = builder.scene();
         scene.cut_now = cut_now(&base.profile, keys);
         scene.own = own_names(&base.skin, &base.profile, keys);
-        Ok(scene)
-    })
+        scene
+    });
+    let mut kept = SCENES.lock().unwrap_or_else(|e| e.into_inner());
+    kept.retain(|(k, _)| *k != key);
+    if kept.len() >= SCENES_KEPT {
+        kept.remove(0);
+    }
+    kept.push((key, scene.clone()));
+    Ok(scene)
 }
 
 // everything the page needs to draw the preview itself, sprites by index
-pub(crate) fn scene(dir: &Path, keys: usize, at: &str, edits: &str) -> Result<Value, String> {
-    Ok(cached(dir, keys, at, edits)?.json())
+// a card `aspect` times as wide as it's tall, 16:9 when not given
+fn width_for(aspect: Option<f64>) -> f64 {
+    aspect.filter(|a| (1.0..=4.0).contains(a)).map_or(WIDTH, |a| (HEIGHT * a).round())
 }
 
-pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, id: usize) -> Result<Option<Vec<u8>>, String> {
-    Ok(cached(dir, keys, at, edits)?.sprite_png(id))
+pub(crate) fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<Value, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect))?.json())
+}
+
+pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, id: usize) -> Result<Option<Vec<u8>>, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect))?.sprite_png(id))
 }
 
 // the still with edits drawn in, to check the page against
 pub(crate) fn render_edited(dir: &Path, keys: usize, at: &str, edits: &str) -> Result<Vec<u8>, String> {
-    cached(dir, keys, at, edits)?.png()
+    cached(dir, keys, at, edits, WIDTH)?.png()
 }
 
 fn own_names(skin: &load::Skin, p: &Profile, keys: usize) -> Vec<Value> {
@@ -141,6 +159,7 @@ struct Builder<'a> {
     s: &'a Settings,
     p: &'a Profile,
     keys: usize,
+    width: f64,
     l: Layout,
     up: bool,
     sprites: Vec<Arc<Texture>>,
@@ -148,9 +167,9 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(s: &'a Settings, p: &'a Profile, keys: usize) -> Self {
-        let l = pattern::layout(&p.column_widths, p.column_width, p.column_spacing, p.column_start, keys);
-        Builder { s, p, keys, l, up: s.upscroll, sprites: vec![], accent: skin_accent(p) }
+    fn new(s: &'a Settings, p: &'a Profile, keys: usize, width: f64) -> Self {
+        let l = pattern::layout(&p.column_widths, p.column_width, p.column_spacing, p.column_start, keys, width);
+        Builder { s, p, keys, width, l, up: s.upscroll, sprites: vec![], accent: skin_accent(p) }
     }
 
     fn sprite(&mut self, tex: &Arc<Texture>) -> usize {
@@ -338,6 +357,7 @@ impl<'a> Builder<'a> {
         let top = self.judgement_and_combo();
         let encoded = self.sprites.iter().map(|_| Default::default()).collect();
         Scene {
+            width: self.width,
             sprites: self.sprites,
             encoded,
             upscroll: self.up,
@@ -381,8 +401,8 @@ impl<'a> Builder<'a> {
             let ch = |i: usize| ini::round(base[i] as f64 + (accent[i] as f64 - base[i] as f64) * amount) as u8;
             [ch(0), ch(1), ch(2), 255]
         };
-        let mut ops = vec![Op::Fill { rect: [0.0, 0.0, WIDTH, HEIGHT], color: shade(FLOOR), alpha: 1.0 }];
-        for t in pattern::backdrop() {
+        let mut ops = vec![Op::Fill { rect: [0.0, 0.0, self.width, HEIGHT], color: shade(FLOOR), alpha: 1.0 }];
+        for t in pattern::backdrop(self.width) {
             let h = t.side * 0.866;
             let points = vec![[t.x, t.y - h / 2.0], [t.x - t.side / 2.0, t.y + h / 2.0], [t.x + t.side / 2.0, t.y + h / 2.0]];
             ops.push(Op::Poly { points, color: shade(FLOOR + t.tone * 0.16) });

@@ -332,12 +332,15 @@ addEventListener("resize", () => {
 
 const done = new URLSearchParams(location.search).get("done");
 try { applyTheme(JSON.parse(localStorage.getItem(THEME_KEY)) ?? DEFAULT_THEME); } catch {}
-inkFilter();
-scrollbar();
-if (done) donePage(done === "yes");
-else if (new URLSearchParams(location.search).has("opening")) openingScreen();
+if (new URLSearchParams(location.search).has("skin-window")) skinWindow();
 else {
-  listen();
-  render();
-  loadNotes();
+  inkFilter();
+  scrollbar();
+  if (done) donePage(done === "yes");
+  else if (new URLSearchParams(location.search).has("opening")) openingScreen();
+  else {
+    listen();
+    render();
+    loadNotes();
+  }
 }

@@ -6,7 +6,7 @@ use tiny_skia::{BlendMode, PathBuilder};
 use super::canvas::{Canvas, Draw, Texture};
 use super::ini::Rgba;
 use super::pattern::{body_tiles, hold_boxes, Pattern};
-use super::{HEIGHT, WIDTH};
+use super::HEIGHT;
 
 pub(super) enum Op {
     Fill { rect: [f64; 4], color: Rgba, alpha: f64 },
@@ -92,6 +92,7 @@ pub(super) struct Column {
 }
 
 pub(super) struct Scene {
+    pub width: f64,
     pub sprites: Vec<Arc<Texture>>,
     pub encoded: Vec<OnceLock<Option<Vec<u8>>>>,
     pub upscroll: bool,
@@ -263,7 +264,7 @@ impl Scene {
         ops.extend(&self.columns[pressed].lighting);
         ops.extend(&self.top);
 
-        let mut c = Canvas::new(WIDTH as u32, HEIGHT as u32);
+        let mut c = Canvas::new(self.width as u32, HEIGHT as u32);
         for op in ops {
             self.paint(&mut c, op);
         }
@@ -317,7 +318,7 @@ impl Scene {
             .collect();
         let p = &self.pattern;
         json!({
-            "width": WIDTH,
+            "width": self.width,
             "height": HEIGHT,
             "upscroll": self.upscroll,
             "lazerBodies": self.lazer_bodies,
