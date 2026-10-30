@@ -67,6 +67,7 @@ The chart icon next to a play's time opens its analysis, worked out on your comp
 replay: how early or late you hit and let go of long notes, each finger's and each hand's accuracy,
 how it went over the course of the map, and what stands out, with what fixing it would have been
 worth on that play. On 5K, 7K and 9K the middle column counts for the hand you pick in the settings.
+If you'd rather not have it, turn off Analysis in the settings. Goals and your profile go with it.
 
 Closing the window quits the app. The hide to tray button keeps it running in the background using
 very little memory.

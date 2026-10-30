@@ -321,6 +321,10 @@ impl State {
     pub(crate) fn sends_no_plays(&self) -> bool {
         self.config.settings.as_ref().is_some_and(|x| x.presence_only)
     }
+
+    pub(crate) fn analyzes(&self) -> bool {
+        !self.config.settings.as_ref().is_some_and(|x| x.hide_analysis)
+    }
 }
 
 pub struct Bridge {
@@ -410,6 +414,7 @@ impl Bridge {
             "sendPlays": !s.sends_no_plays(),
             "tosuDashboard": self.env.tosu_can_start.then_some(s.tosu.dashboard).flatten(),
             "showDans": !s.config.settings.as_ref().is_some_and(|x| x.hide_dans),
+            "analysis": s.analyzes(),
             "thumb": if s.config.settings.as_ref().is_some_and(|x| x.thumb_right) { "right" } else { "left" },
             "unreadNotes": s.config.settings.as_ref().and_then(|x| x.notes_read.as_deref()) != Some(VERSION),
             "guideRead": s.config.settings.as_ref().is_some_and(|x| x.guide_read),
@@ -469,6 +474,13 @@ impl Bridge {
 
     pub(crate) async fn set_show_dans(self: &Arc<Self>, on: bool) -> bool {
         self.st().config.settings.get_or_insert_with(Default::default).hide_dans = !on;
+        let saved = self.save_config().await;
+        self.broadcast();
+        saved
+    }
+
+    pub(crate) async fn set_analysis(self: &Arc<Self>, on: bool) -> bool {
+        self.st().config.settings.get_or_insert_with(Default::default).hide_analysis = !on;
         let saved = self.save_config().await;
         self.broadcast();
         saved

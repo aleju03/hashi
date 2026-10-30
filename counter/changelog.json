@@ -2,7 +2,8 @@
   {
     "version": "0.1.5",
     "changes": [
-      { "kind": "new", "text": "Click the chart icon on a play to see how it went: your timing, how each finger and hand did, your long note releases, and tips on what to work on." }
+      { "kind": "new", "text": "Click the chart icon on a play to see how it went: your timing, how each finger and hand did, your long note releases, and tips on what to work on." },
+      { "kind": "new", "text": "Don't want it? Turn off Analysis in the settings." }
     ]
   },
   {

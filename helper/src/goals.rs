@@ -191,6 +191,9 @@ pub(crate) fn for_map(b: &Bridge, md5: &str) -> Value {
 }
 
 pub(crate) async fn on_play(b: &Arc<Bridge>, id: &str) {
+    if !b.st().analyzes() {
+        return;
+    }
     let Some(item) = b.st().queue.items.iter().find(|i| i.id == id).cloned() else { return };
     let (Some(replay), Some(chart)) = (&item.replay, &item.chart) else { return };
     let (Ok(replay), Ok(chart)) = (crate::replays::read_blob(b, replay).await, crate::replays::read_blob(b, chart).await) else { return };

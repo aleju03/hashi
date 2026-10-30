@@ -66,6 +66,9 @@ pub struct Settings {
     // dans are rough, some would rather not see them
     #[serde(default, rename = "hideDans", skip_serializing_if = "std::ops::Not::not")]
     pub hide_dans: bool,
+    // turns off analysis, goals and the profile, and the work behind them
+    #[serde(default, rename = "hideAnalysis", skip_serializing_if = "std::ops::Not::not")]
+    pub hide_analysis: bool,
     #[serde(default, rename = "onTop", skip_serializing_if = "std::ops::Not::not")]
     pub on_top: bool,
     // the hand whose thumb plays the middle column of 5K, 7K, 9K. unset is the left

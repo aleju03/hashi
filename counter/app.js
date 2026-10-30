@@ -480,7 +480,7 @@ function playRow(p) {
     el("div", { class: "side" },
       stamp(status, p.id),
       el("span", { class: "when" },
-        p.analysis && el("button", { class: "look", title: "Analysis", "aria-label": "Analysis", onclick: () => openAnalysis(p) }, icon(CHART)),
+        snapshot.analysis && p.analysis && el("button", { class: "look", title: "Analysis", "aria-label": "Analysis", onclick: () => openAnalysis(p) }, icon(CHART)),
         time(p.capturedAt)),
     ),
   );
@@ -3099,7 +3099,9 @@ function settings(c, host, reconnect) {
     computer.length > 0 && [el("p", { class: "group" }, "This computer"), ...computer],
     el("p", { class: "group" }, "Look"),
     snapshot.showDans != null && toggle("Show dans", snapshot.showDans, "show-dans", "The dan next to a play's MSD."),
-    snapshot.thumb && el("div", { class: "setting" },
+    snapshot.analysis != null && toggle("Analysis", snapshot.analysis, "analysis",
+      "Reads your replays for each play's analysis, goals and your profile."),
+    snapshot.analysis && snapshot.thumb && el("div", { class: "setting sub" },
       el("div", { class: "text" },
         el("span", { class: "title" }, "Thumb on the middle key"),
         el("span", { class: "line" }, "Which hand it counts for in an analysis of 5K, 7K or 9K.")),
@@ -3186,13 +3188,15 @@ function home(c, host) {
       el("span", { class: "face" }, face(c)),
       el("div", { class: "who" },
         el("div", { class: "name" },
-          el("button", {
-            class: "profile",
-            title: "Your profile",
-            "aria-pressed": String(!!profilePage),
-            style: c.accent && `color: ${c.accent}`,
-            onclick: () => (profilePage ? closeProfile() : openProfile()),
-          }, c.username),
+          snapshot.analysis
+            ? el("button", {
+              class: "profile",
+              title: "Your profile",
+              "aria-pressed": String(!!profilePage),
+              style: c.accent && `color: ${c.accent}`,
+              onclick: () => (profilePage ? closeProfile() : openProfile()),
+            }, c.username)
+            : el("span", { class: "profile", style: c.accent && `color: ${c.accent}` }, c.username),
           host && el("span", {}, host)),
         now()),
       snapshot.tosu.map && el("button", {
@@ -3201,7 +3205,7 @@ function home(c, host) {
         "aria-pressed": String(!!board?.follow),
         onclick: () => (board?.follow ? closeBoard() : openBoard(snapshot.tosu.map, true)),
       }, icon(PODIUM)),
-      (snapshot.goals ?? []).length > 0 && el("button", {
+      snapshot.analysis && (snapshot.goals ?? []).length > 0 && el("button", {
         class: `gear${goalsOpen ? " on" : ""}${goalsUnseen() ? " dot" : ""}`,
         title: "Goals",
         "aria-pressed": String(goalsOpen),
