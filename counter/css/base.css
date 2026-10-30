@@ -1,0 +1,381 @@
+/* The palette, the font, the page and the controls every view uses: buttons, links, switches, segments, captions. */
+
+@font-face {
+  font-family: "Tracker Round";
+  font-weight: 400;
+  src: url("../fonts/TrackerRound-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Tracker Round";
+  font-weight: 600;
+  src: url("../fonts/TrackerRound-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Tracker Round";
+  font-weight: 700;
+  src: url("../fonts/TrackerRound-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Tracker Round";
+  font-weight: 800;
+  src: url("../fonts/TrackerRound-Bold.woff2") format("woff2");
+}
+
+/* palette from mania tracker's styles.css */
+:root {
+  --hue: 333;
+  --sat: 1;
+  --osu-b5: hsl(var(--hue), calc(10% * var(--sat)), calc(15% - 8% * (1 - var(--sat))));
+  --osu-b4: hsl(var(--hue), calc(10% * var(--sat)), calc(20% - 8% * (1 - var(--sat))));
+  --osu-b3: hsl(var(--hue), calc(10% * var(--sat)), calc(25% - 8% * (1 - var(--sat))));
+  --osu-f1: hsl(var(--hue), calc(10% * var(--sat)), 70%);
+  --osu-pink: hsl(var(--hue), calc(100% * var(--sat)), 70%);
+  --osu-b1: hsl(var(--hue), calc(10% * var(--sat)), calc(40% - 8% * (1 - var(--sat))));
+  --accent: var(--osu-pink);
+  --good: #6ee7b7; /* emerald-300 */
+  --warn: #fcd34d; /* amber-300 */
+  --bad: #fda4af; /* rose-300 */
+  --ink: hsl(var(--hue), calc(18% * var(--sat)), 88%);
+  --wobble: url(#ink1);
+  --rule: linear-gradient(var(--osu-b3), var(--osu-b3)) center / 100% 2px no-repeat;
+  color-scheme: dark;
+}
+
+/* judgement colors, checked for colorblind separation on both the dark surface and the paper */
+:root {
+  --j1: #3a9fd0;
+  --j2: #c98500;
+  --j3: #199e70;
+  --j4: #3987e5;
+  --j5: #e0702c;
+  --j6: #c8335a;
+  --paper-ink: hsl(var(--hue), calc(12% * var(--sat)), 40%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--osu-b5);
+  color: #fff;
+  font-family: "Tracker Round", "Inter", "Helvetica Neue", Tahoma, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+html, .framed main {
+  overflow-x: hidden;
+}
+
+main {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 16px;
+}
+
+button {
+  font: inherit;
+}
+
+.defs {
+  position: absolute;
+}
+
+/* app.js draws its own scrollbar */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.ink {
+  filter: url(#ink);
+}
+
+.say {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.lead {
+  max-width: 340px;
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--osu-f1);
+}
+
+.me::after,
+.play + .play::before,
+.setting::before,
+.settings .about::before,
+.past::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--rule);
+  filter: var(--wobble);
+}
+
+.still {
+  filter: var(--wobble);
+}
+
+.switch.locked {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--osu-b1);
+  cursor: pointer;
+  filter: url(#ink);
+}
+
+.switch i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.switch.on {
+  background: var(--accent);
+}
+
+.switch.on i {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* a smaller .primary */
+.key {
+  position: relative;
+  isolation: isolate;
+  flex-shrink: 0;
+  height: 32px;
+  margin-bottom: 3px;
+  border: 0;
+  background: none;
+  color: #fff;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.key::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 9px;
+  background: var(--osu-b3);
+  box-shadow: 0 3px 0 var(--osu-b5);
+  filter: url(#ink);
+}
+
+.key:hover::before {
+  background: var(--osu-b1);
+}
+
+.key:active {
+  transform: translateY(2px);
+}
+
+.key:active::before {
+  box-shadow: 0 1px 0 var(--osu-b5);
+}
+
+.key.danger {
+  color: var(--bad);
+}
+
+.key.go::before {
+  background: var(--osu-pink);
+  box-shadow: 0 3px 0 hsl(var(--hue), calc(55% * var(--sat)), 42%);
+}
+
+.key:disabled {
+  cursor: default;
+  opacity: 0.5;
+  transform: none;
+}
+
+/* the fill is its own layer so it can wobble and the label can't */
+.primary {
+  position: relative;
+  isolation: isolate;
+  height: 44px;
+  margin-bottom: 4px;
+  border: 0;
+  background: none;
+  color: #fff;
+  padding: 0 20px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 11px;
+  background: var(--osu-pink);
+  box-shadow: 0 4px 0 hsl(var(--hue), calc(55% * var(--sat)), 42%);
+  filter: url(#ink);
+}
+
+.primary:hover::before {
+  background: hsl(var(--hue), calc(100% * var(--sat)), 75%);
+}
+
+.primary:active {
+  transform: translateY(3px);
+}
+
+.primary:active::before {
+  box-shadow: 0 1px 0 hsl(var(--hue), calc(55% * var(--sat)), 42%);
+}
+
+.primary:disabled {
+  cursor: default;
+  opacity: 0.5;
+  transform: none;
+}
+
+.primary.waiting {
+  color: var(--osu-f1);
+  opacity: 1;
+}
+
+.primary.waiting::before {
+  background: var(--osu-b3);
+  box-shadow: 0 4px 0 var(--osu-b5);
+}
+
+button.link, a.link {
+  border: 0;
+  padding: 0;
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.status {
+  margin: -4px 0 12px;
+  font-size: 13px;
+}
+
+.status.good {
+  color: var(--good);
+}
+
+.doing {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: 2px solid rgb(255 255 255 / 0.15);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.good {
+  color: var(--good);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+.caption {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--osu-f1);
+}
+
+.caption .got-it {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.segs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--osu-b4);
+  font-size: 12px;
+}
+
+.seg {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--osu-f1);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.seg:hover:not(:disabled) {
+  color: #fff;
+}
+
+.seg.on {
+  background: var(--osu-b3);
+  color: #fff;
+}
+
+.seg:disabled {
+  cursor: default;
+}

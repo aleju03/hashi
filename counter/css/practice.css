@@ -1,0 +1,103 @@
+/* Making a practice map, and how its repeats went. */
+
+.maker > .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.maker > .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.maker > .head .link:hover {
+  color: #fff;
+}
+
+.maker > .caption {
+  margin: 0 0 14px;
+}
+
+.maker .status {
+  margin-top: 12px;
+}
+
+.maker-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.maker-label {
+  width: 86px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.maker-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.maker-time, .maker-goal {
+  width: 64px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+
+.maker-goal::-webkit-inner-spin-button {
+  display: none;
+}
+
+.maker-dash, .maker-unit {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.maker-go {
+  margin-top: 6px;
+}
+
+.practice-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr 1fr;
+  gap: 6px;
+  padding: 5px 2px;
+  border-bottom: 1px solid var(--osu-b4);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.practice-row.head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.practice-row.met {
+  color: var(--good);
+  font-weight: 700;
+}
+
+.practice-verdict {
+  margin: 10px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.practice-verdict.good {
+  color: var(--good);
+}

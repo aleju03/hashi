@@ -1,0 +1,337 @@
+/* What's new: the bottle on the shore and the letter in it. */
+
+/* what's new: a bottle adrift on the shore, and the letter that was in it */
+.bottle {
+  position: absolute;
+  left: 50%;
+  top: -15px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  transform: translateX(-50%);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.bottle svg {
+  display: block;
+  overflow: visible;
+}
+
+.bottle .glass {
+  fill: var(--osu-b5);
+  fill-opacity: 0.55;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.bottle .paper {
+  fill: #fff;
+}
+
+.bottle .ribbon {
+  fill: none;
+  stroke: var(--osu-pink);
+  stroke-width: 3;
+}
+
+.bottle .glint {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+
+.bottle .cork {
+  fill: var(--osu-b1);
+  stroke: var(--ink);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.bottle .ripples path {
+  fill: none;
+  stroke: var(--osu-b1);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.bottle .ripples {
+  animation: ripple steps(4) infinite;
+}
+
+.bottle .float {
+  transform-origin: 50px 46px;
+  animation: bottle-bob steps(8) infinite;
+}
+
+@keyframes bottle-bob {
+  0%, 100% {
+    transform: rotate(4deg);
+  }
+  50% {
+    transform: translateY(3px) rotate(-4deg);
+  }
+}
+
+.bottle .glimmer {
+  fill: none;
+  stroke: var(--osu-pink);
+  stroke-width: 2;
+  stroke-linecap: round;
+  animation: glimmer steps(1) infinite;
+}
+
+@keyframes glimmer {
+  50% {
+    opacity: 0;
+  }
+}
+
+.bottle:hover .bottle-say {
+  color: #fff;
+  text-decoration: underline wavy var(--accent) 1.5px;
+  text-underline-offset: 2px;
+}
+
+.bottle:hover .float {
+  transform: translateY(-3px);
+  animation-play-state: paused;
+}
+
+.bottle.uncorked .cork {
+  animation: uncork 420ms steps(5) both;
+}
+
+.bottle.uncorked .paper, .bottle.uncorked .ribbon {
+  animation: peek 420ms steps(5) both;
+}
+
+.bottle.uncorked .glimmer {
+  display: none;
+}
+
+@keyframes uncork {
+  to {
+    transform: translate(16px, -24px) rotate(160deg);
+    opacity: 0;
+  }
+}
+
+.bottle-say {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
+.bottle-say b {
+  color: var(--accent);
+}
+
+@keyframes peek {
+  to {
+    transform: translateX(12px);
+  }
+}
+
+.notes {
+  padding: 22px 4px 0;
+}
+
+.letter {
+  position: relative;
+  isolation: isolate;
+  margin: 18px 6px 10px 2px;
+  padding: 20px 20px 16px;
+  color: var(--osu-b5);
+  transform: rotate(-0.8deg);
+  animation: unroll 640ms steps(8) both;
+}
+
+.letter::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--ink);
+  filter: url(#ink3);
+}
+
+/* a dog-eared corner */
+.letter::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 24px;
+  height: 24px;
+  background: linear-gradient(135deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%);
+  filter: url(#ink3);
+}
+
+@keyframes unroll {
+  from {
+    clip-path: inset(-40px -40px calc(100% - 6px) -40px);
+    transform: rotate(-0.8deg) translateY(-6px);
+  }
+  to {
+    clip-path: inset(-40px);
+    transform: rotate(-0.8deg);
+  }
+}
+
+.letter .top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.letter .top span {
+  font-size: 12px;
+  font-weight: 600;
+  color: hsl(var(--hue), calc(12% * var(--sat)), 40%);
+}
+
+.letter .kind {
+  margin: 14px 0 2px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: hsl(var(--hue), calc(12% * var(--sat)), 45%);
+}
+
+.letter .changes .new .glyph {
+  color: hsl(var(--hue), calc(70% * var(--sat)), 48%);
+}
+
+.letter .changes .fixed .glyph {
+  color: #059669;
+}
+
+.letter .changes .changed .glyph {
+  color: #0284c7;
+}
+
+.letter .changes li {
+  animation: jot 260ms steps(3) both;
+}
+
+@keyframes jot {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .letter, .letter * {
+    animation: none !important;
+  }
+}
+
+/* the grade keeps its inked stamp, the changelog stays a letter */
+.letter.scorecard {
+  margin: 20px 0 0;
+  padding: 18px;
+  color: #fff;
+  transform: none;
+  animation: none;
+  --paper-ink: var(--osu-f1);
+}
+
+.letter.scorecard::before {
+  border: 1px solid var(--osu-b3);
+  border-radius: 14px;
+  background: var(--osu-b4);
+  filter: none;
+}
+
+.letter.scorecard::after {
+  content: none;
+}
+
+.letter.scorecard .top span {
+  color: var(--osu-f1);
+}
+
+.changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.changes li {
+  display: flex;
+  gap: 9px;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.changes .glyph {
+  display: grid;
+  flex-shrink: 0;
+  margin-top: 2.5px;
+  filter: url(#ink2);
+}
+
+.changes svg {
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.changes .fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.changes .new .glyph {
+  color: var(--accent);
+}
+
+.changes .fixed .glyph {
+  color: var(--good);
+}
+
+.changes .changed .glyph {
+  color: #66ccff;
+}
+
+.past {
+  position: relative;
+  padding: 12px 0 8px;
+}
+
+.past::before {
+  top: -5px;
+}
+
+.past .when {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.past .when b {
+  font-size: 14px;
+  color: #fff;
+}

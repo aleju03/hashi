@@ -1,0 +1,202 @@
+/* Settings and the theme color. */
+
+.settings {
+  padding: 22px 4px 0;
+}
+
+.settings .head, .notes .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings .head .link, .notes .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.settings .head .link:hover, .notes .head .link:hover {
+  color: #fff;
+}
+
+.settings .group, .notes .group {
+  margin: 22px 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--osu-f1);
+}
+
+.settings .about {
+  --wobble: url(#ink3);
+  position: relative;
+  margin: 0;
+  padding-top: 14px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.settings .about .link {
+  color: inherit;
+}
+
+.settings .about .link:hover:not(:disabled) {
+  color: #fff;
+}
+
+.setting {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.setting::before, .settings .about::before {
+  top: -5px;
+}
+
+.setting + .setting {
+  --wobble: url(#ink2);
+}
+
+.setting .text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.setting .title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.setting .line {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.setting.is-sharing .line {
+  color: var(--good);
+}
+
+.setting.is-error .line, .setting.is-needs_reconnect .line {
+  color: var(--warn);
+}
+
+.setting .link {
+  color: inherit;
+}
+
+.setting.theme {
+  align-items: flex-start;
+}
+
+.setting.theme .text {
+  gap: 10px;
+}
+
+.setting .reset {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.setting .reset:hover:not(:disabled) {
+  color: #fff;
+}
+
+.setting .reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* part of the setting above it */
+.setting.sub {
+  margin-top: -8px;
+  padding: 0 0 14px 16px;
+}
+
+.setting.sub .title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.setting .segs {
+  flex-shrink: 0;
+}
+
+.group + .setting::before {
+  display: none;
+}
+
+.setting.sub::before {
+  display: none;
+}
+
+.group + .past::before {
+  display: none;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 6px;
+}
+
+.swatch {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 6px 4px 6px 5px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+  cursor: pointer;
+  filter: url(#ink3);
+  transition: transform 0.1s;
+}
+
+.swatch:hover:not(:disabled), .swatch.on {
+  transform: scale(1.12);
+}
+
+.swatch.on {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgb(0 0 0 / 0.75);
+}
+
+.swatch:disabled {
+  cursor: default;
+}
+
+.strip {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.strip::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 6px 4px 6px 5px;
+  background: var(--track);
+  filter: url(#ink2);
+}
+
+.strip::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--osu-pink);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgb(0 0 0 / 0.75), 0 1px 3px rgb(0 0 0 / 0.5);
+  -webkit-appearance: none;
+}
+
+.strip:disabled {
+  cursor: default;
+}

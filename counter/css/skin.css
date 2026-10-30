@@ -1,0 +1,342 @@
+/* The skin page and its editor. */
+
+.skin-page {
+  padding: 22px 4px 0;
+}
+
+.skin-page .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.skin-page .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+@media (min-width: 980px) {
+  .roomy .skin-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    column-gap: 40px;
+    align-items: start;
+  }
+
+  .roomy .skin-page > * {
+    grid-column: 1;
+  }
+
+  .roomy .skin-page > .head {
+    grid-column: 1 / -1;
+  }
+
+  .roomy .skin-page > .skin-editor {
+    grid-column: 2;
+    grid-row: 2 / span 20;
+    margin-top: 0;
+  }
+}
+
+.skin-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.skin-tools .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.skin-map {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--osu-f1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 980px) {
+  .roomy .skin-stage {
+    position: sticky;
+    top: 16px;
+  }
+}
+
+.skin-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  transition: opacity 120ms;
+}
+
+.skin-shot.loading {
+  opacity: 0.5;
+}
+
+.skin-shot-box {
+  position: relative;
+}
+
+.skin-warn {
+  flex-wrap: nowrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--osu-b5);
+}
+
+.skin-warn .caption {
+  margin: 0;
+  color: var(--bad);
+}
+
+.skin-warn .key {
+  flex: none;
+}
+
+.skin-fps {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.skin-fps:empty {
+  display: none;
+}
+
+.skin-scroll {
+  min-width: 56px;
+  padding: 0 4px;
+  color: #fff;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.skin-editor {
+  padding-bottom: 32px;
+}
+
+.skin-editor .caption .link {
+  font-size: inherit;
+  color: #fff;
+}
+
+.skin-editor .apply {
+  justify-content: flex-start;
+  margin-top: 22px;
+}
+
+.skin-editor .status {
+  margin: 0;
+}
+
+.skin-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.skin-swatches.palette .skin-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.skin-swatch {
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--osu-b3);
+  border-radius: 8px;
+  background: var(--swatch, var(--osu-b4));
+  color: #000;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.skin-swatch.none {
+  color: var(--osu-f1);
+}
+
+.skin-swatch.on {
+  border-color: #fff;
+}
+
+.skin-swatch.big {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  cursor: default;
+}
+
+.skin-label {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.skin-picker {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 4px 0 12px;
+}
+
+.skin-wheel {
+  flex-shrink: 0;
+  border-radius: 50%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.skin-picker-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skin-bar {
+  border-radius: 4px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.skin-name {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+}
+
+.skin-hex {
+  width: 150px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.skin-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  max-height: 340px;
+  margin: 4px 0 10px;
+  padding: 8px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: var(--osu-b5);
+  scrollbar-width: thin;
+}
+
+.skin-thumbs::-webkit-scrollbar {
+  width: 6px;
+}
+
+.skin-thumbs::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--osu-b3);
+}
+
+.skin-thumbs .skin-folder {
+  flex-basis: 100%;
+  margin: 6px 0 0;
+}
+
+.skin-thumbs .skin-others {
+  flex-basis: 100%;
+  margin: 8px 0 2px;
+  font-size: 12px;
+  color: var(--osu-f1);
+  text-align: left;
+}
+
+.skin-tabs {
+  margin-top: 18px;
+}
+
+.skin-thumb {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 2px solid var(--osu-b3);
+  border-radius: 8px;
+  background: var(--osu-b5);
+  cursor: pointer;
+}
+
+.skin-thumb img {
+  position: absolute;
+  inset: 4px;
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  object-fit: contain;
+}
+
+.skin-thumb.on {
+  border-color: #fff;
+}
+
+.skin-thumb.own {
+  width: auto;
+  padding: 0 10px;
+  color: var(--osu-f1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skin-thumb.empty img {
+  display: none;
+}
+
+.skin-thumb.empty::after {
+  content: "Blank";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--osu-f1);
+  font-size: 10px;
+}
+
+.skin-folder {
+  flex-basis: 100%;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--osu-f1);
+}

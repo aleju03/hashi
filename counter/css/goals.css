@@ -1,0 +1,227 @@
+/* Goals, on their page and in an analysis. */
+
+.goals-page {
+  padding: 22px 4px 0;
+}
+
+.goals-page .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.goals-page .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.goals-page .head .link:hover {
+  color: #fff;
+}
+
+.goals {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 12px;
+}
+
+.goals.in-analysis {
+  margin: 4px 0 0;
+}
+
+.goals.in-analysis .goal {
+  padding-top: 6px;
+}
+
+.goal {
+  position: relative;
+  padding: 16px 0 14px;
+}
+
+.goal + .goal::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--rule);
+  filter: url(#ink2);
+}
+
+.goal .goal-x {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.goal .goal-x:first-of-type {
+  margin-left: auto;
+}
+
+.goal .goal-x:hover {
+  color: #fff;
+}
+
+.goal h3 {
+  position: relative;
+  display: inline-block;
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.goal h3 .squiggle {
+  position: absolute;
+  left: 0;
+  bottom: -8px;
+  overflow: visible;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  filter: url(#ink2);
+}
+
+.goal.done .goal-line {
+  color: var(--good);
+}
+
+.goal-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+}
+
+.goal-kind {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--osu-f1);
+}
+
+.goal-stamp {
+  font-size: 11px;
+}
+
+.goal-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.goal-title {
+  cursor: pointer;
+}
+
+button.goal-title:hover {
+  color: var(--accent);
+}
+
+.goal-version {
+  margin: 12px 0 2px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.goal-track {
+  display: block;
+  margin: 2px 0 4px;
+  overflow: visible;
+}
+
+.goal-track .goal-num {
+  font-size: 11px;
+  fill: var(--osu-f1);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-track .goal-num.target {
+  font-weight: 800;
+  fill: #fff;
+}
+
+.goal-track.done .goal-made {
+  fill: var(--good);
+}
+
+.goal-track.done .goal-flag {
+  fill: var(--good);
+}
+
+.goal-track.done .goal-try.best {
+  stroke: var(--good);
+}
+
+.goal-rail {
+  fill: var(--osu-b1);
+  filter: url(#ink2);
+}
+
+.goal-made {
+  fill: var(--accent);
+  filter: url(#ink3);
+}
+
+.goal-pole {
+  fill: #fff;
+  filter: url(#ink1);
+}
+
+.goal-flag {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  filter: url(#ink1);
+}
+
+.goal-try {
+  fill: var(--osu-f1);
+}
+
+.goal-try.best {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.goal-line {
+  margin: 0;
+  font-size: 12px;
+  color: var(--osu-f1);
+  font-variant-numeric: tabular-nums;
+}
+
+.goal-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.goal-edit .link {
+  font-size: 12px;
+}
+
+.goal-input {
+  width: 64px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+
+.goal-input::-webkit-inner-spin-button {
+  display: none;
+}

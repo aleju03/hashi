@@ -1,0 +1,437 @@
+/* The list of plays: each row, its cover, status stamp, mods and rating, and the pages. */
+
+@media (prefers-reduced-motion: reduce) {
+  .stamp {
+    animation: none;
+  }
+}
+
+.stamp {
+  position: relative;
+  max-width: 104px;
+  padding: 4px 8px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+  transform: rotate(var(--tilt));
+  animation: stamp 260ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.stamp::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  filter: var(--wobble);
+}
+
+@keyframes stamp {
+  from {
+    opacity: 0;
+    transform: rotate(var(--tilt)) scale(1.7);
+  }
+}
+
+.stamp.done {
+  color: var(--good);
+}
+
+.stamp.wait {
+  color: var(--warn);
+}
+
+.stamp.fail {
+  color: var(--bad);
+}
+
+.stamp.off {
+  color: var(--osu-f1);
+}
+
+.plays {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.play {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 4px;
+}
+
+.play:nth-child(3n + 2) {
+  --wobble: url(#ink2);
+}
+
+.play:nth-child(3n) {
+  --wobble: url(#ink3);
+}
+
+.play + .play::before {
+  top: -5px;
+}
+
+.play .cover {
+  position: relative;
+  flex-shrink: 0;
+  width: 72px;
+  height: 50px;
+  border-radius: 8px;
+  background: var(--osu-b4);
+}
+
+.play .cover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--cover, none) center / cover no-repeat;
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.play .cover.loaded::before {
+  opacity: 1;
+}
+
+.play .cover::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2px solid var(--ink);
+  border-radius: 9px;
+  filter: var(--wobble);
+}
+
+.play .text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.play .title, .play .artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.play .title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.play .artist {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.play .detail {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.play.fail .detail {
+  color: var(--bad);
+}
+
+.play .detail > .act:first-child {
+  margin-left: 0;
+}
+
+.play .side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.play .when {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--osu-f1);
+}
+
+.play .look {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: 0 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--osu-f1);
+  cursor: pointer;
+}
+
+.play .look .icon {
+  display: grid;
+}
+
+.play .look svg {
+  width: 12px;
+  height: 12px;
+}
+
+.play .look:hover {
+  background: var(--osu-b4);
+  color: #fff;
+}
+
+.pager {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 4px 6px;
+  font-size: 12px;
+  color: var(--osu-b1);
+}
+
+.pager::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--rule);
+  filter: url(#ink2);
+}
+
+.pager .link {
+  color: var(--osu-f1);
+}
+
+.play .act {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.pager .link:hover:not(:disabled) {
+  color: #fff;
+}
+
+.play .act:hover:not(:disabled) {
+  color: #fff;
+}
+
+.pager .link:disabled {
+  opacity: 0.35;
+  text-decoration: none;
+  cursor: default;
+}
+
+a.title {
+  align-self: flex-start;
+  max-width: 100%;
+  padding-bottom: 4px;
+  margin-bottom: -4px;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+}
+
+a.title:hover,
+a.title:focus-visible,
+.who .name button.profile:hover,
+.who .name button.profile:focus-visible {
+  text-decoration: underline wavy var(--accent) 1.5px;
+  text-underline-offset: 1px;
+}
+
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.facts > * {
+  flex-shrink: 0;
+}
+
+.facts > :first-child {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.facts > * + *::before {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 11px;
+  margin: 0 8px 0 2px;
+  border-radius: 1px;
+  background: var(--osu-b1);
+  transform: rotate(20deg);
+  vertical-align: -1px;
+  filter: url(#ink2);
+}
+
+.facts .mods {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.rating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--osu-f1);
+  white-space: nowrap;
+  overflow-x: clip;
+}
+
+.rating .msd b {
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.rating .dan {
+  position: relative;
+  padding: 1px 7px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rating .dan::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid currentColor;
+  border-radius: 7px 5px 6px 5px;
+  filter: url(#ink2);
+}
+
+.rating .dan.off {
+  color: var(--osu-f1);
+}
+
+.rating .board-link {
+  margin-left: 0;
+}
+
+.mod {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 19px;
+  background: var(--mod);
+  -webkit-mask: url("../images/mods/mod-icon.svg") center / contain no-repeat;
+  mask: url("../images/mods/mod-icon.svg") center / contain no-repeat;
+}
+
+.mod i {
+  position: absolute;
+  inset: 1px;
+  background: color-mix(in srgb-linear, black, var(--mod) 10%);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.mod b {
+  font-size: 9px;
+  line-height: 1;
+  color: color-mix(in srgb-linear, black, var(--mod) 10%);
+}
+
+/* a custom speed in a darker tail, the site's ModBadge after osu-web's .mod__extender */
+.mod-rated {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.mod-rated .tail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 19px;
+  margin-left: -10px;
+  padding: 0 2px 1px 10px;
+  background: color-mix(in srgb, black, var(--mod) 26.3%);
+  -webkit-mask: url("../images/mods/mod-icon-extender.svg") center / contain no-repeat;
+  mask: url("../images/mods/mod-icon-extender.svg") center / contain no-repeat;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--mod);
+}
+
+.rank {
+  position: relative;
+  padding: 1px 7px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+}
+
+.rank::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 7px 5px 6px 5px;
+  background: var(--accent);
+  opacity: 0.85;
+  filter: url(#ink3);
+  z-index: -1;
+}
+
+.rank {
+  isolation: isolate;
+}
+
+.rank span {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.rank:hover::before {
+  opacity: 1;
+}
+
+.rank.off {
+  color: var(--osu-f1);
+}
+
+.rank.off::before {
+  background: none;
+  border: 1.5px solid currentColor;
+}

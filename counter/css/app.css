@@ -1,0 +1,609 @@
+/* The page around the views: the header, the title bar and window buttons, the connect screen, the done page. */
+
+.connect {
+  display: flex;
+  flex-direction: column;
+  margin-top: -20px;
+}
+
+.connect:not(.full) {
+  margin-bottom: 12px;
+}
+
+.connect.full {
+  min-height: calc(100vh - var(--titlebar, 0px));
+  margin-bottom: -20px;
+  justify-content: center;
+}
+
+.done .connect.full {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.done .connect.full::before {
+  content: "";
+  flex: 1;
+}
+
+.done .connect.full .river {
+  flex: 1.5;
+}
+
+.connect.full .river {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  padding-bottom: 0;
+}
+
+.alone, .alone body {
+  background: transparent;
+}
+
+.done, .done body {
+  height: 100%;
+}
+
+.done body {
+  display: flex;
+  flex-direction: column;
+}
+
+.done main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 480px;
+  max-width: none;
+  padding-bottom: 0;
+  zoom: 1.3;
+}
+
+.river {
+  position: relative;
+  margin-inline: -16px;
+  padding: 14px 28px 24px;
+  background: var(--osu-b4);
+  box-shadow: 0 0 0 100vmax var(--osu-b4);
+  clip-path: inset(0 -100vmax);
+}
+
+.river .cross {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.river .host {
+  font-size: 12px;
+  color: var(--osu-f1);
+  opacity: 0.6;
+}
+
+.river .note {
+  margin-top: 14px;
+  text-align: left;
+}
+
+.river .blocked {
+  max-width: 340px;
+  margin: 10px 0 0;
+}
+
+.river .blocked code:hover {
+  background: var(--osu-b3);
+}
+
+.river .pinned {
+  align-self: stretch;
+  margin: 18px 0 0;
+}
+
+.river .pinned::before {
+  background: var(--osu-b5);
+}
+
+.field-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.blocked {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.blocked p {
+  margin: 0 0 6px;
+}
+
+.blocked code {
+  display: block;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: 12px ui-monospace, "JetBrains Mono", monospace;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: copy;
+}
+
+.blocked code:hover {
+  background: var(--osu-b3);
+}
+
+.river .blocked code {
+  background: var(--osu-b5);
+}
+
+.blocked code.copied::after {
+  content: "  copied";
+  color: var(--good);
+}
+
+.me {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 4px 16px;
+}
+
+.me::after {
+  bottom: -5px;
+}
+
+/* below this the window's own buttons would sit on the header's right end, so it starts under them */
+@media (max-width: 700px) {
+  :root:not(.framed) .home {
+    padding-top: 16px;
+  }
+}
+
+.home .status, .home .blocked {
+  margin: 16px 4px 0;
+}
+
+.home > .key {
+  margin: 10px 4px 0;
+}
+
+.home .plays {
+  margin-top: 5px;
+}
+
+.face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 9999px;
+  background: var(--osu-pink);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.face::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border: 2.5px solid #fff;
+  border-radius: inherit;
+  filter: var(--wobble);
+}
+
+.who {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.who .name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.who .name .profile {
+  overflow: hidden;
+  padding: 0 0 4px;
+  margin-bottom: -4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.who .name span.profile {
+  cursor: default;
+}
+
+.who .name .profile[aria-pressed="true"] {
+  text-decoration: underline wavy var(--accent) 1.5px;
+  text-underline-offset: 1px;
+}
+
+.who .name span {
+  font-size: 12px;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
+.who {
+  flex: 1;
+}
+
+.now {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
+.now i {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--osu-b1);
+}
+
+.now.on i {
+  background: var(--good);
+}
+
+.now.missing i {
+  background: var(--warn);
+}
+
+.now b {
+  font-weight: 600;
+  color: #fff;
+}
+
+.now.off b {
+  color: var(--osu-f1);
+}
+
+.now {
+  overflow: hidden;
+}
+
+.now > * {
+  flex-shrink: 0;
+}
+
+.blank svg {
+  display: block;
+  overflow: visible;
+}
+
+.blank {
+  margin: 22px 0 0;
+}
+
+.blank path, .blank rect {
+  fill: none;
+  stroke: var(--osu-b1);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+.blank .thick {
+  stroke-width: 4;
+}
+
+.blank .dashed {
+  stroke-dasharray: 5 6;
+}
+
+.nothing .blank + i {
+  margin-top: 9px;
+}
+
+.nothing {
+  padding: 24px 4px 0;
+}
+
+.nothing i {
+  display: block;
+  height: 10px;
+  margin-top: 62px;
+  background: var(--rule);
+  filter: var(--wobble);
+  opacity: 0.55;
+}
+
+.nothing .lead + i {
+  margin-top: 34px;
+}
+
+.nothing i:nth-of-type(2) {
+  --wobble: url(#ink2);
+}
+
+.nothing i:nth-of-type(3) {
+  --wobble: url(#ink3);
+}
+
+.pinned {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 4px 0;
+  padding: 9px 10px 9px 14px;
+  font-size: 13px;
+}
+
+.pinned::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border: 2px solid var(--osu-b3);
+  border-radius: 10px;
+  background: var(--osu-b4);
+  filter: var(--wobble);
+}
+
+.pinned p {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+}
+
+.pinned b {
+  color: var(--osu-pink);
+}
+
+.pinned .key {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.pinned .link {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.pinned .link:hover:not(:disabled) {
+  color: #fff;
+}
+
+.pinned .spinner {
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.pinned .why {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
+.ground {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--titlebar, 0px) - 20px);
+  margin-bottom: -20px;
+}
+
+.corner {
+  position: fixed;
+  z-index: 1;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+}
+
+.framed .corner {
+  top: calc(var(--titlebar) + 8px);
+}
+
+.corner button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--osu-f1);
+  cursor: pointer;
+}
+
+.corner .icon {
+  display: grid;
+}
+
+.corner button:hover {
+  background: var(--osu-b4);
+  color: #fff;
+}
+
+.corner .close:hover {
+  background: #e81123;
+}
+
+.gear {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--osu-f1);
+  cursor: pointer;
+}
+
+.gear .icon {
+  display: grid;
+}
+
+.gear svg {
+  width: 16px;
+  height: 16px;
+}
+
+.gear:hover {
+  background: var(--osu-b4);
+  color: #fff;
+}
+
+.gear.on {
+  background: var(--osu-b3);
+  color: #fff;
+}
+
+.gear.dot {
+  position: relative;
+}
+
+.gear.dot::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+/* windows title bar. main scrolls so the scrollbar stays under it */
+.framed {
+  --titlebar: 32px;
+}
+
+.framed, .framed body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.framed body {
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+}
+
+.framed img {
+  -webkit-user-drag: none;
+}
+
+.framed main {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  overflow-y: auto;
+}
+
+.framed body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  pointer-events: none;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--titlebar);
+  padding-left: 10px;
+  background: var(--osu-b5);
+  user-select: none;
+}
+
+/* the logo is drawn for the default hue, 333 */
+.titlebar img, .standing .app {
+  filter: hue-rotate(calc((var(--hue) - 333) * 1deg)) saturate(var(--sat));
+}
+
+.titlebar img {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+}
+
+.titlebar .name {
+  margin: 0 auto 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.titlebar button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  border: 0;
+  background: none;
+  color: var(--osu-f1);
+}
+
+.titlebar .pin.on {
+  color: var(--accent);
+}
+
+.titlebar .pin.on .head {
+  fill: currentColor;
+}
+
+.titlebar .icon {
+  display: grid;
+}
+
+.titlebar button:hover {
+  background: var(--osu-b4);
+  color: #fff;
+}
+
+.titlebar .close:hover {
+  background: #e81123;
+}
+
+.inactive .titlebar img, .inactive .titlebar .name, .inactive .titlebar button:not(:hover) {
+  opacity: 0.5;
+}
+
+.roomy main {
+  max-width: 1240px;
+}
