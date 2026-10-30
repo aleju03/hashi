@@ -5,7 +5,8 @@
       { "kind": "new", "text": "Click the chart icon on a play to see how it went: your timing, how each finger and hand did, your long note releases, and tips on what to work on." },
       { "kind": "new", "text": "Don't want it? Turn off Analysis in the settings." },
       { "kind": "changed", "text": "Sending plays and sharing your live status can both be off. Plays you finish then stay in Hashi for their analysis." },
-      { "kind": "new", "text": "Open your skin in its own window at the size osu! draws it. It changes as you edit." }
+      { "kind": "new", "text": "Open your skin in its own window at the size osu! draws it. It changes as you edit." },
+      { "kind": "new", "text": "Change your skin's HitPosition, ColumnStart and judgement line, and line the notes up with the receptors." }
     ]
   },
   {

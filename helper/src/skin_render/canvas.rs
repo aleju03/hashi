@@ -38,6 +38,15 @@ impl Texture {
         })
     }
 
+    // the rows under the last one with something seen in it as a fraction of the height, None for
+    // blank art. Black doesn't count: receptor art often sits on a black panel that's lost on the stage
+    pub fn alpha_bottom(&self) -> Option<f64> {
+        let w = self.pixmap.width() as usize * 4;
+        let seen = |p: &[u8]| p[3] >= 25 && p[0].max(p[1]).max(p[2]) >= 48;
+        let last = self.pixmap.data().chunks_exact(w).rposition(|row| row.chunks_exact(4).any(seen))?;
+        Some((self.pixmap.height() as usize - last - 1) as f64 / self.pixmap.height() as f64)
+    }
+
     // Chrome's decode cache builds each level from the one before it, halving the size rounded up
     // with a truncating bilinear filter
     fn level(&self, level: usize) -> Option<Arc<Pixmap>> {

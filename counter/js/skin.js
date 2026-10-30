@@ -357,7 +357,7 @@ function startSkinLive(page, loaded) {
   const live = { ...loaded, ctx: page.canvas.getContext("2d"), k: page.k ?? 1, pressed: [], chart, now: 0, last: null };
   skinLayers(live);
   page.live = live;
-  (page.hitUnits ??= {})[page.keys] = loaded.scene.hitUnits;
+  (page.hitUnits ??= {})[page.keys] = loaded.scene.ownHit;
   if (!SKIN_FREEZE && !page.window) {
     loadSkinTiming(page);
     loadSkinImages(page);
@@ -431,18 +431,26 @@ function skinEdit(page) {
     cut: null, fade: null, colors: [], parts: { notes: true, heads: true, bodies: true, tails: true }, pick: null,
     // the skin's own images by part, per column, and which part and columns the grid picks for
     swap: {}, swapPart: "note", swapCols: [],
+    // skin.ini's HitPosition, JudgementLine and ColumnStart, null keeping the skin's, and how far up
+    // the receptors' art moves in its images, in the same 480ths
+    hit: null, line: null, start: null, raise: 0,
   });
 }
 
 // a note covers the field down to the judgement line in the scroll time, so a time is a length
-const skinUnits = (page, ms) => (ms * page.hitUnits[page.keys]) / page.scroll;
-const skinMsOf = (page, units) => (units * page.scroll) / page.hitUnits[page.keys];
+const skinHit = (page) => page.edits?.[page.keys]?.hit ?? page.hitUnits[page.keys];
+const skinUnits = (page, ms) => (ms * skinHit(page)) / page.scroll;
+const skinMsOf = (page, units) => (units * page.scroll) / skinHit(page);
 
 function skinEditsJson(page) {
   const e = page.edits?.[page.keys];
   if (!e || !page.hitUnits?.[page.keys]) return "";
   const keys = page.keys;
   const out = {};
+  if (e.hit != null) out.hitPosition = e.hit;
+  if (e.raise) out.keysRaise = e.raise;
+  if (e.line != null) out.judgementLine = e.line;
+  if (e.start != null) out.columnStart = e.start;
   if (e.cut) out.cut = e.cut.map((ms) => (ms == null ? null : Math.round(skinUnits(page, ms) * 100) / 100));
   if (e.fade) out.fade = { length: Math.round(skinUnits(page, e.fade.ms) * 100) / 100, from: e.fade.from, round: !!e.fade.round };
   if (e.colors.some(Boolean)) {
@@ -923,13 +931,82 @@ function skinNameField(page) {
   return input;
 }
 
+const SKIN_HIT_STEP = 1;
+const SKIN_HIT_BIG_STEP = 10;
+const SKIN_COLUMN_START_MAX = 853;
+
+// a stepper of one skin.ini number: −big, −1, the value, +1, +big
+function skinNumber(label, value, min, max, set) {
+  const step = (d) => () => set(Math.min(max, Math.max(min, value + d)));
+  return el("div", { class: "segs", title: label },
+    el("button", { class: "seg", disabled: value <= min, "aria-label": `${label} down by ${SKIN_HIT_BIG_STEP}`, onclick: step(-SKIN_HIT_BIG_STEP) }, `−${SKIN_HIT_BIG_STEP}`),
+    el("button", { class: "seg", disabled: value <= min, "aria-label": `${label} down by ${SKIN_HIT_STEP}`, onclick: step(-SKIN_HIT_STEP) }, "−"),
+    el("span", { class: "skin-scroll" }, String(value)),
+    el("button", { class: "seg", disabled: value >= max, "aria-label": `${label} up by ${SKIN_HIT_STEP}`, onclick: step(SKIN_HIT_STEP) }, "+"),
+    el("button", { class: "seg", disabled: value >= max, "aria-label": `${label} up by ${SKIN_HIT_BIG_STEP}`, onclick: step(SKIN_HIT_BIG_STEP) }, `+${SKIN_HIT_BIG_STEP}`));
+}
+
+// the ColumnStart that puts the stage in the middle of the screen osu! draws on
+function skinCentred(page) {
+  const s = page.live.scene;
+  const size = page.info?.gameSize;
+  const aspect = size?.width ? size.width / size.height : size === "screen" ? screen.width / screen.height : s.width / s.height;
+  const first = s.columns[0];
+  const last = s.columns[s.columns.length - 1];
+  const stage = (last.x + last.w - first.x) / (s.height / 480);
+  return Math.round(Math.max(0, (480 * aspect - stage) / 2));
+}
+
+// HitPosition counts down from the top of a 480-tall stage, so a bigger number sits lower
+function skinStage(page) {
+  const e = skinEdit(page);
+  const s = page.live.scene;
+  const own = Math.round(s.ownHit);
+  const hit = e.hit ?? own;
+  const line = e.line ?? s.ownLine;
+  const ownStart = Math.round(s.ownColumnStart);
+  const start = e.start ?? ownStart;
+  const centred = skinCentred(page);
+  // the receptors as the HitPosition that lands a note's art on theirs, so lining them up is the two
+  // numbers matching
+  const ownKeys = s.ownKeyBottom == null ? null : Math.round(s.ownKeyBottom + s.notePad);
+  const keysAt = ownKeys == null ? null : ownKeys - (e.raise ?? 0);
+  const setHit = (v) => skinChange(page, (x) => (x.hit = v === own ? null : v));
+  const setKeys = (v) => skinChange(page, (x) => (x.raise = ownKeys - v));
+  return part("skin-stage-edit", null,
+    el("p", { class: "caption" }, `HitPosition is ${own} in this skin`, e.hit != null ? `, ${hit} after your change.` : ". Higher puts the judgement line lower."),
+    el("div", { class: "skin-tools" },
+      skinNumber("HitPosition", hit, 0, 480, setHit),
+      e.hit != null && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.hit = null)) }, "Keep the skin's")),
+    // lined up and untouched, there's nothing to change about them until asked
+    keysAt != null && (keysAt === hit && !e.raise && !page.keysOpen
+      ? el("p", { class: "caption" }, "Notes land right on the receptors. ",
+        el("button", { class: "link", onclick: () => { page.keysOpen = true; render(); } }, "Move the receptors"))
+      : [
+        el("p", { class: "caption" }, keysAt === hit
+          ? "Notes land right on the receptors."
+          : `Notes land on the receptors at ${keysAt}, so HitPosition ${hit} puts the line ${hit > keysAt ? "below" : "above"} them.`),
+        el("div", { class: "skin-tools" },
+          skinNumber("Receptors", keysAt, 0, 480, setKeys),
+          keysAt !== hit && el("button", { class: "link", onclick: () => setHit(keysAt) }, "Move the line to them"),
+          keysAt !== hit && el("button", { class: "link", onclick: () => setKeys(hit) }, "Move them to the line"),
+          e.raise !== 0 && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.raise = 0)) }, "Keep the skin's"))]),
+    el("div", { class: "skin-tools" },
+      segs([[true, "Judgement line"], [false, "No judgement line"]], line, (on) => skinChange(page, (x) => (x.line = on === s.ownLine ? null : on)), "The line notes are hit on")),
+    el("p", { class: "caption" }, `ColumnStart is ${ownStart} in this skin`, e.start != null ? `, ${start} after your change.` : ". It's how far the stage sits from the left edge."),
+    el("div", { class: "skin-tools" },
+      skinNumber("ColumnStart", start, 0, SKIN_COLUMN_START_MAX, (v) => skinChange(page, (x) => (x.start = v === ownStart ? null : v))),
+      start !== centred && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.start = centred === ownStart ? null : centred)) }, `Centre it (${centred})`),
+      e.start != null && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.start = null)) }, "Keep the skin's")));
+}
+
 function skinEditor(page) {
   const changed = !!skinEditsJson(page);
   const tab = page.tab ?? "lns";
   return el("div", { class: "skin-editor" },
     el("div", { class: "skin-tools skin-tabs" },
-      segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colours"]], tab, (t) => { page.tab = t; render(); }, "Edit")),
-    tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : skinColours(page),
+      segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colours"], ["stage", "Stage"]], tab, (t) => { page.tab = t; render(); }, "Edit")),
+    tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : tab === "stage" ? skinStage(page) : skinColours(page),
     page.info?.stored
       ? [el("div", { class: "skin-tools apply" },
         skinNameField(page),

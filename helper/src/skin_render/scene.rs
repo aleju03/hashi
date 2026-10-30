@@ -102,6 +102,14 @@ pub(super) struct Scene {
     // the judgement line in skin units from the top, what a note travels in its scroll time
     pub hit_units: f64,
     pub cut_now: Vec<Option<f64>>,
+    // the skin's own HitPosition and judgement line, before any edit
+    pub own_hit: f64,
+    pub own_line: bool,
+    pub own_column_start: f64,
+    // where the skin's own receptor art ends, in HitPosition's 480ths
+    pub own_key_bottom: Option<f64>,
+    // the empty rows under the note art in the same 480ths
+    pub note_pad: f64,
     // each column's images as skin.ini names them, before any edit
     pub own: Vec<Value>,
     pub body_color: Rgba,
@@ -326,6 +334,11 @@ impl Scene {
             "hitY": self.hit_y,
             "hitUnits": self.hit_units,
             "cutNow": self.cut_now,
+            "ownHit": self.own_hit,
+            "ownLine": self.own_line,
+            "ownColumnStart": self.own_column_start,
+            "ownKeyBottom": self.own_key_bottom,
+            "notePad": self.note_pad,
             "own": self.own,
             "bodyColor": self.body_color,
             "sprites": self.sprites.iter().map(|t| json!([t.width(), t.height(), t.id])).collect::<Vec<_>>(),

@@ -624,7 +624,12 @@ fn stage_position(raw: Option<&String>) -> Option<f64> {
     if !(0.0..=480.0).contains(&v) {
         return None;
     }
-    Some(ini::round((480.0 - ini::round(v)) * 1.6))
+    Some(hit_from_ini(v))
+}
+
+// skin.ini's 0-480 from the top, as 768ths up from the bottom
+pub(super) fn hit_from_ini(v: f64) -> f64 {
+    ini::round((480.0 - ini::round(v)) * 1.6)
 }
 
 fn get<'a>(block: &'a Block, key: &str) -> Option<&'a str> {
@@ -745,7 +750,7 @@ fn build(skin: &Skin, block: &Block, fonts: &HashMap<String, String>, base: &Pro
         backgrounds: (0..keys).map(|i| opaque(color_alpha(block.get(&format!("Colour{}", i + 1))))).collect(),
         judgement_line: opt_number(block.get("JudgementLine")).is_none_or(|v| v != 0.0),
         judgement_line_color: color_alpha(block.get("ColourJudgementLine")),
-        column_start: opt_number(block.get("ColumnStart")).map(|v| v.clamp(0.0, 853.0)),
+        column_start: opt_number(block.get("ColumnStart")).map(|v| v.clamp(0.0, super::edit::COLUMN_START_MAX)),
         light_position: opt_number(block.get("LightPosition")).map(|v| v.clamp(0.0, 480.0)),
         hit_position: stage_position(block.get("HitPosition")),
         score_position: stage_position(block.get("ScorePosition")),

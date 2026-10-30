@@ -90,6 +90,10 @@ fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<
         builder.accent = skin_accent(&base.profile);
         let mut scene = builder.scene();
         scene.cut_now = cut_now(&base.profile, keys);
+        scene.own_hit = 480.0 - s_position(base.profile.hit_position, base.settings.hit_position) * UNIT;
+        scene.own_line = base.profile.judgement_line;
+        scene.own_column_start = base.profile.column_start.unwrap_or(pattern::COLUMN_START);
+        scene.own_key_bottom = key_bottom(&base.profile, keys);
         scene.own = own_names(&base.skin, &base.profile, keys);
         scene
     });
@@ -149,6 +153,21 @@ fn cut_now(p: &Profile, keys: usize) -> Vec<Option<f64>> {
             Some(rows / edit::rows_per_unit(asset.scale, full, p.lazer_bodies))
         })
         .collect()
+}
+
+// where the receptors' art ends, in HitPosition's 480ths from the top: their images sit on the
+// stage's bottom edge, so it's that edge less the empty rows under the art. The middle column's
+// when they differ
+fn key_bottom(p: &Profile, keys: usize) -> Option<f64> {
+    let mut ends: Vec<f64> = (0..keys)
+        .filter_map(|c| {
+            let asset = p.columns.get(c)?.key.as_ref()?;
+            let tex = asset.image.as_ref()?;
+            Some(480.0 - tex.alpha_bottom()? * asset.native_height(tex) * UNIT)
+        })
+        .collect();
+    ends.sort_by(f64::total_cmp);
+    ends.get(ends.len() / 2).copied()
 }
 
 fn image(asset: Option<&Asset>) -> Option<&Arc<Texture>> {
@@ -354,6 +373,15 @@ impl<'a> Builder<'a> {
             over.push(self.image(tex, [x, 0.0, w, HEIGHT], Draw::default()));
         }
 
+        // the empty rows under the note art, which sit under the line when a note is hit
+        let mut pads: Vec<f64> = (0..keys)
+            .filter_map(|col| {
+                let tex = image(assets[col].tap.as_ref())?;
+                Some(tex.alpha_bottom()? * self.note_height(tex) / self.l.scale)
+            })
+            .collect();
+        pads.sort_by(f64::total_cmp);
+        let note_pad = pads.get(pads.len() / 2).copied().unwrap_or(0.0);
         let top = self.judgement_and_combo();
         let encoded = self.sprites.iter().map(|_| Default::default()).collect();
         Scene {
@@ -366,6 +394,11 @@ impl<'a> Builder<'a> {
             hit_y: judgment_y,
             hit_units: 480.0 - hit * UNIT,
             cut_now: vec![],
+            own_hit: 0.0,
+            own_line: true,
+            own_column_start: 0.0,
+            own_key_bottom: None,
+            note_pad,
             own: vec![],
             body_color: s.ln_body_color,
             base,

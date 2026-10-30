@@ -19,6 +19,18 @@ pub(crate) struct Edits {
     pub parts: Parts,
     // other images of the skin's own per column, as skin.ini would name them
     pub swaps: Vec<Option<Swap>>,
+    // skin.ini's HitPosition, 0-480 from the top
+    #[serde(rename = "hitPosition")]
+    pub hit_position: Option<f64>,
+    #[serde(rename = "judgementLine")]
+    pub judgement_line: Option<bool>,
+    // skin.ini's ColumnStart, the stage's left edge in 480ths of the screen's height
+    #[serde(rename = "columnStart")]
+    pub column_start: Option<f64>,
+    // how far up the receptors' art moves in its images, in HitPosition's 480ths. The game keeps the
+    // images on the stage's bottom edge whatever HitPosition says
+    #[serde(rename = "keysRaise")]
+    pub keys_raise: Option<f64>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -122,6 +134,8 @@ impl Part {
     }
 }
 
+pub(super) const COLUMN_START_MAX: f64 = 853.0;
+
 // a swap that resolved: the column, the part and the reference skin.ini gets
 pub(super) type Swapped = (usize, Part, String);
 
@@ -148,6 +162,15 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
     let mut made = vec![];
     let mut swapped = vec![];
     out.columns.resize_with(keys.max(out.columns.len()), Default::default);
+    if let Some(v) = edits.hit_position.filter(|v| (0.0..=480.0).contains(v)) {
+        out.hit_position = Some(load::hit_from_ini(v));
+    }
+    if let Some(on) = edits.judgement_line {
+        out.judgement_line = on;
+    }
+    if let Some(v) = edits.column_start {
+        out.column_start = Some(v.clamp(0.0, COLUMN_START_MAX));
+    }
     // swaps first, so the cut, fade and colour work on the art swapped in
     for (c, swap) in edits.swaps.iter().enumerate().take(keys) {
         for (part, reference) in swap.iter().flat_map(Swap::parts) {
@@ -223,7 +246,37 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
             }
         }
     }
+    if let Some(up) = edits.keys_raise.filter(|r| r.abs() >= 0.5 && r.abs() <= 480.0) {
+        for c in 0..keys {
+            for part in [Part::Key, Part::KeyDown] {
+                let column = out.columns[c].clone();
+                let Some(asset) = (if part == Part::Key { column.key.as_ref() } else { column.key_down.as_ref() }) else { continue };
+                // a row of art is a 768th of the stage, half of one at @2x
+                let rows = (up / UNIT * asset.scale).round() as i64;
+                let Some((new, raw)) = redraw(asset, format!("raise {rows}"), &mut done, sources, full, |src| Some(raised(src, rows))) else { continue };
+                if let Some(raw) = raw {
+                    made.push(Made { column: c, part, frames: vec![raw], scale: asset.scale });
+                }
+                if part == Part::Key {
+                    out.columns[c].key = Some(new);
+                } else {
+                    out.columns[c].key_down = Some(new);
+                }
+            }
+        }
+    }
     (out, made, swapped)
+}
+
+// The art `rows` higher in its image, which the game sets on the stage's bottom edge: empty rows
+// added under it, or taken off the bottom to lower it
+fn raised(src: &Raw, rows: i64) -> (Raw, Option<f64>) {
+    let row_bytes = src.w as usize * 4;
+    let h = (src.h as i64 + rows).max(1) as usize;
+    let keep = h.min(src.h as usize);
+    let mut rgba = vec![0u8; h * row_bytes];
+    rgba[..keep * row_bytes].copy_from_slice(&src.rgba[..keep * row_bytes]);
+    (Raw::new(rgba, src.w, h as u32), None)
 }
 
 // an asset with its art made again by `make`, and the made image when it's for writing

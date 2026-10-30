@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use super::edit::{self, Edits};
-use super::load;
+use super::{ini, load};
 
 const PREFIX: &str = "hashi-";
 
@@ -30,7 +30,8 @@ pub(crate) fn apply(dir: &Path, keys: usize, edits: &str) -> Result<Value, Strin
     let skin = load::Skin::open(dir);
     let (_, profile) = load::import_from(&skin, keys)?;
     let (edited, made, swapped) = edit::apply(&profile, &edits, keys, &skin, &Default::default(), true);
-    if made.is_empty() && swapped.is_empty() {
+    let hit = edits.hit_position.filter(|v| (0.0..=480.0).contains(v));
+    if made.is_empty() && swapped.is_empty() && hit.is_none() && edits.judgement_line.is_none() && edits.column_start.is_none() {
         return Err("There's nothing to change.".into());
     }
     let ini = ini_of(dir)?;
@@ -79,6 +80,15 @@ pub(crate) fn apply(dir: &Path, keys: usize, edits: &str) -> Result<Value, Strin
         if style(&profile) != style(&edited) {
             sets.push((format!("NoteBodyStyle{c}"), "1".into()));
         }
+    }
+    if let Some(v) = hit {
+        sets.push(("HitPosition".into(), ini::round(v).to_string()));
+    }
+    if let Some(on) = edits.judgement_line {
+        sets.push(("JudgementLine".into(), if on { "1" } else { "0" }.into()));
+    }
+    if let Some(v) = edits.column_start {
+        sets.push(("ColumnStart".into(), ini::round(v.clamp(0.0, edit::COLUMN_START_MAX)).to_string()));
     }
     std::fs::write(&ini, set_keys(&text, keys, &sets)).map_err(|e| e.to_string())?;
     Ok(json!({ "files": files, "keys": sets.iter().map(|(k, _)| k).collect::<Vec<_>>() }))
