@@ -1,0 +1,410 @@
+.board {
+  padding: 22px 4px 0;
+}
+
+.board .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.board .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.board .head .link:hover {
+  color: #fff;
+}
+
+.board .head .following {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.board-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
+  margin-bottom: 8px;
+}
+
+.board-top .board-filters {
+  margin-bottom: 0;
+}
+
+.board-top .board-filters:has(.board-search) {
+  flex: 1 1 280px;
+}
+
+.board .map {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.board .map .name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.board .map .title, .board .map .artist {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* a long artist gives way before the title does */
+.board .map .artist {
+  flex-shrink: 10;
+}
+
+.board .map .title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.board .map .artist {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.board .doing {
+  display: flex;
+  justify-content: center;
+  margin: 48px 0 0;
+  color: var(--osu-f1);
+}
+
+.board .lead {
+  margin-top: 14px;
+}
+
+.board .status {
+  margin: 14px 0 0;
+}
+
+.board .status .link {
+  color: inherit;
+}
+
+.board .map .facts {
+  margin-top: 3px;
+}
+
+.board .map .players {
+  font-weight: 500;
+  color: var(--osu-f1);
+}
+
+.standings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.standing {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 44px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+
+.standing + .standing::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: var(--rule);
+  filter: var(--wobble);
+  opacity: 0.6;
+}
+
+.standing:nth-child(3n + 2) {
+  --wobble: url(#ink2);
+}
+
+.standing:nth-child(3n) {
+  --wobble: url(#ink3);
+}
+
+.standing.me {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 8px 6px 8px 7px;
+}
+
+.standing.mine {
+  margin-top: 8px;
+}
+
+.standing.mine::before {
+  top: -9px;
+}
+
+.standing .pos {
+  width: 34px;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--osu-f1);
+}
+
+.standing.me .pos {
+  color: var(--accent);
+}
+
+.standing .grade {
+  width: 22px;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.standing .avatar {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
+  background: var(--osu-b3);
+  overflow: hidden;
+}
+
+.standing .avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.standing .player {
+  min-width: 3em;
+  overflow: hidden;
+  padding-bottom: 4px;
+  margin-bottom: -4px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  text-decoration: none;
+  outline: none;
+}
+
+.standing .player:hover, .standing .player:focus-visible, .board .map a.title:hover {
+  text-decoration: underline wavy var(--accent) 1.5px;
+  text-underline-offset: 1px;
+}
+
+.standing .app {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.standing .mods {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.standing .acc {
+  width: 58px;
+  flex-shrink: 0;
+  font-weight: 700;
+  text-align: right;
+}
+
+.standing .when {
+  width: 52px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--osu-f1);
+  text-align: right;
+}
+
+@media (max-width: 420px) {
+  .standing .when {
+    display: none;
+  }
+}
+
+/* lazer's SS pink */
+.grade.ss {
+  color: #ff66cc;
+}
+
+.grade.gold {
+  color: #ffcc22;
+}
+
+.grade.silver {
+  color: #d6e0eb;
+}
+
+.grade.a {
+  color: #88da20;
+}
+
+.grade.b {
+  color: #66ccff;
+}
+
+.grade.c {
+  color: #ff8e5d;
+}
+
+.grade.d {
+  color: #ff5a5a;
+}
+
+.board-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.board-filters .segs .icon {
+  display: grid;
+}
+
+.board-pick {
+  position: relative;
+}
+
+.board-pick .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* opens leftwards since the filters can sit at the right edge */
+.board-countries {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 190px;
+  max-height: 264px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.board-countries::-webkit-scrollbar {
+  width: 6px;
+}
+
+.board-countries::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--osu-b3);
+}
+
+.board-countries button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--osu-f1);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-countries button:hover,
+.board-countries button.on {
+  background: var(--osu-b3);
+  color: #fff;
+}
+
+.board-countries b {
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.board-countries .board-group {
+  padding: 8px 10px 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--osu-f1);
+  opacity: 0.7;
+}
+
+.board-search {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.board .flag {
+  width: 18px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+.board .flag.region {
+  display: inline-grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+}
+
+.board .flag.region svg {
+  width: 11px;
+  height: 11px;
+}
+
+.board-filters .seg:has(.flag),
+.board-countries button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.board .lead .link {
+  color: var(--osu-f1);
+}
+
+.board .lead .link:hover {
+  color: #fff;
+}

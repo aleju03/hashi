@@ -2,7 +2,7 @@ use tokio::runtime::Runtime;
 
 use crate::background::{hide, quit, show, toggle};
 
-fn rgba(png: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub(crate) fn rgba(png: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let mut decoder = png::Decoder::new(png);
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().ok()?;

@@ -264,6 +264,11 @@ fn command(app: &AppHandle, line: &str) {
                 let _ = w.minimize();
             }
         }
+        "maximize" => {
+            if let Some(w) = app.get_webview_window(MAIN) {
+                let _ = if w.is_maximized().unwrap_or(false) { w.unmaximize() } else { w.maximize() };
+            }
+        }
         "on-top" => {
             if let Some(w) = app.get_webview_window(MAIN) {
                 let _ = w.set_always_on_top(rest == "on");

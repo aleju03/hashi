@@ -2,6 +2,7 @@
 
 mod autostart;
 mod background;
+mod player;
 mod tray;
 mod window;
 
@@ -18,6 +19,14 @@ fn main() {
     }
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // saving to a lazer skin, run from the background process
+    if args.first().map(String::as_str) == Some(mania_bridge::lazer::MODE) {
+        std::process::exit(mania_bridge::lazer::writer_main(&args[1..]));
+    }
+    // the game size window, run from the background process
+    if args.first().map(String::as_str) == Some(player::MODE) {
+        return player::run(&args[1..]);
+    }
     if args.iter().any(|a| a == WINDOW) {
         window::run(&args);
     } else {

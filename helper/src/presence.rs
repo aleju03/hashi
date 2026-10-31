@@ -108,7 +108,7 @@ fn clip(v: Option<&Value>) -> Value {
 }
 
 // the regex /10K|[1-9]K|SV2|[A-Z]{2}/g over a name like "HDDT"
-fn split_mods(name: &str) -> Vec<String> {
+pub(crate) fn split_mods(name: &str) -> Vec<String> {
     let c: Vec<char> = name.chars().collect();
     let mut out = vec![];
     let mut i = 0;

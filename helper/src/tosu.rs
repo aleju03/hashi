@@ -33,6 +33,7 @@ pub(crate) struct LastPlay {
     beatmap: Beatmap,
     // lazer gives paths relative to files/, by hash
     chart_file: Option<String>,
+    audio_file: Option<String>,
     // relative to Songs (or files/ on lazer), for the cover in the ui
     cover: Option<Cover>,
     // past the last note and not failed: quitting partway saves no score
@@ -63,6 +64,8 @@ pub(crate) struct TosuState {
     pub lazer_files_dir: PathBuf,
     // stable's folder and its Songs, wherever it's installed
     pub stable_dirs: Option<(PathBuf, PathBuf)>,
+    // the skin's folder name, stable's
+    pub skin: Option<String>,
     // as tosu last reported them, a wine drive other than Z: is looked up on disk
     stable_folders: Option<(String, String)>,
     pub last_frame_at: i64,
@@ -99,6 +102,7 @@ impl TosuState {
             found: None,
             lazer_files_dir,
             stable_dirs: None,
+            skin: None,
             stable_folders: None,
             last_frame_at: 0,
             last_frame: None,
@@ -240,6 +244,10 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             .unwrap_or_else(|| "unknown".into());
         let player = str_of(raw.pointer("/profile/name"));
         let client = if raw.get("client").and_then(Value::as_str) == Some("lazer") { "lazer" } else { "stable" };
+        // lazer reports "." here, its skins have no folder
+        if client == "stable" {
+            t.skin = str_of(raw.pointer("/folders/skin")).filter(|x| !x.is_empty());
+        }
         if client == "lazer" {
             if let Some(songs) = raw.pointer("/folders/songs").and_then(Value::as_str).filter(|x| !x.is_empty()) {
                 t.lazer_files_dir = PathBuf::from(songs);
@@ -309,6 +317,14 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                     str_of(files.get("beatmap")).filter(|x| !x.is_empty()).map(|f| t.lazer_files_dir.join(f).to_string_lossy().into_owned())
                 } else {
                     None
+                },
+                audio_file: match (str_of(files.get("audio")).filter(|x| !x.is_empty()), client == "lazer") {
+                    (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
+                    (Some(f), false) => match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), &t.stable_dirs) {
+                        (Some(folder), Some((_, songs))) => Some(songs.join(folder.replace('\\', "/")).join(f).to_string_lossy().into_owned()),
+                        _ => None,
+                    },
+                    _ => None,
                 },
                 cover: if client == "lazer" {
                     background.map(|file| Cover { lazer: Some(true), folder: None, file })
@@ -395,10 +411,12 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
         return log!("skip (tosu gave no beatmap checksum): {label}");
     };
     let created = g("createdAt");
+    let practice = crate::practice::is_practice(b, &md5, &crate::types::text(&bm.version));
 
     let item = {
         let mut s = b.st();
-        if s.sends_no_plays() {
+        let kept = s.sends_no_plays() && !practice;
+        if kept && !s.analyzes() {
             drop(s);
             return log!("skip (sending plays is off): {label}");
         }
@@ -431,6 +449,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
                 keys: bm.keys.clone(),
                 cover: play.cover.clone(),
                 chart_file: play.chart_file.clone(),
+                audio_file: play.audio_file.clone(),
                 mods: mods_name(&mods),
                 player_name: or(g("playerName"), play.player_name.clone()),
                 score: g("score"),
@@ -450,6 +469,8 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             poll_delay: None,
             held_from: None,
             on_hold: false,
+            practice,
+            kept,
         };
         s.queue.items.push(item.clone());
         item

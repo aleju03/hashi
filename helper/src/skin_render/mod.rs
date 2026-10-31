@@ -1,0 +1,748 @@
+mod canvas;
+mod edit;
+mod ini;
+mod library;
+mod load;
+mod pattern;
+mod scene;
+mod write;
+
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+
+use serde_json::Value;
+use tiny_skia::BlendMode;
+
+pub(crate) use library::{images, rim, thumb};
+pub(crate) use write::{applied, apply, copy_tree, edited, fix_tiffs, pack, tiffs, undo};
+
+use canvas::{tinted, Draw, Texture};
+use ini::{hex, Rgba};
+use load::{Asset, Profile, Settings};
+use pattern::{Layout, HIT_LINE_MIN_FRACTION};
+use scene::{Body, Column, Frame, Op, Scene};
+
+// a 16:9 card; another screen's shape keeps the height and changes the width
+const WIDTH: f64 = 1280.0;
+const HEIGHT: f64 = 720.0;
+// stable's accuracy: the score font at 0.6 of the score's 0.96, right-aligned on a HUD 768 tall,
+// under the score. The margins are measured off stable, lazer's copy of the layout (17 in from the
+// right, 9 under the score) puts it about a digit off
+const ACC_SCALE: f64 = 0.6 * 0.96;
+const ACC_MARGIN: f64 = 6.0;
+const ACC_BELOW_SCORE: f64 = 3.0;
+// skin art is authored in a 768-tall space and the stage in a 480-tall one
+const UNIT: f64 = 480.0 / 768.0;
+// lazer stretches a body that isn't NoteBodyStyle 0 over 32800 of its 768ths
+const LAZER_BODY_SPAN: f64 = 32800.0 * UNIT;
+const BLACK: Rgba = [0, 0, 0, 255];
+const WHITE: Rgba = [255, 255, 255, 255];
+const FAINT: Rgba = [255, 255, 255, 64];
+const PINK: Rgba = [255, 102, 171, 255];
+
+// mania-hub's skin preview (src/lib/skin-preview-render.ts) ported as is, down to Chrome's canvas
+// quirks, since that one is checked against the game 1:1. A change there belongs here too.
+pub(crate) fn render(dir: &Path, keys: usize) -> Result<Vec<u8>, String> {
+    let keys = keys.clamp(1, 10);
+    let (settings, profile) = load::import(dir, keys)?;
+    Builder::new(&settings, &profile, keys, WIDTH).scene().png()
+}
+
+// the skin as loaded, which every edit starts from
+struct Base {
+    settings: Settings,
+    profile: Profile,
+    skin: load::Skin,
+    sources: edit::Sources,
+}
+
+type Slot<T> = Mutex<Option<(String, Arc<T>)>>;
+
+// The page asks for a scene and then each of its sprites, and again on every edit. One skin load
+// is kept for those, and the latest scenes: the game size window asks for its own shape.
+static BASE: Slot<Base> = Mutex::new(None);
+static SCENES: Mutex<Vec<(String, Arc<Scene>)>> = Mutex::new(Vec::new());
+const SCENES_KEPT: usize = 4;
+
+fn slot<T>(slot: &Slot<T>, key: String, make: impl FnOnce() -> Result<T, String>) -> Result<Arc<T>, String> {
+    let mut held = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, v)) = held.as_ref() {
+        if *k == key {
+            return Ok(v.clone());
+        }
+    }
+    *held = None;
+    let v = Arc::new(make()?);
+    *held = Some((key, v.clone()));
+    Ok(v)
+}
+
+fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<Arc<Scene>, String> {
+    let keys = keys.clamp(1, 10);
+    let base_key = format!("{}\n{keys}\n{at}", dir.display());
+    let key = format!("{base_key}\n{width}\n{edits}");
+    if let Some((_, s)) = SCENES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key) {
+        return Ok(s.clone());
+    }
+    let scene = Arc::new({
+        let base = slot(&BASE, base_key, || {
+            let skin = load::Skin::open(dir);
+            let (settings, profile) = load::import_from(&skin, keys)?;
+            Ok(Base { settings, profile, skin, sources: Default::default() })
+        })?;
+        let (profile, _, _) = edit::apply(&base.profile, &edit::Edits::parse(edits), keys, &base.skin, &base.sources, false);
+        let mut builder = Builder::new(&base.settings, &profile, keys, width);
+        // recoloured notes would tint the backdrop, which should stay the skin's while it's edited
+        builder.accent = skin_accent(&base.profile);
+        let mut scene = builder.scene();
+        scene.cut_now = cut_now(&base.profile, keys);
+        scene.own_hit = 480.0 - s_position(base.profile.hit_position, base.settings.hit_position) * UNIT;
+        scene.own_line = base.profile.judgement_line;
+        scene.own_score = 480.0 - s_position(base.profile.score_position, base.settings.score_position) * UNIT;
+        scene.own_combo = 480.0 - s_position(base.profile.combo_position, base.settings.combo_position) * UNIT;
+        scene.own_combo_hidden = base.profile.combo_hidden;
+        scene.own_combo_hud = base.profile.combo_hud;
+        scene.own_column_start = base.profile.column_start.unwrap_or(pattern::COLUMN_START);
+        scene.own_column_width = base.profile.column_widths.first().copied().unwrap_or(base.profile.column_width);
+        scene.own_column_spacing = base.profile.column_spacing;
+        scene.own_key_bottom = key_bottom(&base.profile, keys);
+        scene.own_bottom_art = bottom_art(&base.profile);
+        scene.own = own_names(&base.skin, &base.profile, keys);
+        scene
+    });
+    let mut kept = SCENES.lock().unwrap_or_else(|e| e.into_inner());
+    kept.retain(|(k, _)| *k != key);
+    if kept.len() >= SCENES_KEPT {
+        kept.remove(0);
+    }
+    kept.push((key, scene.clone()));
+    Ok(scene)
+}
+
+// a card `aspect` times as wide as it's tall, 16:9 when not given
+fn width_for(aspect: Option<f64>) -> f64 {
+    aspect.filter(|a| (1.0..=4.0).contains(a)).map_or(WIDTH, |a| (HEIGHT * a).round())
+}
+
+// everything the page needs to draw the preview itself, sprites by index
+pub(crate) fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<Value, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect))?.json())
+}
+
+pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, id: usize) -> Result<Option<Vec<u8>>, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect))?.sprite_png(id))
+}
+
+// the scene for the game size window, which draws it itself: what the page gets, with each
+// sprite's premultiplied RGBA pixels instead of a png
+pub(crate) fn player_scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<(Value, Vec<(u32, u32, Vec<u8>)>), String> {
+    let scene = cached(dir, keys, at, edits, width_for(aspect))?;
+    let sprites = scene.sprites.iter().map(|t| (t.pixmap.width(), t.pixmap.height(), t.pixmap.data().to_vec())).collect();
+    Ok((scene.json(), sprites))
+}
+
+// the still with edits drawn in, to check the page against
+pub(crate) fn render_edited(dir: &Path, keys: usize, at: &str, edits: &str) -> Result<Vec<u8>, String> {
+    cached(dir, keys, at, edits, WIDTH)?.png()
+}
+
+fn own_names(skin: &load::Skin, p: &Profile, keys: usize) -> Vec<Value> {
+    let name = |a: &Option<Asset>| a.as_ref().and_then(|a| library::name_of(skin, a));
+    (0..keys)
+        .map(|c| {
+            let col = p.columns.get(c).cloned().unwrap_or_default();
+            serde_json::json!({
+                "note": name(&col.tap),
+                "head": name(&col.head),
+                "body": name(&col.body),
+                "tail": name(&col.tail),
+                "key": name(&col.key),
+                "keyDown": name(&col.key_down),
+            })
+        })
+        .collect()
+}
+
+// each column's transparent lead-in at the tail end of the body, in skin units
+fn cut_now(p: &Profile, keys: usize) -> Vec<Option<f64>> {
+    (0..keys)
+        .map(|c| {
+            let asset = p.columns.get(c)?.body.as_ref()?;
+            let tex = asset.image.as_ref()?;
+            let full = tex.height().max(asset.source_height.unwrap_or(0.0));
+            let rows = tex.alpha_top()? * tex.height();
+            Some(rows / edit::rows_per_unit(asset.scale, full, p.lazer_bodies))
+        })
+        .collect()
+}
+
+// where the receptors' art ends, in HitPosition's 480ths from the top: their images sit on the
+// stage's bottom edge, so it's that edge less the empty rows under the art. The middle column's
+// when they differ
+fn key_bottom(p: &Profile, keys: usize) -> Option<f64> {
+    let mut ends: Vec<f64> = (0..keys)
+        .filter_map(|c| {
+            let asset = p.columns.get(c)?.key.as_ref()?;
+            let tex = asset.image.as_ref()?;
+            Some(480.0 - tex.alpha_bottom()? * asset.native_height(tex) * UNIT)
+        })
+        .collect();
+    ends.sort_by(f64::total_cmp);
+    ends.get(ends.len() / 2).copied()
+}
+
+// the middle of StageBottom's art, in HitPosition's 480ths from the top: its image sits on the stage's
+// bottom edge at its own size
+fn bottom_art(p: &Profile) -> Option<f64> {
+    let asset = p.stage.bottom.as_ref()?;
+    let tex = asset.image.as_ref()?;
+    let h = asset.native_height(tex);
+    let (top, under) = (tex.alpha_top()?, tex.alpha_bottom()?);
+    Some(480.0 - h + h * (top + 1.0 - under) / 2.0)
+}
+
+fn image(asset: Option<&Asset>) -> Option<&Arc<Texture>> {
+    asset?.image.as_ref()
+}
+
+struct Builder<'a> {
+    s: &'a Settings,
+    p: &'a Profile,
+    keys: usize,
+    width: f64,
+    l: Layout,
+    up: bool,
+    sprites: Vec<Arc<Texture>>,
+    accent: Rgba,
+}
+
+impl<'a> Builder<'a> {
+    fn new(s: &'a Settings, p: &'a Profile, keys: usize, width: f64) -> Self {
+        let l = pattern::layout(&p.column_widths, p.column_width, p.column_spacing, p.column_start, keys, width);
+        Builder { s, p, keys, width, l, up: s.upscroll, sprites: vec![], accent: skin_accent(p) }
+    }
+
+    fn sprite(&mut self, tex: &Arc<Texture>) -> usize {
+        if let Some(i) = self.sprites.iter().position(|t| Arc::ptr_eq(t, tex)) {
+            return i;
+        }
+        self.sprites.push(tex.clone());
+        self.sprites.len() - 1
+    }
+
+    fn image(&mut self, tex: &Arc<Texture>, dst: [f64; 4], how: Draw) -> Op {
+        let sprite = self.sprite(tex);
+        Op::Image { sprite, src: [0.0, 0.0, tex.width(), tex.height()], dst, how }
+    }
+
+    fn image_at(&mut self, tex: &Arc<Texture>, x: f64, y: f64, w: f64, h: f64, flip: bool) -> Op {
+        let how = if flip { Draw::flipped(y * 2.0 + h) } else { Draw::default() };
+        self.image(tex, [x, y, w, h], how)
+    }
+
+    fn map_y(&self, y: f64) -> f64 {
+        if self.up {
+            HEIGHT - y
+        } else {
+            y
+        }
+    }
+
+    // sprite height follows the art's aspect at WidthForNoteHeightScale, not the lane width
+    fn note_height(&self, tex: &Texture) -> f64 {
+        let width = (self.p.note_height_scale * self.l.scale).max(1.0);
+        (tex.height() * (width / tex.width())).max(1.0)
+    }
+
+    fn stage_height(&self, asset: &Asset, tex: &Texture) -> f64 {
+        (asset.native_height(tex) * UNIT * self.l.scale).max(1.0)
+    }
+
+    fn frames(&mut self, asset: Option<&Asset>, tail: bool) -> Vec<Frame> {
+        let Some(asset) = asset else { return vec![] };
+        std::iter::once(asset)
+            .chain(&asset.frames)
+            .map(|a| match &a.image {
+                Some(tex) => Frame {
+                    sprite: Some(self.sprite(tex)),
+                    h: self.note_height(tex),
+                    top: if tail { tex.alpha_top() } else { None },
+                },
+                None => Frame { sprite: None, h: 0.0, top: None },
+            })
+            .collect()
+    }
+
+    fn scene(mut self) -> Scene {
+        let (p, s, keys) = (self.p, self.s, self.keys);
+        let assets: Vec<load::Column> = (0..keys).map(|c| p.columns.get(c).cloned().unwrap_or_default()).collect();
+        let accent = self.accent;
+
+        let hit = s_position(p.hit_position, s.hit_position);
+        let hit_gap = hit * UNIT * self.l.scale;
+        let judgment_y = (HEIGHT * HIT_LINE_MIN_FRACTION).max((HEIGHT * 0.95).min(HEIGHT - hit_gap));
+        let tallest = (0..keys)
+            .map(|col| match image(assets[col].tap.as_ref()) {
+                Some(tex) => self.note_height(tex),
+                None => (self.l.lane_widths[col] * 0.3).max(10.0),
+            })
+            .fold(f64::NEG_INFINITY, f64::max);
+        let pattern = pattern::pattern(keys, judgment_y, tallest.min(HEIGHT * 0.24));
+        let line_y = self.map_y(judgment_y);
+
+        let mut base = self.backdrop(accent);
+        let l = &self.l;
+        base.push(Op::Fill { rect: [l.stage_x, 0.0, l.stage_width, HEIGHT], color: BLACK, alpha: 1.0 });
+        for col in 0..keys {
+            if let Some(Some(bg)) = p.backgrounds.get(col) {
+                let rect = [l.lane_xs[col], 0.0, l.lane_widths[col], HEIGHT];
+                base.push(Op::Clear { rect });
+                base.push(Op::Fill { rect, color: *bg, alpha: 1.0 });
+            }
+        }
+        base.extend(self.column_lines());
+
+        let stage = &p.stage;
+        let mut columns = vec![];
+        let mut tints: Vec<(Rgba, Arc<Texture>)> = vec![];
+        for (col, a) in assets.iter().enumerate() {
+            let (x, w) = (self.l.lane_xs[col], self.l.lane_widths[col]);
+            let mut light = vec![];
+            if let Some((asset, tex)) = stage.light.as_ref().and_then(|a| Some((a, a.image.as_ref()?))) {
+                // the column light's bottom sits at LightPosition, not the hit position; measured
+                // from the judgement line so the declared gap survives the card clamping the line
+                let height = self.stage_height(asset, tex);
+                let light_units = 480.0 - p.light_position.unwrap_or(413.0);
+                let shift = (hit * UNIT - light_units) * self.l.scale;
+                let tint = stage.light_colors.get(col).copied().flatten();
+                let art = match tint {
+                    Some(c) => match tints.iter().find(|(t, _)| *t == c) {
+                        Some((_, art)) => art.clone(),
+                        None => {
+                            let art = Arc::new(tinted(tex, c));
+                            tints.push((c, art.clone()));
+                            art
+                        }
+                    },
+                    None => tex.clone(),
+                };
+                let how = Draw { mips: tint.is_none(), ..Default::default() };
+                light.push(if self.up {
+                    let y = line_y - shift;
+                    self.image(&art, [x, y, w, height], Draw { flip: Some(y * 2.0 + height), ..how })
+                } else {
+                    self.image(&art, [x, line_y + shift - height, w, height], how)
+                });
+            }
+            let key_up = self.key(a.key.as_ref(), x, w, hit_gap, line_y, FAINT);
+            let key_down = self.key(a.key_down.as_ref().or(a.key.as_ref()), x, w, hit_gap, line_y, accent);
+            let mut lighting = vec![];
+            if let Some((asset, tex)) = stage.lighting.as_ref().and_then(|a| Some((a, a.image.as_ref()?))) {
+                // additive like in game, LightingNWidth overriding the art's own width
+                let declared = stage.lighting_widths.get(col).copied().filter(|w| *w > 0.0);
+                let lw = (declared.unwrap_or(asset.native_width(tex) * UNIT) * self.l.scale).max(1.0);
+                let lh = (lw * (tex.height() / tex.width())).max(1.0);
+                let how = Draw { blend: BlendMode::Plus, ..Default::default() };
+                lighting.push(self.image(tex, [x + w / 2.0 - lw / 2.0, line_y - lh / 2.0, lw, lh], how));
+            }
+            let body = a.body.as_ref().and_then(|asset| {
+                let tex = asset.image.as_ref()?;
+                // stable gives each texel row a fixed 480/768 of a unit whatever the art's width;
+                // lazer stretches one copy over its span
+                let full = tex.height().max(asset.source_height.unwrap_or(0.0));
+                let row = if p.lazer_bodies { LAZER_BODY_SPAN * self.l.scale / full } else { UNIT * self.l.scale / asset.scale };
+                let style = p.body_styles.get(col).copied().unwrap_or(1.0);
+                Some(Body { sprite: self.sprite(tex), sw: tex.width(), sh: tex.height(), full, style, row })
+            });
+            let tap_color = p.tap_colors.get(col).copied().flatten().unwrap_or(p.tap_color);
+            let note_color = a.tap.as_ref().and_then(|t| t.image.as_ref()?.average()).unwrap_or(tap_color);
+            columns.push(Column {
+                x,
+                w,
+                tap: self.frames(a.tap.as_ref(), false),
+                head: self.frames(a.head.as_ref(), false),
+                tail: self.frames(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref()), true),
+                body,
+                tap_color,
+                note_color,
+                head_color: p.head_colors.get(col).copied().flatten().unwrap_or(p.head_color),
+                light,
+                key_up,
+                key_down,
+                lighting,
+            });
+        }
+
+        let mut hint = vec![];
+        if let Some((asset, tex)) = stage.hint.as_ref().and_then(|a| Some((a, a.image.as_ref()?))) {
+            let height = self.stage_height(asset, tex);
+            let (x, w) = (self.l.stage_x, self.l.stage_width);
+            hint.push(if self.up {
+                self.image_at(tex, x, line_y, w, height, true)
+            } else {
+                self.image_at(tex, x, line_y - height / 2.0, w, height, false)
+            });
+        }
+
+        // black on black is how circle skins hide the default-on line, so no invented fallback
+        let mut line = vec![];
+        if p.judgement_line {
+            let color = p.judgement_line_color.unwrap_or(FAINT);
+            line.push(Op::Fill { rect: [self.l.stage_x, line_y - 1.0, self.l.stage_width, 2.0], color, alpha: 1.0 });
+        }
+
+        let mut over = vec![];
+        if let Some((asset, tex)) = stage.bottom.as_ref().and_then(|a| Some((a, a.image.as_ref()?))) {
+            // never stretched to the stage: native size in the 480 space on both axes, so a canvas
+            // taller than 480 hangs off the top and is cut
+            let w = (asset.native_width(tex) * self.l.scale).max(1.0);
+            let h = (asset.native_height(tex) * self.l.scale).max(1.0);
+            let x = self.l.stage_x + (self.l.stage_width - w) / 2.0;
+            over.push(if self.up { self.image_at(tex, x, 0.0, w, h, true) } else { self.image_at(tex, x, HEIGHT - h, w, h, false) });
+        }
+        for (asset, left) in [(stage.left.as_ref(), true), (stage.right.as_ref(), false)] {
+            let Some((asset, tex)) = asset.and_then(|a| Some((a, a.image.as_ref()?))) else { continue };
+            let w = (asset.native_width(tex) * UNIT * self.l.scale).max(1.0);
+            let x = if left { self.l.stage_x - w } else { self.l.stage_x + self.l.stage_width };
+            over.push(self.image(tex, [x, 0.0, w, HEIGHT], Draw::default()));
+        }
+
+        // the empty rows under the note art, which sit under the line when a note is hit
+        let mut pads: Vec<f64> = (0..keys)
+            .filter_map(|col| {
+                let tex = image(assets[col].tap.as_ref())?;
+                Some(tex.alpha_bottom()? * self.note_height(tex) / self.l.scale)
+            })
+            .collect();
+        pads.sort_by(f64::total_cmp);
+        let note_pad = pads.get(pads.len() / 2).copied().unwrap_or(0.0);
+        let top = self.judgement_and_combo();
+        let hud = self.hud();
+        let encoded = self.sprites.iter().map(|_| Default::default()).collect();
+        Scene {
+            width: self.width,
+            sprites: self.sprites,
+            encoded,
+            upscroll: self.up,
+            lazer_bodies: p.lazer_bodies,
+            keys_under_notes: p.keys_under_notes,
+            hit_y: judgment_y,
+            hit_units: 480.0 - hit * UNIT,
+            cut_now: vec![],
+            own_hit: 0.0,
+            own_line: true,
+            own_score: 0.0,
+            own_combo: 0.0,
+            own_combo_hidden: false,
+            own_combo_hud: false,
+            own_column_start: 0.0,
+            own_column_width: 0.0,
+            own_column_spacing: 0.0,
+            own_key_bottom: None,
+            own_bottom_art: None,
+            note_pad,
+            own: vec![],
+            body_color: s.ln_body_color,
+            base,
+            hint,
+            line,
+            over,
+            top,
+            hud,
+            columns,
+            pattern,
+        }
+    }
+
+    // key art is authored against the stage's bottom edge, not the card's, so it lines up with the
+    // notes even where the card clamps the hit line
+    fn key(&mut self, asset: Option<&Asset>, x: f64, w: f64, hit_gap: f64, line_y: f64, fallback: Rgba) -> Vec<Op> {
+        if let Some((asset, tex)) = asset.and_then(|a| Some((a, a.image.as_ref()?))) {
+            let h = self.stage_height(asset, tex);
+            return vec![if self.up {
+                self.image_at(tex, x, line_y - hit_gap, w, h, true)
+            } else {
+                self.image_at(tex, x, line_y + hit_gap - h, w, h, false)
+            }];
+        }
+        let h = (HEIGHT * 0.012).max(6.0);
+        let top = if self.up { line_y - h - 2.0 } else { line_y + 2.0 };
+        vec![Op::RoundRect { rect: [x + 2.0, top, w - 4.0, h], radius: 2.0, color: fallback }]
+    }
+
+    fn backdrop(&self, accent: Rgba) -> Vec<Op> {
+        const FLOOR: f64 = 0.085;
+        let base = hex("#16121d");
+        let shade = |amount: f64| -> Rgba {
+            let ch = |i: usize| ini::round(base[i] as f64 + (accent[i] as f64 - base[i] as f64) * amount) as u8;
+            [ch(0), ch(1), ch(2), 255]
+        };
+        let mut ops = vec![Op::Fill { rect: [0.0, 0.0, self.width, HEIGHT], color: shade(FLOOR), alpha: 1.0 }];
+        for t in pattern::backdrop(self.width) {
+            let h = t.side * 0.866;
+            let points = vec![[t.x, t.y - h / 2.0], [t.x - t.side / 2.0, t.y + h / 2.0], [t.x + t.side / 2.0, t.y + h / 2.0]];
+            ops.push(Op::Poly { points, color: shade(FLOOR + t.tone * 0.16) });
+        }
+        ops
+    }
+
+    // keys+1 boundaries, outer edges included; a skin that never sets ColumnLineWidth gets 2-unit
+    // lines everywhere and explicit zeros hide them
+    fn column_lines(&self) -> Vec<Op> {
+        let (p, l, keys) = (self.p, &self.l, self.keys);
+        let color = p.line_color.unwrap_or(WHITE);
+        let mut ops = vec![];
+        for boundary in 0..=keys {
+            let units = if p.line_widths.is_empty() { 2.0 } else { p.line_widths.get(boundary).copied().unwrap_or(0.0) };
+            if units <= 0.0 {
+                continue;
+            }
+            let w = (units * l.scale).max(1.0);
+            let x = if boundary == 0 {
+                l.stage_x
+            } else if boundary == keys {
+                l.stage_x + l.stage_width - w
+            } else {
+                (l.lane_xs[boundary - 1] + l.lane_widths[boundary - 1] + l.lane_xs[boundary]) / 2.0 - w / 2.0
+            };
+            ops.push(Op::Fill { rect: [x, 0.0, w, HEIGHT], color, alpha: 1.0 });
+        }
+        ops
+    }
+
+    // ScorePosition and ComboPosition, counted up from the bottom in the skin's 768ths
+    fn stage_y(&self, own: Option<f64>, fallback: f64) -> f64 {
+        let from_bottom = s_position(own, fallback) * UNIT * self.l.scale;
+        if self.up {
+            from_bottom
+        } else {
+            HEIGHT - from_bottom
+        }
+    }
+
+    fn judgement_size(&self, asset: &Asset, tex: &Texture) -> (f64, f64) {
+        let (nw, nh) = (tex.width() / asset.scale, tex.height() / asset.scale);
+        let w = (self.l.stage_width * 0.9).min(nw * UNIT * self.l.scale);
+        (w, nh * (w / nw))
+    }
+
+    // the accuracy's glyphs in the score font: the scene pixels per skin pixel, the right edge, the
+    // top, a digit's cell and the %'s width
+    fn accuracy_layout(&self, f: &load::ScoreFont) -> Option<(f64, f64, f64, f64, f64)> {
+        let hud = HEIGHT / 768.0;
+        let k = hud * ACC_SCALE;
+        let size = |a: &Option<load::Asset>| a.as_ref().and_then(|a| Some((a.native_width(a.image.as_ref()?), a.native_height(a.image.as_ref()?))));
+        let (five, tall) = size(&f.digit)?;
+        let percent = self.p.percent_width.or_else(|| size(&f.percent).map(|s| s.0)).unwrap_or(0.0);
+        // the score's digits at 0.96 from the top, the accuracy just under them
+        let top = hud * (tall * 0.96 + ACC_BELOW_SCORE);
+        Some((k, self.width - ACC_MARGIN * hud, top, five * k, percent * k))
+    }
+
+    // the % shows only as much of its art as its slot holds
+    fn accuracy_ops(&mut self) -> Vec<Op> {
+        let p = self.p;
+        let Some(f) = p.score_font.as_ref().filter(|_| p.stable) else { return vec![] };
+        let Some((k, right, top, cell, slot)) = self.accuracy_layout(f) else { return vec![] };
+        let overlap = f.overlap * k;
+        let glyph = |c: char| -> Option<&load::Asset> {
+            match c {
+                '0'..='9' => f.digits.get(c as usize - '0' as usize)?.as_ref(),
+                '.' => f.dot.as_ref(),
+                _ => f.percent.as_ref(),
+            }
+        };
+        let text = "100.00%";
+        let advance = |c: char| match c {
+            '0'..='9' => cell,
+            '%' => slot,
+            _ => glyph(c).and_then(|a| Some(a.native_width(a.image.as_ref()?) * k)).unwrap_or(cell),
+        };
+        let total: f64 = text.chars().map(advance).sum::<f64>() - overlap * (text.chars().count() as f64 - 1.0);
+        let mut x = right - total;
+        let mut ops = vec![];
+        for c in text.chars() {
+            let adv = advance(c);
+            if let Some((a, tex)) = glyph(c).and_then(|a| Some((a, a.image.as_ref()?))) {
+                let (w, h) = (a.native_width(tex) * k, a.native_height(tex) * k);
+                let (dx, frac) = match c {
+                    '0'..='9' => ((cell - w) / 2.0, 1.0),
+                    '%' => (0.0, (slot / w.max(1e-6)).min(1.0)),
+                    _ => (0.0, 1.0),
+                };
+                let mut op = self.image(tex, [x + dx, top, w * frac, h], Draw::default());
+                if let Op::Image { src, .. } = &mut op {
+                    src[2] *= frac;
+                }
+                ops.push(op);
+            }
+            x += adv - overlap;
+        }
+        ops
+    }
+
+    fn judgement_and_combo(&mut self) -> Vec<Op> {
+        let mut ops = self.judgement_and_combo_only();
+        ops.extend(self.accuracy_ops());
+        ops
+    }
+
+    fn judgement_and_combo_only(&mut self) -> Vec<Op> {
+        let (p, s) = (self.p, self.s);
+        let cx = self.l.stage_x + self.l.stage_width / 2.0;
+        let mut ops = vec![];
+        if let Some((asset, tex)) = p.judgement.as_ref().and_then(|a| Some((a, a.image.as_ref()?))) {
+            let (w, h) = self.judgement_size(asset, tex);
+            let cy = (HEIGHT * 0.05).max((HEIGHT * 0.8).min(self.stage_y(p.score_position, s.score_position)));
+            ops.push(self.image(tex, [cx - w / 2.0, cy - h / 2.0, w, h], Draw::default()));
+        }
+
+        // ComboPosition pushed off the stage is how a skin turns the counter off
+        let Some(combo) = p.combo.as_ref().filter(|_| !p.combo_hidden) else { return ops };
+        let unit = UNIT * self.l.scale * p.combo_scale;
+        let size = |a: &Asset, t: &Texture| ((a.native_width(t) * unit).max(1.0), (a.native_height(t) * unit).max(1.0));
+        let digit = |d: usize| combo.digits[d].as_ref().and_then(|a| Some((a, a.image.as_ref()?)));
+        let glyphs: Option<Vec<(&Asset, &Arc<Texture>)>> = [7, 2, 7].iter().map(|&d| digit(d)).collect();
+        let Some(glyphs) = glyphs else { return ops };
+        let sizes: Vec<(f64, f64)> = glyphs.iter().map(|(a, t)| size(a, t)).collect();
+        // tabular: every digit takes the widest digit's cell, ComboOverlap pulling them together
+        let cell = (0..10)
+            .filter_map(digit)
+            .map(|(a, t)| size(a, t).0)
+            .chain(sizes.iter().map(|s| s.0))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let overlap = combo.overlap * unit;
+        let total = cell * 3.0 - overlap * 2.0;
+        let tallest = sizes.iter().map(|s| s.1).fold(f64::NEG_INFINITY, f64::max);
+        let cy = (HEIGHT * 0.05 + tallest / 2.0).max((HEIGHT * 0.8 + tallest / 2.0).min(self.stage_y(p.combo_position, s.combo_position) + p.combo_origin * tallest));
+        let mut x = cx - total / 2.0;
+        for ((_, tex), (w, h)) in glyphs.iter().zip(&sizes) {
+            ops.push(self.image(tex, [x + (cell - w) / 2.0, cy - h / 2.0, *w, *h], Draw::default()));
+            x += cell - overlap;
+        }
+        ops
+    }
+    // what the top layer draws still, in pieces for a preview playing a map: each judgement, and the
+    // combo's digits to lay out as it counts
+    fn hud(&mut self) -> Value {
+        let (p, s) = (self.p, self.s);
+        let judgements: Vec<Value> = (0..7)
+            .map(|j| {
+                let Some((asset, tex)) = p.judgements.get(j).and_then(Option::as_ref).and_then(|a| Some((a, a.image.as_ref()?))) else { return Value::Null };
+                let (w, h) = self.judgement_size(asset, tex);
+                serde_json::json!({ "s": self.sprite(tex), "w": w, "h": h })
+            })
+            .collect();
+        let combo = p.combo.as_ref().filter(|_| !p.combo_hidden).map(|combo| {
+            let unit = UNIT * self.l.scale * p.combo_scale;
+            let digits: Vec<Option<(usize, f64, f64)>> = combo
+                .digits
+                .iter()
+                .map(|a| {
+                    let (a, tex) = a.as_ref().and_then(|a| Some((a, a.image.as_ref()?)))?;
+                    Some((self.sprite(tex), (a.native_width(tex) * unit).max(1.0), (a.native_height(tex) * unit).max(1.0)))
+                })
+                .collect();
+            let cell = digits.iter().flatten().map(|d| d.1).fold(0.0, f64::max);
+            let tallest = digits.iter().flatten().map(|d| d.2).fold(0.0, f64::max);
+            let y = (HEIGHT * 0.05 + tallest / 2.0).max((HEIGHT * 0.8 + tallest / 2.0).min(self.stage_y(p.combo_position, s.combo_position) + p.combo_origin * tallest));
+            serde_json::json!({
+                "digits": digits.iter().map(|d| d.map(|(s, w, h)| serde_json::json!({ "s": s, "w": w, "h": h }))).collect::<Vec<_>>(),
+                "cell": cell,
+                "overlap": combo.overlap * unit,
+                "y": y,
+            })
+        });
+        serde_json::json!({
+            "x": self.l.stage_x + self.l.stage_width / 2.0,
+            "width": self.l.stage_width,
+            "judgementY": (HEIGHT * 0.05).max((HEIGHT * 0.8).min(self.stage_y(p.score_position, s.score_position))),
+            "judgements": judgements,
+            "combo": combo,
+            // for the game size window's HUD, in scene pixels
+            "score": p.score_font.as_ref().filter(|_| p.stable).and_then(|f| {
+                let (k, right, top, cell, slot) = self.accuracy_layout(f)?;
+                let mut g = |a: &Option<load::Asset>| -> Value {
+                    a.as_ref().and_then(|a| {
+                        let tex = a.image.as_ref()?;
+                        Some(serde_json::json!({ "s": self.sprite(tex), "w": a.native_width(tex) * k, "h": a.native_height(tex) * k }))
+                    }).unwrap_or(Value::Null)
+                };
+                let digits: Vec<Value> = f.digits.iter().map(&mut g).collect();
+                let (dot, percent) = (g(&f.dot), g(&f.percent));
+                Some(serde_json::json!({ "digits": digits, "dot": dot, "percent": percent, "cell": cell, "slot": slot, "overlap": f.overlap * k, "right": right, "top": top }))
+            }),
+            // in skin pixels, for the page to place the accuracy
+            "accuracy": p.score_font.as_ref().map(|f| {
+                let w = |a: &Option<load::Asset>| a.as_ref().and_then(|a| Some(a.native_width(a.image.as_ref()?)));
+                serde_json::json!({ "digit": w(&f.digit), "dot": w(&f.dot), "percent": w(&f.percent), "overlap": f.overlap })
+            }),
+            // a combo with no digits to draw it in, which stable would draw in its own
+            "comboText": (p.combo.is_none() && !p.combo_hidden).then(|| (HEIGHT * 0.05).max((HEIGHT * 0.8).min(self.stage_y(p.combo_position, s.combo_position)))),
+        })
+    }
+}
+
+// the keymode's own [Mania] value when it has one, else the skin-wide one
+fn s_position(own: Option<f64>, fallback: f64) -> f64 {
+    own.unwrap_or(fallback).clamp(0.0, 768.0)
+}
+
+// the note art carries a skin's identity far more reliably than its skin.ini colours
+fn skin_accent(p: &Profile) -> Rgba {
+    let declared = p.tap_colors.iter().flatten().next().copied().unwrap_or(p.tap_color);
+    accent(p).or(Some(declared).filter(|c| c[..3].iter().any(|&v| v >= 40))).unwrap_or(PINK)
+}
+
+// the first tap or hold head shrunk to 12x12, None when that is effectively black
+fn accent(p: &Profile) -> Option<Rgba> {
+    for column in &p.columns {
+        for tex in [image(column.tap.as_ref()), image(column.head.as_ref())].into_iter().flatten() {
+            let mut sample = canvas::Canvas::new(12, 12);
+            sample.image(tex, 0.0, 0.0, 12.0, 12.0, Draw::default());
+            let (mut r, mut g, mut b, mut weight) = (0.0, 0.0, 0.0, 0.0);
+            for px in sample.pixmap.pixels() {
+                let c = px.demultiply();
+                let a = c.alpha() as f64 / 255.0;
+                if a < 0.4 {
+                    continue;
+                }
+                r += c.red() as f64 * a;
+                g += c.green() as f64 * a;
+                b += c.blue() as f64 * a;
+                weight += a;
+            }
+            if weight < 4.0 {
+                continue;
+            }
+            let (r, g, b) = (r / weight, g / weight, b / weight);
+            if r.max(g).max(b) < 40.0 {
+                continue;
+            }
+            let ch = |v: f64| ini::round(v).clamp(0.0, 255.0) as u8;
+            return Some([ch(r), ch(g), ch(b), 255]);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    // renders every skin in SKIN_RENDER_DIR to SKIN_RENDER_OUT as <skin>_<keys>k.png
+    #[test]
+    #[ignore]
+    fn render_skins() {
+        let dir = std::env::var("SKIN_RENDER_DIR").expect("SKIN_RENDER_DIR");
+        let out = std::env::var("SKIN_RENDER_OUT").expect("SKIN_RENDER_OUT");
+        let keys: Vec<usize> = std::env::var("SKIN_RENDER_KEYS").unwrap_or("4,7".into()).split(',').filter_map(|k| k.parse().ok()).collect();
+        for entry in std::fs::read_dir(dir).unwrap().flatten().filter(|e| e.path().is_dir()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            for &k in &keys {
+                match super::render(&entry.path(), k) {
+                    Ok(png) => std::fs::write(format!("{out}/{name}_{k}k.png"), png).unwrap(),
+                    Err(e) => println!("{name} {k}K: {e}"),
+                }
+            }
+        }
+    }
+}

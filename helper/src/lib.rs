@@ -1,17 +1,29 @@
+mod analysis;
 mod auth;
 mod autostart;
+mod beatmap;
 mod get_tosu;
+mod goals;
+mod judge;
+pub mod lazer;
 mod leaderboard;
 mod osr;
+pub mod player;
+mod practice;
 mod presence;
+mod profile;
 mod queue;
+mod realm;
 mod replays;
+mod skin;
+mod skin_render;
 mod server;
 mod tosu;
 mod types;
 mod update;
 
 pub use autostart::Autostart;
+pub use skin::player_status;
 pub use update::{Progress, Updater};
 
 use std::collections::{HashMap, HashSet};
@@ -41,6 +53,9 @@ const SCOPES: [&str; 4] = [
 // dev builds talk to a local mania-hub, TRACKER_ORIGIN picks any other
 const DEFAULT_ORIGIN: &str = if cfg!(debug_assertions) { "http://localhost:3000" } else { "https://mania-tracker.com" };
 pub const COUNTER_PATH: &str = "/mania-bridge/";
+const RECENT_PLAYS_MS: i64 = 12 * 3600_000;
+// the latest plays the list shows however long ago they were
+const LATEST_PLAYS_SHOWN: usize = 20;
 pub const DEFAULT_PORT: u16 = 24071;
 pub const DEFAULT_HUE: u16 = 333;
 pub const DEFAULT_SAT: u8 = 100;
@@ -311,6 +326,10 @@ impl State {
     pub(crate) fn sends_no_plays(&self) -> bool {
         self.config.settings.as_ref().is_some_and(|x| x.presence_only)
     }
+
+    pub(crate) fn analyzes(&self) -> bool {
+        !self.config.settings.as_ref().is_some_and(|x| x.hide_analysis)
+    }
 }
 
 pub struct Bridge {
@@ -366,14 +385,18 @@ impl Bridge {
         let s = self.st();
         let profile = s.config.connection.as_ref().map(|c| crate::types::text(&c.username)).filter(|u| !u.is_empty() && u != "null");
         let items: Vec<&types::Item> = {
-            let mut v: Vec<&types::Item> = s
-                .queue
-                .items
-                .iter()
-                .filter(|i| i.session_id == self.session_id || ["waiting_replay", "send", "poll", "held"].contains(&i.phase.as_str()))
-                .collect();
+            // restarting the app shouldn't hide what was just played, and the latest few always show
+            // so a fresh start isn't an empty list
+            let recent = iso_from_ms(now_ms() - RECENT_PLAYS_MS);
+            let mut v: Vec<&types::Item> = s.queue.items.iter().collect();
             v.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
-            v
+            v.into_iter()
+                .enumerate()
+                .filter(|(n, i)| {
+                    *n < LATEST_PLAYS_SHOWN || i.session_id == self.session_id || i.captured_at >= recent || ["waiting_replay", "send", "poll", "held"].contains(&i.phase.as_str())
+                })
+                .map(|(_, i)| i)
+                .collect()
         };
         json!({
             "version": VERSION,
@@ -398,7 +421,19 @@ impl Bridge {
             "sendPlays": !s.sends_no_plays(),
             "tosuDashboard": self.env.tosu_can_start.then_some(s.tosu.dashboard).flatten(),
             "showDans": !s.config.settings.as_ref().is_some_and(|x| x.hide_dans),
+            "analysis": s.analyzes(),
+            "thumb": if s.config.settings.as_ref().is_some_and(|x| x.thumb_right) { "right" } else { "left" },
             "unreadNotes": s.config.settings.as_ref().and_then(|x| x.notes_read.as_deref()) != Some(VERSION),
+            "guideRead": s.config.settings.as_ref().is_some_and(|x| x.guide_read),
+            // what to tell someone whose metronome stays silent
+            "soundHelp": if !cfg!(target_os = "linux") {
+                None
+            } else if std::env::var_os("APPIMAGE").is_some_and(|p| !p.is_empty()) {
+                Some("appimage")
+            } else {
+                Some("gstreamer")
+            },
+            "goals": goals::public(self),
             "plays": items.into_iter().map(|i| queue::public_item(i, &self.env.origin, profile.as_deref())).collect::<Vec<_>>(),
         })
     }
@@ -451,8 +486,42 @@ impl Bridge {
         saved
     }
 
+    pub(crate) async fn set_analysis(self: &Arc<Self>, on: bool) -> bool {
+        self.st().config.settings.get_or_insert_with(Default::default).hide_analysis = !on;
+        let saved = self.save_config().await;
+        self.broadcast();
+        saved
+    }
+
     pub(crate) async fn read_notes(self: &Arc<Self>) -> bool {
         self.st().config.settings.get_or_insert_with(Default::default).notes_read = Some(VERSION.into());
+        let saved = self.save_config().await;
+        self.broadcast();
+        saved
+    }
+
+    // back to the usual layout drops the entry, so it follows the thumb setting again
+    pub(crate) async fn set_finger(self: &Arc<Self>, keys: usize, column: usize, finger: &str) -> bool {
+        {
+            let mut s = self.st();
+            let fingers = &mut s.config.settings.get_or_insert_with(Default::default).fingers;
+            let usual = analysis::usual_finger_names(keys);
+            let list = fingers.entry(keys.to_string()).or_insert_with(|| usual.clone());
+            if list.len() != keys {
+                *list = usual.clone();
+            }
+            list[column] = finger.into();
+            if *list == usual {
+                fingers.remove(&keys.to_string());
+            }
+        }
+        let saved = self.save_config().await;
+        self.broadcast();
+        saved
+    }
+
+    pub(crate) async fn read_guide(self: &Arc<Self>) -> bool {
+        self.st().config.settings.get_or_insert_with(Default::default).guide_read = true;
         let saved = self.save_config().await;
         self.broadcast();
         saved
@@ -466,6 +535,13 @@ impl Bridge {
         self.st().config.settings.get_or_insert_with(Default::default).start_in_tray = on;
         let saved = self.save_config().await;
         log!("starting in the tray {}", if on { "on" } else { "off" });
+        self.broadcast();
+        saved
+    }
+
+    pub(crate) async fn set_thumb(self: &Arc<Self>, right: bool) -> bool {
+        self.st().config.settings.get_or_insert_with(Default::default).thumb_right = right;
+        let saved = self.save_config().await;
         self.broadcast();
         saved
     }

@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.5",
+    "changes": [
+      { "kind": "new", "text": "Play analysis. Click the chart icon on a play to see your timing, how each finger and hand did, your long note releases, and what to work on. You can turn it off in the settings." },
+      { "kind": "new", "text": "A skin editor. Color columns, outline parts, resize art, and move HitPosition, ColumnStart, ColumnWidth, ColumnSpacing, the judgement line, judgements, combo and StageBottom. Ctrl+Z and Ctrl+Y undo and redo." },
+      { "kind": "new", "text": "Save edits straight into your lazer skin, without Edit externally. Switch skins and back in lazer to see them." },
+      { "kind": "new", "text": "Open your skin in a window the size of osu!'s and play the selected map in it with its song. Watch autoplay or play on your keys, judged like stable or lazer at the map's OD and mods. osu! goes quiet while it plays." },
+      { "kind": "new", "text": "Leaderboards for your country, continent, a subregion like Southeast Asia, your friends, or any player, past the top 50." },
+      { "kind": "changed", "text": "Sending plays and sharing your live status can both be turned off, and plays you finish still stay in Hashi for their analysis." }
+    ]
+  },
+  {
     "version": "0.1.4",
     "date": "2026-10-19",
     "changes": [

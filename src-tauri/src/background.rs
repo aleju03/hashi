@@ -18,6 +18,7 @@ pub const TELL: &str = "mania-bridge:";
 
 static BRIDGE: OnceLock<Arc<Bridge>> = OnceLock::new();
 static RUNTIME: OnceLock<Handle> = OnceLock::new();
+static SKIN_WINDOW: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static WINDOW_PROCESS: Mutex<Window> = Mutex::new(Window { stdin: None, generation: 0, place: None, update: None });
 
 struct Window {
@@ -49,6 +50,17 @@ pub fn run(args: &[String]) {
     let has_tray = tray::start(&rt);
 
     autostart::refresh();
+    // a game size window that went down with Hashi left osu! muted. osu! may not be running yet, so
+    // this waits for its stream for a while, leaving it to any game size window open meanwhile
+    std::thread::spawn(|| {
+        for _ in 0..360 {
+            let open = SKIN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+            if !open && crate::player::hush::restore() {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    });
     let opts = Options {
         tray: has_tray,
         titlebar: cfg!(windows),
@@ -131,9 +143,61 @@ fn on_window(name: &str) {
         "hide" => hide(),
         "close" => quit(),
         _ => {
+            if let Some(size) = name.strip_prefix("skin-window ") {
+                return skin_window(size);
+            }
             tell_window(name);
         }
     }
+}
+
+// the game size window, a process of its own: `size` is 1440x900, or `screen` for the whole screen.
+// Opening it again replaces the one that's open
+fn skin_window(size: &str) {
+    let Some(bridge) = BRIDGE.get() else { return };
+    let exe = match tauri::utils::platform::current_exe() {
+        Ok(exe) => exe,
+        Err(e) => return log!("could not open the game size window: {e}"),
+    };
+    let mut open = SKIN_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(mut old) = open.take() {
+        let _ = old.kill();
+    }
+    let mut cmd = Command::new(exe);
+    let (hue, sat) = bridge.theme();
+    cmd.arg(crate::player::MODE).arg(format!("--bridge={}", bridge.env.port)).arg(format!("--theme={hue},{sat}"));
+    if size != "screen" {
+        cmd.arg(format!("--size={size}"));
+    }
+    // the main window's middle, to open on its screen
+    let near = window().place.as_deref().and_then(|p| {
+        let n: Vec<f64> = p.split(',').filter_map(|n| n.parse().ok()).collect();
+        (n.len() >= 4).then(|| (n[0] + n[2] / 2.0, n[1] + n[3] / 2.0))
+    });
+    if let Some((x, y)) = near {
+        cmd.arg(format!("--near={x},{y}"));
+    }
+    let child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return log!("could not open the game size window: {e}"),
+    };
+    let id = child.id();
+    *open = Some(child);
+    drop(open);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(250));
+        let mut open = SKIN_WINDOW.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(child) = open.as_mut().filter(|c| c.id() == id) else { return };
+        if !matches!(child.try_wait(), Ok(None)) {
+            *open = None;
+            // its own unmuting of osu! doesn't happen if it crashed
+            crate::player::hush::restore();
+            if let Some(b) = BRIDGE.get() {
+                mania_bridge::player_status(b, r#"{"open":false}"#);
+            }
+            return;
+        }
+    });
 }
 
 pub fn show() {

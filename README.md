@@ -60,8 +60,16 @@ it open and play. Plays you finish while it isn't connected aren't sent later.
 
 Each finished map appears at the top of the list and gets a stamp once Mania Tracker has checked it,
 along with where it placed on the map's leaderboard. Click a play to open it on Mania Tracker, or
-its rank to see the map's top 50. While you're picking a song, the podium button next to the gear
-opens the selected map's leaderboard. A play that hasn't been sent yet can be held back or removed.
+its rank to see the map's leaderboard, which you can narrow to a country or your friends, or search
+for a player. While you're picking a song, the podium button next to the gear opens the selected
+map's leaderboard. A play that hasn't been sent yet can be held back or removed.
+
+The chart icon next to a play's time opens its analysis, worked out on your computer from the
+replay: how early or late you hit and let go of long notes, each finger's and each hand's accuracy,
+how it went over the course of the map, and what stands out, with what fixing it would have been
+worth on that play. On 5K, 7K and 9K the middle column counts for the hand you pick in the settings.
+Plays you finish while sending is off are still analyzed, they just aren't sent. If you'd rather not
+have any of it, turn off Analysis in the settings. Goals and your profile go with it.
 
 Closing the window quits the app. The hide to tray button keeps it running in the background using
 very little memory.
@@ -103,4 +111,4 @@ Uninstall it the usual way; on Windows the uninstaller asks whether to delete yo
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The Outfit font in `counter/fonts` is under the SIL Open Font License.
+MIT, see [LICENSE](LICENSE). Tracker Round in `counter/fonts`, built on Outfit, is under the SIL Open Font License.
