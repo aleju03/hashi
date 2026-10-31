@@ -195,38 +195,49 @@ fn trim_context_menu(w: &WebviewWindow) {
 }
 
 // The skin preview at the size osu! draws it, pixel for pixel: `1440x900`, or `screen` when the
-// game fills the screen. One that doesn't fit goes fullscreen, the closest there is to the game.
+// game fills the screen. It opens on the main window's screen, or another one when it only fits
+// there. One that fits on none goes fullscreen, the closest there is to the game.
 fn skin_window(app: &AppHandle, size: &str) {
     if let Some(w) = app.get_webview_window(SKIN) {
         let _ = w.destroy();
     }
     let Some(base) = COUNTER_URL.get() else { return };
-    let monitor = app.get_webview_window(MAIN).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| app.primary_monitor().ok().flatten());
-    let screen = monitor.as_ref().map(|m| *m.size());
-    let scale = monitor.as_ref().map_or(1.0, |m| m.scale_factor());
+    let here = app.get_webview_window(MAIN).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| app.primary_monitor().ok().flatten());
     let wanted = size.split_once('x').and_then(|(w, h)| Some(PhysicalSize::new(w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)));
-    let Some(px) = wanted.or(screen) else { return };
-    let full = wanted.is_none() || screen.is_some_and(|s| px.width >= s.width || px.height >= s.height);
+    let fits = |m: &tauri::Monitor| wanted.is_some_and(|px| px.width < m.size().width && px.height < m.size().height);
+    let fit_on = here.clone().filter(fits).or_else(|| app.available_monitors().ok()?.into_iter().find(fits));
+    let full = fit_on.is_none();
+    let Some(monitor) = fit_on.or(here) else { return };
+    let px = wanted.unwrap_or(*monitor.size());
+    let scale = monitor.scale_factor();
     let Ok(url) = format!("{base}?skin-window={}x{}", px.width, px.height).parse() else { return };
     let window = WebviewWindowBuilder::new(app, SKIN, WebviewUrl::External(url))
         .title(format!("Hashi · your skin at {}×{}", px.width, px.height))
         .inner_size(f64::from(px.width) / scale, f64::from(px.height) / scale)
         // fixed in size, so tiling window managers float it at that size
         .resizable(false)
-        .fullscreen(full)
-        .center()
+        // placed on its screen before it shows, or it opens wherever the OS likes
+        .visible(false)
         .background_color(tauri::window::Color(0, 0, 0, 255))
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
         .build();
-    match window {
-        Ok(w) => {
-            if !full {
-                let _ = w.set_size(px);
-            }
-            let _ = w.set_focus();
-        }
-        Err(e) => eprintln!("no skin window: {e}"),
+    let w = match window {
+        Ok(w) => w,
+        Err(e) => return eprintln!("no skin window: {e}"),
+    };
+    // moved there first: crossing to a screen with another scale resizes the window
+    let (at, screen) = (*monitor.position(), *monitor.size());
+    let _ = w.set_position(at);
+    if full {
+        let _ = w.set_fullscreen(true);
+    } else {
+        let _ = w.set_size(px);
+        let outer = w.outer_size().unwrap_or(px);
+        let centre = |start: i32, room: u32, taken: u32| start + (i64::from(room) - i64::from(taken)).max(0) as i32 / 2;
+        let _ = w.set_position(tauri::PhysicalPosition::new(centre(at.x, screen.width, outer.width), centre(at.y, screen.height, outer.height)));
     }
+    let _ = w.show();
+    let _ = w.set_focus();
 }
 
 // the main window loads hidden behind it and comes up once the animation is done
