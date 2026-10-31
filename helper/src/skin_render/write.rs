@@ -31,7 +31,8 @@ pub(crate) fn apply(dir: &Path, keys: usize, edits: &str) -> Result<Value, Strin
     let (_, profile) = load::import_from(&skin, keys)?;
     let (edited, made, swapped) = edit::apply(&profile, &edits, keys, &skin, &Default::default(), true);
     let hit = edits.hit_position.filter(|v| (0.0..=480.0).contains(v));
-    if made.is_empty() && swapped.is_empty() && hit.is_none() && edits.judgement_line.is_none() && edits.column_start.is_none() {
+    let columns = edits.column_width.is_some() || edits.column_spacing.is_some();
+    if made.is_empty() && swapped.is_empty() && hit.is_none() && edits.judgement_line.is_none() && edits.column_start.is_none() && !columns {
         return Err("There's nothing to change.".into());
     }
     let ini = ini_of(dir)?;
@@ -89,6 +90,13 @@ pub(crate) fn apply(dir: &Path, keys: usize, edits: &str) -> Result<Value, Strin
     }
     if let Some(v) = edits.column_start {
         sets.push(("ColumnStart".into(), ini::round(v.clamp(0.0, edit::COLUMN_START_MAX)).to_string()));
+    }
+    // one value per column, and per gap between them
+    if edits.column_width.is_some() {
+        sets.push(("ColumnWidth".into(), vec![ini::round(edited.column_width).to_string(); keys].join(",")));
+    }
+    if edits.column_spacing.is_some() {
+        sets.push(("ColumnSpacing".into(), vec![ini::round(edited.column_spacing).to_string(); keys.saturating_sub(1).max(1)].join(",")));
     }
     std::fs::write(&ini, set_keys(&text, keys, &sets)).map_err(|e| e.to_string())?;
     Ok(json!({ "files": files, "keys": sets.iter().map(|(k, _)| k).collect::<Vec<_>>() }))

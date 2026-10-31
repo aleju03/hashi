@@ -85,6 +85,8 @@ pub(super) struct Column {
     pub body: Option<Body>,
     pub tap_color: Rgba,
     pub head_color: Rgba,
+    // what the colour picker starts on for the column
+    pub note_color: Rgba,
     pub light: Vec<Op>,
     pub key_up: Vec<Op>,
     pub key_down: Vec<Op>,
@@ -106,6 +108,8 @@ pub(super) struct Scene {
     pub own_hit: f64,
     pub own_line: bool,
     pub own_column_start: f64,
+    pub own_column_width: f64,
+    pub own_column_spacing: f64,
     // where the skin's own receptor art ends, in HitPosition's 480ths
     pub own_key_bottom: Option<f64>,
     // the empty rows under the note art in the same 480ths
@@ -317,6 +321,7 @@ impl Scene {
                     "body": c.body.as_ref().map(|b| json!({ "s": b.sprite, "sw": b.sw, "sh": b.sh, "style": b.style, "row": b.row })),
                     "tapColor": c.tap_color,
                     "headColor": c.head_color,
+                    "noteColor": c.note_color,
                     "light": ops_json(&c.light),
                     "keyUp": ops_json(&c.key_up),
                     "keyDown": ops_json(&c.key_down),
@@ -337,6 +342,8 @@ impl Scene {
             "ownHit": self.own_hit,
             "ownLine": self.own_line,
             "ownColumnStart": self.own_column_start,
+            "ownColumnWidth": self.own_column_width,
+            "ownColumnSpacing": self.own_column_spacing,
             "ownKeyBottom": self.own_key_bottom,
             "notePad": self.note_pad,
             "own": self.own,

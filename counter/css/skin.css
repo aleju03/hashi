@@ -87,6 +87,91 @@
   position: relative;
 }
 
+.skin-seek {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.skin-seek[hidden] {
+  display: none;
+}
+
+/* a thin track filled with the accent up to the handle, --at far */
+.skin-seek-bar {
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.skin-seek-bar::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--at, 0%), var(--osu-b3) var(--at, 0%));
+}
+
+.skin-seek-bar::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: transform 120ms;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.skin-seek-bar:hover::-webkit-slider-thumb, .skin-seek-bar:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+
+.skin-seek-bar:focus-visible {
+  outline: none;
+}
+
+.skin-seek-bar:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+/* over the bottom of the game size window, while the mouse moves or rests on it */
+.skin-window .skin-seek {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  width: min(720px, calc(100% - 48px));
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity 200ms;
+}
+
+.skin-window.moving .skin-seek, .skin-window .skin-seek:hover {
+  opacity: 1;
+}
+
+.skin-window .skin-seek-time {
+  font-size: 13px;
+  color: #fff;
+}
+
+.skin-seek-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
 .skin-warn {
   flex-wrap: nowrap;
   padding: 10px 12px;
@@ -121,6 +206,123 @@
   display: none;
 }
 
+/* the game size window shows it instead */
+.skin-shot.away {
+  opacity: 0;
+}
+
+.skin-fps.away {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  color: var(--osu-f1);
+  font-size: 13px;
+}
+
+.skin-shot {
+  cursor: pointer;
+}
+
+.skin-input {
+  width: 44px;
+  height: 24px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  outline: none;
+}
+
+.skin-input:hover, .skin-input:focus {
+  background: var(--osu-b3);
+}
+
+.skin-input::placeholder {
+  color: var(--osu-f1);
+  font-weight: 500;
+}
+
+.skin-unit {
+  padding: 0 6px 0 2px;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
+.skin-group {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 18px 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--osu-f1);
+}
+
+.skin-group:first-child {
+  margin-top: 4px;
+}
+
+.skin-group .link {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.skin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 12px;
+  padding: 9px 0;
+}
+
+.skin-row .text {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.skin-row .title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* a changed setting is marked beside its name */
+.skin-row.changed .title::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 7px;
+  border-radius: 9999px;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+
+.skin-row .line {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.skin-row .link {
+  color: inherit;
+}
+
 .skin-scroll {
   min-width: 56px;
   padding: 0 4px;
@@ -138,6 +340,10 @@
 .skin-editor .caption .link {
   font-size: inherit;
   color: #fff;
+}
+
+.skin-part-pick {
+  justify-content: flex-start;
 }
 
 .skin-editor .apply {
@@ -360,6 +566,7 @@
 
 .skin-window-shot {
   display: block;
+  cursor: pointer;
 }
 
 .skin-window-note {

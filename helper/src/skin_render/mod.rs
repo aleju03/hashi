@@ -93,6 +93,8 @@ fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<
         scene.own_hit = 480.0 - s_position(base.profile.hit_position, base.settings.hit_position) * UNIT;
         scene.own_line = base.profile.judgement_line;
         scene.own_column_start = base.profile.column_start.unwrap_or(pattern::COLUMN_START);
+        scene.own_column_width = base.profile.column_widths.first().copied().unwrap_or(base.profile.column_width);
+        scene.own_column_spacing = base.profile.column_spacing;
         scene.own_key_bottom = key_bottom(&base.profile, keys);
         scene.own = own_names(&base.skin, &base.profile, keys);
         scene
@@ -323,6 +325,8 @@ impl<'a> Builder<'a> {
                 let style = p.body_styles.get(col).copied().unwrap_or(1.0);
                 Some(Body { sprite: self.sprite(tex), sw: tex.width(), sh: tex.height(), style, row })
             });
+            let tap_color = p.tap_colors.get(col).copied().flatten().unwrap_or(p.tap_color);
+            let note_color = a.tap.as_ref().and_then(|t| t.image.as_ref()?.average()).unwrap_or(tap_color);
             columns.push(Column {
                 x,
                 w,
@@ -330,7 +334,8 @@ impl<'a> Builder<'a> {
                 head: self.frames(a.head.as_ref(), false),
                 tail: self.frames(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref()), true),
                 body,
-                tap_color: p.tap_colors.get(col).copied().flatten().unwrap_or(p.tap_color),
+                tap_color,
+                note_color,
                 head_color: p.head_colors.get(col).copied().flatten().unwrap_or(p.head_color),
                 light,
                 key_up,
@@ -397,6 +402,8 @@ impl<'a> Builder<'a> {
             own_hit: 0.0,
             own_line: true,
             own_column_start: 0.0,
+            own_column_width: 0.0,
+            own_column_spacing: 0.0,
             own_key_bottom: None,
             note_pad,
             own: vec![],

@@ -24,7 +24,8 @@ function openSkin(from = null) {
     source: from ? "play" : "mix", play: from, back, map: null,
     keys: keys >= 4 && keys <= 10 ? keys : 4, info: null, stamp: Date.now(), loading: true, error: null,
     // kept across renders so the running preview isn't torn down by every update
-    canvas: el("canvas", { class: "skin-shot", width: 1280, height: 720 }),
+    // a click on the playfield pauses it, as the Pause button does
+    canvas: el("canvas", { class: "skin-shot", width: 1280, height: 720, title: "Click to pause or play", onclick: () => skinPause(skinPage) }),
     fpsNode: el("span", { class: "skin-fps" }),
     live: null, playing: true, scroll: stored(SKIN_SCROLL, 480),
   };
@@ -161,7 +162,7 @@ function skinView() {
   p.canvas.setAttribute("aria-label", info?.found ? `${info.name} in ${p.keys}K` : "");
   return el("div", { class: "skin-page" },
     el("div", { class: "head" },
-      el("p", { class: "say" }, "Your skin"),
+      el("p", { class: "say" }, "Skin editor"),
       el("button", { class: "link", onclick: closeSkin }, p.back ? "Back to the analysis" : "Back to plays")),
     info?.found && el("p", { class: "caption" }, info.name, info.client === "lazer" && " (lazer)"),
     info && !info.found && el("p", { class: "caption" }, SKIN_WHY[info.why] ?? SKIN_WHY.unknown),
@@ -188,11 +189,13 @@ function skinView() {
       p.noMap ? el("span", { class: "skin-map bad" }, p.noMap) : p.map && el("span", { class: "skin-map" },`${p.map.title ?? "Unknown"}${p.map.version ? ` [${p.map.version}]` : ""}`)),
     !SKIN_FREEZE && el("div", { class: "skin-tools" },
       el("div", { class: "segs" },
-        el("button", { class: "seg", onclick: () => { p.playing = !p.playing; render(); } }, p.playing ? "Pause" : "Play")),
+        el("button", { class: "seg", onclick: () => skinPause(p) }, p.playing ? "Pause" : "Play")),
       el("div", { class: "segs", title: "How long a note takes from the top to the judgement line" },
         el("button", { class: "seg", disabled: p.scroll <= SKIN_SCROLL_MIN, "aria-label": "Faster", onclick: () => skinScroll(p, -SKIN_SCROLL_STEP) }, "−"),
         el("span", { class: "skin-scroll" }, `${p.scroll} ms`),
         el("button", { class: "seg", disabled: p.scroll >= SKIN_SCROLL_MAX, "aria-label": "Slower", onclick: () => skinScroll(p, SKIN_SCROLL_STEP) }, "+"))),
-    el("div", { class: "skin-shot-box" }, p.canvas, p.fpsNode)),
+    el("div", { class: "skin-shot-box" }, p.canvas, p.fpsNode),
+    // the game size window follows once it's let go
+    !SKIN_FREEZE && skinSeekBar(p, () => render())),
     info?.found && p.live && !SKIN_FREEZE && skinEditor(p));
 }

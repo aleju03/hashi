@@ -212,9 +212,9 @@ function settings(c, host, reconnect) {
     snapshot.theme && themeSetting(),
     el("div", { class: "setting" },
       el("div", { class: "text" },
-        el("span", { class: "title" }, "Your skin"),
-        el("span", { class: "line" }, "The skin you have on in osu!.")),
-      el("button", { class: "key", onclick: () => openSkin() }, "Preview")),
+        el("span", { class: "title" }, "Skin editor"),
+        el("span", { class: "line" }, "Preview your osu! skin as you edit it.")),
+      el("button", { class: "key", onclick: () => openSkin() }, "Open")),
     el("p", { class: "about" }, `Hashi ${snapshot.version}`,
       shownNotes().length > 0 && [" · ", el("button", { class: "link", onclick: openNotes }, "What's new")],
       snapshot.update && !snapshot.update.step

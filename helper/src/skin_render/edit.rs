@@ -31,6 +31,58 @@ pub(crate) struct Edits {
     // images on the stage's bottom edge whatever HitPosition says
     #[serde(rename = "keysRaise")]
     pub keys_raise: Option<f64>,
+    // skin.ini's ColumnWidth and ColumnSpacing, the same for every column; None keeps the skin's
+    #[serde(rename = "columnWidth")]
+    pub column_width: Option<f64>,
+    #[serde(rename = "columnSpacing")]
+    pub column_spacing: Option<f64>,
+    // per column, how each part's art is reshaped
+    pub shapes: Vec<Option<Shapes>>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct Shapes {
+    pub note: Option<Shape>,
+    pub head: Option<Shape>,
+    pub body: Option<Shape>,
+    pub tail: Option<Shape>,
+    pub key: Option<Shape>,
+    pub key_down: Option<Shape>,
+}
+
+// a part's art made narrower or wider in its image, which the game stretches across the column, and
+// outlined inside its edge
+#[derive(Deserialize, Default, Clone, Debug)]
+#[serde(default)]
+pub(crate) struct Shape {
+    // of the art's own width, 1 as it is
+    pub width: Option<f64>,
+    pub outline: Option<Outline>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub(crate) struct Outline {
+    // in ColumnWidth's units
+    pub size: f64,
+    pub color: String,
+}
+
+impl Shape {
+    fn width(&self) -> Option<f64> {
+        self.width.filter(|w| w.is_finite() && (w - 1.0).abs() >= 0.005).map(|w| w.clamp(0.1, 3.0))
+    }
+
+    fn outline(&self) -> Option<(f64, Rgba)> {
+        let o = self.outline.as_ref()?;
+        Some((o.size.clamp(0.0, 40.0), hex(&o.color)?)).filter(|(size, _)| *size > 0.0)
+    }
+}
+
+fn hex(s: &str) -> Option<Rgba> {
+    let hex = s.strip_prefix('#')?;
+    let v = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6)?;
+    Some([(v >> 16) as u8, (v >> 8) as u8, v as u8, 255])
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -94,9 +146,21 @@ impl Edits {
     }
 
     fn color(&self, column: usize) -> Option<Rgba> {
-        let hex = self.colors.get(column)?.as_deref()?.strip_prefix('#')?;
-        let v = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6)?;
-        Some([(v >> 16) as u8, (v >> 8) as u8, v as u8, 255])
+        hex(self.colors.get(column)?.as_deref()?)
+    }
+
+    // a shape that changes something, for a part of a column
+    fn shape(&self, column: usize, part: Part) -> Option<&Shape> {
+        let s = self.shapes.get(column)?.as_ref()?;
+        let shape = match part {
+            Part::Note => &s.note,
+            Part::Head => &s.head,
+            Part::Body => &s.body,
+            Part::Tail => &s.tail,
+            Part::Key => &s.key,
+            Part::KeyDown => &s.key_down,
+        };
+        shape.as_ref().filter(|s| s.width().is_some() || s.outline().is_some())
     }
 }
 
@@ -135,6 +199,10 @@ impl Part {
 }
 
 pub(super) const COLUMN_START_MAX: f64 = 853.0;
+// what the game reads ColumnWidth and ColumnSpacing between
+pub(super) const COLUMN_WIDTH_MIN: f64 = 20.0;
+pub(super) const COLUMN_WIDTH_MAX: f64 = 160.0;
+pub(super) const COLUMN_SPACING_MAX: f64 = 40.0;
 
 // a swap that resolved: the column, the part and the reference skin.ini gets
 pub(super) type Swapped = (usize, Part, String);
@@ -171,6 +239,14 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
     if let Some(v) = edits.column_start {
         out.column_start = Some(v.clamp(0.0, COLUMN_START_MAX));
     }
+    if let Some(w) = edits.column_width.filter(|w| w.is_finite()) {
+        let w = w.clamp(COLUMN_WIDTH_MIN, COLUMN_WIDTH_MAX).round();
+        out.column_width = w;
+        out.column_widths = vec![w; keys];
+    }
+    if let Some(s) = edits.column_spacing.filter(|s| s.is_finite()) {
+        out.column_spacing = s.clamp(0.0, COLUMN_SPACING_MAX).round();
+    }
     // swaps first, so the cut, fade and colour work on the art swapped in
     for (c, swap) in edits.swaps.iter().enumerate().take(keys) {
         for (part, reference) in swap.iter().flat_map(Swap::parts) {
@@ -194,13 +270,20 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
         let tint = edits.color(c);
         let cut = edits.cut.get(c).copied().flatten().map(|u| u.max(0.0));
         let column = out.columns[c].clone();
-        if let Some(asset) = column.body.as_ref().filter(|_| cut.is_some() || edits.fade.is_some() || (tint.is_some() && edits.parts.bodies)) {
+        // the column's width in skin units, what its art is stretched across
+        let units = out.column_widths.get(c).copied().unwrap_or(out.column_width);
+        let shape = edits.shape(c, Part::Body);
+        if let Some(asset) = column.body.as_ref().filter(|_| cut.is_some() || edits.fade.is_some() || (tint.is_some() && edits.parts.bodies) || shape.is_some()) {
             let tint = tint.filter(|_| edits.parts.bodies);
             let style = p.body_styles.get(c).copied().unwrap_or(1.0);
             let restyle = style == 0.0 && (cut.is_some() || edits.fade.is_some());
-            let width = p.column_widths.get(c).copied().unwrap_or(p.column_width);
-            let key = format!("body {cut:?} {:?} {tint:?} {} {width}", edits.fade.map(|f| (f.length, f.from, f.round)), restyle);
-            if let Some((new, raw)) = redraw(asset, key, &mut done, sources, full, |src| body(src, asset, p.lazer_bodies, width, cut, edits.fade, tint, full)) {
+            let key = format!("body {cut:?} {:?} {tint:?} {} {units} {shape:?}", edits.fade.map(|f| (f.length, f.from, f.round)), restyle);
+            // shaped and coloured first, so the cut and fade take the outline with them
+            let make = |src: &Raw| {
+                let pre = prep(src, tint, shape, units, false);
+                body(&pre, asset, p.lazer_bodies, units, cut, edits.fade, None, full).or(Some((pre, None)))
+            };
+            if let Some((new, raw)) = redraw(asset, key, &mut done, sources, full, make) {
                 if let Some(raw) = raw {
                     made.push(Made { column: c, part: Part::Body, frames: vec![raw], scale: asset.scale });
                 }
@@ -215,19 +298,34 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
                 }
             }
         }
-        let Some(tint) = tint else { continue };
-        for (part, on) in [(Part::Note, edits.parts.notes), (Part::Head, edits.parts.heads), (Part::Tail, edits.parts.tails)] {
-            let slot = match part {
-                Part::Note => &column.tap,
-                Part::Head => &column.head,
-                _ => &column.tail,
-            };
-            let Some(asset) = slot.as_ref().filter(|_| on) else { continue };
+        let raise = edits.keys_raise.filter(|r| r.abs() >= 0.5 && r.abs() <= 480.0);
+        for part in [Part::Note, Part::Head, Part::Tail, Part::Key, Part::KeyDown] {
+            let tint = tint.filter(|_| match part {
+                Part::Note => edits.parts.notes,
+                Part::Head => edits.parts.heads,
+                Part::Tail => edits.parts.tails,
+                _ => false,
+            });
+            let shape = edits.shape(c, part);
+            let up = raise.filter(|_| matches!(part, Part::Key | Part::KeyDown));
+            if tint.is_none() && shape.is_none() && up.is_none() {
+                continue;
+            }
+            let Some(asset) = slot(&column, part) else { continue };
             let mut frames = vec![];
             let mut new = asset.clone();
             for (i, frame) in std::iter::once(asset).chain(&asset.frames).enumerate() {
-                let key = format!("tint {tint:?}");
-                let (drawn, raw) = redraw(frame, key, &mut done, sources, full, |src| Some(tinted(src, tint))).unwrap_or_else(|| (frame.clone(), None));
+                // a row of receptor art is a 768th of the stage, half of one at @2x
+                let rows = up.map(|up| (up / UNIT * frame.scale).round() as i64);
+                let key = format!("{} {tint:?} {shape:?} {units} {rows:?}", part.name());
+                let drawn = redraw(frame, key, &mut done, sources, full, |src| {
+                    let shaped = prep(src, tint, shape, units, true);
+                    Some(match rows {
+                        Some(rows) => raised(&shaped, rows),
+                        None => (shaped, None),
+                    })
+                });
+                let (drawn, raw) = drawn.unwrap_or_else(|| (frame.clone(), None));
                 frames.extend(raw);
                 if i == 0 {
                     new = Asset { frames: vec![], ..drawn };
@@ -235,37 +333,151 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
                     new.frames.push(drawn);
                 }
             }
-            if full {
+            if full && !frames.is_empty() {
                 made.push(Made { column: c, part, frames, scale: asset.scale });
             }
-            let target = &mut out.columns[c];
-            match part {
-                Part::Note => target.tap = Some(new),
-                Part::Head => target.head = Some(new),
-                _ => target.tail = Some(new),
-            }
-        }
-    }
-    if let Some(up) = edits.keys_raise.filter(|r| r.abs() >= 0.5 && r.abs() <= 480.0) {
-        for c in 0..keys {
-            for part in [Part::Key, Part::KeyDown] {
-                let column = out.columns[c].clone();
-                let Some(asset) = (if part == Part::Key { column.key.as_ref() } else { column.key_down.as_ref() }) else { continue };
-                // a row of art is a 768th of the stage, half of one at @2x
-                let rows = (up / UNIT * asset.scale).round() as i64;
-                let Some((new, raw)) = redraw(asset, format!("raise {rows}"), &mut done, sources, full, |src| Some(raised(src, rows))) else { continue };
-                if let Some(raw) = raw {
-                    made.push(Made { column: c, part, frames: vec![raw], scale: asset.scale });
-                }
-                if part == Part::Key {
-                    out.columns[c].key = Some(new);
-                } else {
-                    out.columns[c].key_down = Some(new);
-                }
-            }
+            *slot_mut(&mut out.columns[c], part) = Some(new);
         }
     }
     (out, made, swapped)
+}
+
+fn slot(column: &load::Column, part: Part) -> Option<&Asset> {
+    match part {
+        Part::Note => column.tap.as_ref(),
+        Part::Head => column.head.as_ref(),
+        Part::Body => column.body.as_ref(),
+        Part::Tail => column.tail.as_ref(),
+        Part::Key => column.key.as_ref(),
+        Part::KeyDown => column.key_down.as_ref(),
+    }
+}
+
+fn slot_mut(column: &mut load::Column, part: Part) -> &mut Option<Asset> {
+    match part {
+        Part::Note => &mut column.tap,
+        Part::Head => &mut column.head,
+        Part::Body => &mut column.body,
+        Part::Tail => &mut column.tail,
+        Part::Key => &mut column.key,
+        Part::KeyDown => &mut column.key_down,
+    }
+}
+
+// The art reshaped, recoloured, then outlined, in that order so the outline keeps its own colour.
+// `units` is the column's width in skin units, what the image is stretched across. `ends` outlines
+// the image's top and bottom edges too, which a body's art repeats across
+fn prep(src: &Raw, tint: Option<Rgba>, shape: Option<&Shape>, units: f64, ends: bool) -> Raw {
+    let mut raw = match shape.and_then(Shape::width) {
+        Some(f) => squeezed(src, f),
+        None => Raw::new(src.rgba.clone(), src.w, src.h),
+    };
+    if let Some(t) = tint {
+        raw = tinted(&raw, t).0;
+    }
+    if let Some((size, color)) = shape.and_then(Shape::outline) {
+        let px = size * f64::from(raw.w) / units.max(1.0);
+        outline(&mut raw, px, color, ends);
+    }
+    raw
+}
+
+// The art `f` times as wide about the image's middle, the image the same size: narrower leaves
+// clear sides, wider runs off them
+fn squeezed(src: &Raw, f: f64) -> Raw {
+    let (w, h) = (src.w as usize, src.h as usize);
+    let mut rgba = vec![0u8; w * h * 4];
+    let mid = w as f64 / 2.0;
+    // premultiplied while it's mixed, so clear pixels don't darken the edges
+    let take = |x: i64, y: usize| -> [f64; 4] {
+        if x < 0 || x >= w as i64 {
+            return [0.0; 4];
+        }
+        let i = (y * w + x as usize) * 4;
+        let a = f64::from(src.rgba[i + 3]) / 255.0;
+        [f64::from(src.rgba[i]) * a, f64::from(src.rgba[i + 1]) * a, f64::from(src.rgba[i + 2]) * a, a]
+    };
+    for x in 0..w {
+        let from = (x as f64 + 0.5 - mid) / f + mid - 0.5;
+        let left = from.floor();
+        let t = from - left;
+        let left = left as i64;
+        for y in 0..h {
+            let (p, q) = (take(left, y), take(left + 1, y));
+            let mix = |k: usize| p[k] * (1.0 - t) + q[k] * t;
+            let a = mix(3);
+            if a <= 0.0 {
+                continue;
+            }
+            let i = (y * w + x) * 4;
+            for k in 0..3 {
+                rgba[i + k] = (mix(k) / a).round().min(255.0) as u8;
+            }
+            rgba[i + 3] = (a * 255.0).round().min(255.0) as u8;
+        }
+    }
+    Raw::new(rgba, src.w, src.h)
+}
+
+// how far a pixel at (x, y) is from the art's edge so far; past the sides is clear, past the top
+// and bottom is clear only when `ends` counts
+fn edge_distance(d: &[f32], w: usize, h: usize, x: i64, y: i64, ends: bool) -> f32 {
+    if x < 0 || x >= w as i64 {
+        0.0
+    } else if y < 0 || y >= h as i64 {
+        if ends {
+            0.0
+        } else {
+            f32::MAX / 2.0
+        }
+    } else {
+        d[y as usize * w + x as usize]
+    }
+}
+
+// A line `px` wide just inside the art's edge, measured with a two pass distance transform. Faint
+// art counts as art, so a body fading out keeps its line along its sides, fading with it
+fn outline(raw: &mut Raw, px: f64, color: Rgba, ends: bool) {
+    if px <= 0.0 {
+        return;
+    }
+    let (w, h) = (raw.w as usize, raw.h as usize);
+    let diagonal = std::f32::consts::SQRT_2;
+    let mut d: Vec<f32> = raw.rgba.chunks_exact(4).map(|p| if p[3] >= 25 { f32::MAX / 2.0 } else { 0.0 }).collect();
+    for y in 0..h as i64 {
+        for x in 0..w as i64 {
+            let i = y as usize * w + x as usize;
+            if d[i] == 0.0 {
+                continue;
+            }
+            let at = |dx: i64, dy: i64| edge_distance(&d, w, h, x + dx, y + dy, ends);
+            let v = d[i].min(at(-1, 0) + 1.0).min(at(0, -1) + 1.0).min(at(-1, -1) + diagonal).min(at(1, -1) + diagonal);
+            d[i] = v;
+        }
+    }
+    for y in (0..h as i64).rev() {
+        for x in (0..w as i64).rev() {
+            let i = y as usize * w + x as usize;
+            if d[i] == 0.0 {
+                continue;
+            }
+            let at = |dx: i64, dy: i64| edge_distance(&d, w, h, x + dx, y + dy, ends);
+            let v = d[i].min(at(1, 0) + 1.0).min(at(0, 1) + 1.0).min(at(1, 1) + diagonal).min(at(-1, 1) + diagonal);
+            d[i] = v;
+        }
+    }
+    for (p, dist) in raw.rgba.chunks_exact_mut(4).zip(d) {
+        if dist == 0.0 {
+            continue;
+        }
+        let cover = (px + 1.0 - f64::from(dist)).clamp(0.0, 1.0);
+        if cover <= 0.0 {
+            continue;
+        }
+        for k in 0..3 {
+            p[k] = (f64::from(p[k]) * (1.0 - cover) + f64::from(color[k]) * cover).round() as u8;
+        }
+    }
 }
 
 // The art `rows` higher in its image, which the game sets on the stage's bottom edge: empty rows

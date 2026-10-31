@@ -29,6 +29,20 @@ impl Texture {
         self.pixmap.height() as f64
     }
 
+    // the art's colour: its pixels averaged by how much each shows, None for blank art
+    pub fn average(&self) -> Option<Rgba> {
+        let (mut sum, mut alpha) = ([0u64; 3], 0u64);
+        for p in self.pixmap.pixels() {
+            // premultiplied, so the sums are already weighted
+            sum[0] += u64::from(p.red());
+            sum[1] += u64::from(p.green());
+            sum[2] += u64::from(p.blue());
+            alpha += u64::from(p.alpha());
+        }
+        let channel = |s: u64| ((s * 255 + alpha / 2) / alpha).min(255) as u8;
+        (alpha > 0).then(|| [channel(sum[0]), channel(sum[1]), channel(sum[2]), 255])
+    }
+
     // the first row with a visible pixel as a fraction of the height, None for blank art
     pub fn alpha_top(&self) -> Option<f64> {
         *self.alpha_top.get_or_init(|| {
@@ -166,8 +180,11 @@ impl Canvas {
         self.pixmap.fill_rect(r, &paint, Transform::identity(), None);
     }
 
+    // only the pixels wholly inside: one it half clears stays half see-through under the fill that
+    // follows, a faint line down a column's edge
     pub fn clear_rect(&mut self, x: f64, y: f64, w: f64, h: f64) {
-        let Some(r) = rect(x, y, w, h) else { return };
+        let (x0, y0) = (x.ceil(), y.ceil());
+        let Some(r) = rect(x0, y0, (x + w).floor() - x0, (y + h).floor() - y0) else { return };
         let paint = Paint { blend_mode: BlendMode::Clear, ..Default::default() };
         self.pixmap.fill_rect(r, &paint, Transform::identity(), None);
     }

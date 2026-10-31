@@ -52,7 +52,13 @@ function skinWindow() {
     page.scroll = st.scroll;
     page.playing = st.playing;
     const reload = st.keys !== page.keys || st.at !== page.stamp || st.edits !== page.editsJson;
-    const notes = st.source !== page.source || st.play !== page.playId || st.from !== page.from;
+    // the same map from somewhere else in it is the main window's seek bar
+    const seek = page.live && page.map && st.source === page.source && st.play === page.playId && st.from !== page.from;
+    if (seek) {
+      page.from = st.from;
+      skinSeek(page, st.from);
+    }
+    const notes = !seek && (st.source !== page.source || st.play !== page.playId || st.from !== page.from);
     if (notes) {
       const map = await skinWindowMap(st);
       if (seq !== page.seq) return;
@@ -81,4 +87,32 @@ function skinWindow() {
   events.addEventListener("skin", (ev) => follow(JSON.parse(ev.data)));
   events.addEventListener("reload", () => location.reload());
   addEventListener("keydown", (e) => e.key === "Escape" && windowAction("skin-close"));
+
+  // says it's on screen every second, the main window's preview rests meanwhile
+  const away = new BroadcastChannel(SKIN_AWAY);
+  const beat = () => away.postMessage(document.hidden ? "closed" : "open");
+  beat();
+  setInterval(beat, 1000);
+  document.addEventListener("visibilitychange", beat);
+  addEventListener("pagehide", () => away.postMessage("closed"));
+  // it follows the main window's preview, so a click pauses that one
+  canvas.addEventListener("click", () => away.postMessage("pause"));
+
+  // a seek bar over the bottom while the mouse moves, which the main window's follows
+  skinSeekBar(page, (t) => {
+    // the main window says the same back, which is already done here
+    page.from = t;
+    away.postMessage({ seek: t });
+  });
+  document.body.append(page.seek.box);
+  let still = 0;
+  addEventListener("pointermove", () => {
+    document.documentElement.classList.add("moving");
+    clearTimeout(still);
+    still = setTimeout(() => document.documentElement.classList.remove("moving"), 1500);
+  });
+  setInterval(() => {
+    const chart = page.live?.chart;
+    if (page.map && chart?.at && !document.hidden) away.postMessage({ at: chart.at(page.live.now) });
+  }, 500);
 }
