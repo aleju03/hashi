@@ -20,17 +20,55 @@
   color: #fff;
 }
 
-.board .map {
+.board .head .following {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.board-top {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 24px;
   margin-bottom: 8px;
 }
 
+.board-top .board-filters {
+  margin-bottom: 0;
+}
+
+/* the search field takes the room the buttons had */
+.board-top .board-filters:has(.board-search) {
+  flex: 1 1 280px;
+}
+
+.board .map {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.board .map .name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
 .board .map .title, .board .map .artist {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* a long artist gives way before the title does */
+.board .map .artist {
+  flex-shrink: 10;
 }
 
 .board .map .title {
@@ -39,14 +77,9 @@
   line-height: 1.25;
 }
 
-.board .map .artist, .board .map .line {
+.board .map .artist {
   font-size: 12px;
   color: var(--osu-f1);
-}
-
-.board .map .line {
-  margin-top: 2px;
-  color: var(--accent);
 }
 
 .board .doing {
@@ -264,10 +297,11 @@
   gap: 6px;
 }
 
+/* opens leftwards, the filters can sit at the right edge */
 .board-countries {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
+  right: 0;
   z-index: 20;
   min-width: 190px;
   max-height: 264px;

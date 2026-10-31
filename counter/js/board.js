@@ -276,19 +276,19 @@ function boardView() {
   const diff = diffName(map.keys, data?.version ?? map.version);
   const players = data?.entries?.length ? `${data.total} ${data.total === 1 ? "player" : "players"}` : null;
   const head = el("div", { class: "head" },
-    el("p", { class: "say" }, "Leaderboard"),
+    el("p", { class: "say" }, "Leaderboard", board.follow && el("span", { class: "following", title: "It changes with the map selected in osu!" }, "Selected in osu!")),
     el("button", { class: "link", onclick: closeBoard }, "Back to plays"));
   const about = el("div", { class: "map" },
-    data?.url
-      ? el("a", { class: "title", href: data.url, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, title)
-      : el("span", { class: "title" }, title),
-    el("span", { class: "artist" }, data?.artist ?? map.artist),
+    el("div", { class: "name" },
+      data?.url
+        ? el("a", { class: "title", href: data.url, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, title)
+        : el("span", { class: "title" }, title),
+      el("span", { class: "artist" }, data?.artist ?? map.artist)),
     el("div", { class: "facts" },
       diff && el("span", {}, diff),
       (board.speed || board.mods.length > 0) && el("span", { class: "mods", title: "Only plays with these mods" },
         [board.speed && { ht: "HT", dt: "DT" }[board.speed], ...board.mods].filter(Boolean).map(modBadge)),
-      players && el("span", { class: "players" }, players)),
-    board.follow && el("span", { class: "line" }, "The map selected in osu!"));
+      players && el("span", { class: "players" }, players)));
   const filtered = board.friends || board.country || board.q;
   const scope = data && !data.unsupported && !data.unknown && boardScope();
 
@@ -351,5 +351,6 @@ function boardView() {
         el("span", {}, `${data.offset + from + 1}–${data.offset + from + shown.length} of ${data.total}`),
         el("button", { class: "link", disabled: board.loading || (from >= last && !more), onclick: () => page(1) }, "Next")));
   }
-  return el("div", { class: "board" }, head, about, scope, body);
+  // the filters sit beside the map when there's room, under it when there isn't
+  return el("div", { class: "board" }, head, el("div", { class: "board-top" }, about, scope), body);
 }
