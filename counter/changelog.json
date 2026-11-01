@@ -1,6 +1,7 @@
 [
   {
     "version": "0.1.5",
+    "date": "2026-11-01",
     "changes": [
       { "kind": "new", "text": "Play analysis. Click the chart icon on a play to see your timing, how each finger and hand did, your long note releases, and what to work on. You can turn it off in the settings." },
       { "kind": "new", "text": "A skin editor. Color columns, outline parts, resize art, and move HitPosition, ColumnStart, ColumnWidth, ColumnSpacing, the judgement line, judgements, combo and StageBottom. Ctrl+Z and Ctrl+Y undo and redo." },
