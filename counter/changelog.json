@@ -1,6 +1,7 @@
 [
   {
     "version": "0.1.6",
+    "date": "2026-11-03",
     "changes": [
       { "kind": "fixed", "text": "Watching a replay of your own score on lazer showed it as a new play." }
     ]
