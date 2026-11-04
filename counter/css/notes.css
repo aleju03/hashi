@@ -62,12 +62,12 @@
 }
 
 .bottle .ripples {
-  animation: ripple steps(4) infinite;
+  animation: ripple ease-in-out infinite;
 }
 
 .bottle .float {
   transform-origin: 50px 46px;
-  animation: bottle-bob steps(8) infinite;
+  animation: bottle-bob ease-in-out infinite;
 }
 
 @keyframes bottle-bob {
@@ -105,11 +105,11 @@
 }
 
 .bottle.uncorked .cork {
-  animation: uncork 420ms steps(5) both;
+  animation: uncork 420ms ease-out both;
 }
 
 .bottle.uncorked .paper, .bottle.uncorked .ribbon {
-  animation: peek 420ms steps(5) both;
+  animation: peek 420ms ease-out both;
 }
 
 .bottle.uncorked .glimmer {
@@ -151,7 +151,7 @@
   padding: 20px 20px 16px;
   color: var(--osu-b5);
   transform: rotate(-0.8deg);
-  animation: unroll 640ms steps(8) both;
+  animation: unroll 640ms ease-out both;
 }
 
 .letter::before {
@@ -221,7 +221,7 @@
 }
 
 .letter .changes li {
-  animation: jot 260ms steps(3) both;
+  animation: jot 260ms ease-out both;
 }
 
 @keyframes jot {

@@ -2,7 +2,8 @@
   {
     "version": "0.1.7",
     "changes": [
-      { "kind": "new", "text": "Plays on torii are sent. It needs tosu-torii instead of tosu." }
+      { "kind": "new", "text": "Plays on torii are sent. It needs tosu-torii instead of tosu." },
+      { "kind": "changed", "text": "The bottle and the letter with what's new move smoothly." }
     ]
   },
   {
