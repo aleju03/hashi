@@ -196,10 +196,17 @@ impl Env {
             }
         });
         let lazer_dir = var("LAZER_DIR").map(PathBuf::from).unwrap_or_else(|| {
-            if cfg!(windows) {
-                var("APPDATA").map(PathBuf::from).unwrap_or(home.join("AppData").join("Roaming")).join("osu")
+            let parent = if cfg!(windows) {
+                var("APPDATA").map(PathBuf::from).unwrap_or(home.join("AppData").join("Roaming"))
             } else {
-                var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or(home.join(".local").join("share")).join("osu")
+                var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or(home.join(".local").join("share"))
+            };
+            // torii's, when it's the only one here
+            let (osu, torii) = (parent.join("osu"), parent.join("osu-torii"));
+            if !osu.join("client.realm").is_file() && torii.join("client.realm").is_file() {
+                torii
+            } else {
+                osu
             }
         });
         let config_root = if cfg!(windows) {

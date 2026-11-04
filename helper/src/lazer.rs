@@ -18,6 +18,27 @@ static WRITER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/LazerWriter.dll
 pub const MODE: &str = "--lazer-write";
 const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 
+// torii, a lazer fork, keeps its data in osu-torii and its settings in torii.ini instead of game.ini
+pub(crate) fn is_torii(root: &Path) -> bool {
+    root.join("torii.ini").is_file()
+}
+
+// what the running game's process is called on linux
+pub(crate) fn process_name(torii: bool) -> &'static str {
+    if torii { "torii" } else { "osu!" }
+}
+
+pub(crate) fn windows_install(torii: bool) -> Option<(PathBuf, PathBuf)> {
+    let (folder, exe) = if torii { ("torii", "torii.exe") } else { ("osulazer", "osu!.exe") };
+    let dir = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(folder).join("current");
+    let exe = dir.join(exe);
+    Some((dir, exe))
+}
+
+fn game_root(b: &Bridge) -> Option<PathBuf> {
+    b.st().tosu.lazer_files_dir.parent().map(Path::to_path_buf)
+}
+
 pub(crate) fn can_save() -> bool {
     !WRITER.is_empty()
 }
@@ -35,7 +56,7 @@ pub(crate) fn save(b: &Bridge, found: &crate::skin::Found, change: impl FnOnce(&
     // one at a time: saves share the work folder, and a half-copied one would read as files taken out
     static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _saving = SAVING.lock().unwrap_or_else(|e| e.into_inner());
-    let root = b.st().tosu.lazer_files_dir.parent().map(Path::to_path_buf).ok_or("Hashi can't find lazer's folder.")?;
+    let root = game_root(b).ok_or("Hashi can't find lazer's folder.")?;
     let id = crate::skin::lazer_skin_id(&root).ok_or("Hashi can't tell which skin lazer has on.")?;
     let work = work_dir(b).join("skin");
     let _ = std::fs::remove_dir_all(&work);
@@ -194,25 +215,27 @@ const CORECLR: &str = "libcoreclr.so";
 // The folder with lazer's .NET runtime and Realm. On Linux lazer is an AppImage: its files are only
 // there while it's mounted, by a running lazer or by Hashi for the write.
 fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
+    let torii = game_root(b).is_some_and(|r| is_torii(&r));
     #[cfg(windows)]
     {
-        let _ = b;
-        let dir = std::env::var_os("LOCALAPPDATA").map(|l| PathBuf::from(l).join("osulazer").join("current"));
-        return match dir.filter(|d| d.join(CORECLR).is_file()) {
+        return match windows_install(torii).map(|(d, _)| d).filter(|d| d.join(CORECLR).is_file()) {
             Some(d) => Ok((d, None)),
             None => Err("Hashi can't find lazer's install to save with.".into()),
         };
     }
     #[cfg(target_os = "linux")]
     {
-        if let Some(dir) = running_lazer(b) {
+        if let Some(dir) = running_lazer(b, torii) {
             return Ok((dir, None));
         }
-        let remembered = std::fs::read_to_string(b.env.data_dir.join("lazer appimage")).ok().map(|s| PathBuf::from(s.trim()));
+        let remembered = std::fs::read_to_string(b.env.data_dir.join(appimage_note(torii))).ok().map(|s| PathBuf::from(s.trim()));
         let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        let candidates = remembered
-            .into_iter()
-            .chain([PathBuf::from("/opt/osu-lazer/osu.AppImage"), home.join("Applications/osu.AppImage"), home.join(".local/bin/osu.AppImage")]);
+        let usual = if torii {
+            [home.join("Applications/torii-linux-x64.AppImage"), home.join(".local/bin/torii-linux-x64.AppImage"), home.join("Downloads/torii-linux-x64.AppImage")]
+        } else {
+            [PathBuf::from("/opt/osu-lazer/osu.AppImage"), home.join("Applications/osu.AppImage"), home.join(".local/bin/osu.AppImage")]
+        };
+        let candidates = remembered.into_iter().chain(usual);
         for image in candidates.filter(|p| p.is_file()) {
             if let Some((dir, mount)) = mount_appimage(&image) {
                 return Ok((dir, Some(mount)));
@@ -222,7 +245,7 @@ fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = b;
+        let _ = torii;
         Err("Saving to lazer skins isn't supported here yet.".into())
     }
 }
@@ -230,16 +253,21 @@ fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
 // a running lazer's AppImage is mounted, its executable sits next to the runtime. The AppImage's own
 // path is kept for when lazer is closed.
 #[cfg(target_os = "linux")]
-fn running_lazer(b: &Bridge) -> Option<PathBuf> {
+fn appimage_note(torii: bool) -> &'static str {
+    if torii { "torii appimage" } else { "lazer appimage" }
+}
+
+#[cfg(target_os = "linux")]
+fn running_lazer(b: &Bridge, torii: bool) -> Option<PathBuf> {
     for e in std::fs::read_dir("/proc").ok()?.flatten() {
         if !e.file_name().to_string_lossy().bytes().all(|c| c.is_ascii_digit()) {
             continue;
         }
         let Ok(exe) = std::fs::read_link(e.path().join("exe")) else { continue };
-        let Some(dir) = exe.parent().filter(|d| exe.file_name().is_some_and(|n| n == "osu!") && d.join(CORECLR).is_file()) else { continue };
+        let Some(dir) = exe.parent().filter(|d| exe.file_name().is_some_and(|n| n == process_name(torii)) && d.join(CORECLR).is_file()) else { continue };
         if let Ok(env) = std::fs::read(e.path().join("environ")) {
             if let Some(image) = env.split(|c| *c == 0).find_map(|v| v.strip_prefix(b"APPIMAGE=")) {
-                let _ = std::fs::write(b.env.data_dir.join("lazer appimage"), image);
+                let _ = std::fs::write(b.env.data_dir.join(appimage_note(torii)), image);
             }
         }
         return Some(dir.to_path_buf());

@@ -641,7 +641,7 @@ fn check_tosu_blocked(b: &Arc<Bridge>) {
     // a fresh tosu takes a few seconds to find the game
     if cfg!(not(windows)) && connected && !osu && now_ms() - since > 10_000 {
         let scope: i64 = std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-        if scope >= 1 && find_process(&["osu!", "osu!.exe"]).is_some() {
+        if scope >= 1 && find_process(&["osu!", "osu!.exe", "torii"]).is_some() {
             let exe = exe.or_else(tosu_process);
             let shown = exe.map(|e| shell_quote(&e.display().to_string())).unwrap_or("path/to/tosu".into());
             blocked = Some(format!("sudo setcap cap_sys_ptrace=eip {shown}"));

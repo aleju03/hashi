@@ -416,6 +416,7 @@ fn most_common_beat(points: &[Point], end: f64) -> f64 {
 
 pub(crate) fn open_in_osu(b: &Bridge, lazer: bool, file: &Path) {
     let stable_exe = if cfg!(windows) && !lazer { b.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe")) } else { None };
+    let torii = b.st().tosu.lazer_files_dir.parent().is_some_and(crate::lazer::is_torii);
     let file = file.to_path_buf();
     // a handler takes a moment to fail, see handed_on
     std::thread::spawn(move || {
@@ -424,11 +425,11 @@ pub(crate) fn open_in_osu(b: &Bridge, lazer: bool, file: &Path) {
             handed_on(child).map_err(|status| log!("{} couldn't open {}: {status}", exe.display(), file.display())).is_ok()
         };
         let started = if cfg!(windows) {
-            let exe = if lazer { std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("osulazer").join("current").join("osu!.exe")) } else { stable_exe };
+            let exe = if lazer { crate::lazer::windows_install(torii).map(|(_, exe)| exe) } else { stable_exe };
             exe.filter(|e| e.is_file()).is_some_and(|e| run(&e, &[]))
         } else if lazer {
             // a second lazer hands the file to the one running
-            running_lazer().is_some_and(|e| run(&e, &[]))
+            running_lazer(torii).is_some_and(|e| run(&e, &[]))
         } else {
             osu_wine().is_some_and(|e| run(&e, &["--osuhandler".as_ref()]))
         };
@@ -469,10 +470,10 @@ fn osu_wine() -> Option<PathBuf> {
 }
 
 // the AppImage the running lazer came from, or the program itself
-fn running_lazer() -> Option<PathBuf> {
+fn running_lazer(torii: bool) -> Option<PathBuf> {
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
         let dir = entry.path();
-        if !std::fs::read_to_string(dir.join("comm")).is_ok_and(|c| c.trim() == "osu!") {
+        if !std::fs::read_to_string(dir.join("comm")).is_ok_and(|c| c.trim() == crate::lazer::process_name(torii)) {
             continue;
         }
         let environ = std::fs::read(dir.join("environ")).unwrap_or_default();

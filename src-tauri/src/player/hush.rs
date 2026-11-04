@@ -112,7 +112,7 @@ fn keep(rx: Receiver<bool>) {
 
 fn is_osu(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
-    name == "osu!" || name == "osu!.exe"
+    ["osu!", "osu!.exe", "torii", "torii.exe"].contains(&name.as_str())
 }
 
 // a stream is known by its app's name, which outlives it

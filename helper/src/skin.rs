@@ -175,7 +175,8 @@ pub(crate) fn apply_as_new(b: &Bridge, found: &Found, keys: usize, edits: &str, 
 }
 
 pub(crate) fn lazer_skin_id(root: &Path) -> Option<uuid::Uuid> {
-    let text = std::fs::read_to_string(root.join("game.ini")).ok()?;
+    let ini = if crate::lazer::is_torii(root) { "torii.ini" } else { "game.ini" };
+    let text = std::fs::read_to_string(root.join(ini)).ok()?;
     text.lines().find_map(|l| {
         let (k, v) = l.split_once('=')?;
         (k.trim() == "Skin").then(|| v.trim().parse().ok()).flatten()
