@@ -10,6 +10,10 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::types::{truthy, Binding, Cover, Item, Play};
 use crate::{iso_now, log, now_ms, replays, Bridge, AUTOMATED_MODS};
 
+// lazer showed song select for ~300ms between a score's results and its replay
+const FROM_RESULTS_MS: i64 = 3000;
+const SCORE_DATE_SLACK_MS: i64 = 60_000;
+
 #[derive(Clone)]
 pub(crate) struct Beatmap {
     md5: Option<String>,
@@ -38,6 +42,9 @@ pub(crate) struct LastPlay {
     cover: Option<Cover>,
     // past the last note and not failed: quitting partway saves no score
     completed: bool,
+    // whose says watching_replay only from where it started, a new score's date overrules that
+    from_results: bool,
+    started_at: i64,
 }
 
 pub(crate) struct PendingFinish {
@@ -79,6 +86,8 @@ pub(crate) struct TosuState {
     own_results: bool,
     // started from the results of some other score: stable's local scores open there first
     pub replay: bool,
+    results_left_at: i64,
+    play_started_at: i64,
     pending_finish: Option<PendingFinish>,
     connected_at: i64,
     exe: Option<PathBuf>,
@@ -112,6 +121,8 @@ impl TosuState {
             viewed_result: None,
             own_results: false,
             replay: false,
+            results_left_at: 0,
+            play_started_at: 0,
             pending_finish: None,
             connected_at: 0,
             exe: None,
@@ -278,11 +289,17 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             b.broadcast();
         }
 
+        if t.prev_state.as_deref() == Some("resultScreen") && state != "resultScreen" {
+            t.results_left_at = now_ms();
+        }
         if state == "play" {
             if t.prev_state.as_deref() != Some("play") {
-                // retry or watch replay from results, remember which score was up
-                t.viewed_result = if t.prev_state.as_deref() == Some("resultScreen") { t.last_result_shown.clone() } else { None };
-                t.replay = t.prev_state.as_deref() == Some("resultScreen") && !t.own_results;
+                // retry or watch replay from results, remember which score was up. lazer goes back
+                // to song select for a moment on the way
+                let from_results = t.prev_state.as_deref() == Some("resultScreen") || now_ms() - t.results_left_at < FROM_RESULTS_MS;
+                t.viewed_result = if from_results { t.last_result_shown.clone() } else { None };
+                t.replay = from_results && !t.own_results;
+                t.play_started_at = now_ms();
             }
             let null = Value::Null;
             let bm = raw.get("beatmap").unwrap_or(&null);
@@ -338,6 +355,8 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                     let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
                     at("lastObject") > 0.0 && at("live") >= at("lastObject") && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true)
                 },
+                from_results: t.replay,
+                started_at: t.play_started_at,
             });
         }
 
@@ -390,7 +409,17 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
     let PendingFinish { play, viewed, stale, .. } = finish;
     let bm = &play.beatmap;
     let label = format!("{} - {} [{}]", crate::types::text(&bm.artist), crate::types::text(&bm.title), crate::types::text(&bm.version));
-    if play.whose != "playing" {
+    // a replay's results keep the date of the play it recorded
+    let new_score = rs
+        .as_ref()
+        .and_then(|r| r.get("createdAt"))
+        .and_then(Value::as_str)
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| at.timestamp_millis() >= play.started_at - SCORE_DATE_SLACK_MS);
+    if new_score == Some(false) {
+        return log!("skip (watched replay, an older score): {label}");
+    }
+    if play.whose != "playing" && !(play.from_results && new_score == Some(true)) {
         return log!("skip ({}, {}): {label}", play.whose.replace('_', " "), crate::types::text(&play.player_name));
     }
     // same results as before = watched the replay

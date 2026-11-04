@@ -12,6 +12,8 @@ use crate::{iso_from_ms, log, now_ms, osr, queue, Bridge, AUTOMATED_MODS, REPLAY
 
 // lazer saves the replay under its hash with no name, so look at what got written since the play
 const LAZER_SCAN_MS: i64 = 2000;
+// a new play's replay is dated when it ended, give or take a second
+const OLD_REPLAY_MS: i64 = 10 * 60_000;
 
 pub(crate) struct Fresh {
     name: String,
@@ -282,6 +284,12 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
     }
     if header.beatmap_md5.as_deref().map(str::to_lowercase).as_deref() != Some(item.play.beatmap_md5.as_str()) {
         return Ok(queue::fail(b, id, "failed", "replay_mismatch", "The replay header names a different chart."));
+    }
+    // lazer's file for a replay downloaded just before watching it looks new, its date doesn't
+    if header.played_at > 0 && header.played_at < item.detected_at_ms - OLD_REPLAY_MS {
+        log!("drop (watched replay, the file is from {}): {}", iso_from_ms(header.played_at), file.name);
+        queue::remove(b, id);
+        return Ok(());
     }
     if header.mods & AUTOMATED_MODS != 0 {
         return Ok(queue::fail(b, id, "failed", "automated", "The replay carries automated mods."));
