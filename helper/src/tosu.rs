@@ -13,6 +13,8 @@ use crate::{iso_now, log, now_ms, replays, Bridge, AUTOMATED_MODS};
 // lazer showed song select for ~300ms between a score's results and its replay
 const FROM_RESULTS_MS: i64 = 3000;
 const SCORE_DATE_SLACK_MS: i64 = 60_000;
+// song time this far before a finished play's last note means a new attempt or song select's preview
+const RESTART_GAP_MS: f64 = 5000.0;
 
 #[derive(Clone)]
 pub(crate) struct Beatmap {
@@ -86,6 +88,8 @@ pub(crate) struct TosuState {
     own_results: bool,
     // started from the results of some other score: stable's local scores open there first
     pub replay: bool,
+    // the play is in torii, whose tosu-torii reports its results as play
+    torii: bool,
     results_left_at: i64,
     play_started_at: i64,
     pending_finish: Option<PendingFinish>,
@@ -121,6 +125,7 @@ impl TosuState {
             viewed_result: None,
             own_results: false,
             replay: false,
+            torii: false,
             results_left_at: 0,
             play_started_at: 0,
             pending_finish: None,
@@ -300,13 +305,15 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 t.viewed_result = if from_results { t.last_result_shown.clone() } else { None };
                 t.replay = from_results && !t.own_results;
                 t.play_started_at = now_ms();
+                t.torii = client == "lazer" && t.lazer_files_dir.parent().is_some_and(crate::lazer::is_torii);
             }
             let null = Value::Null;
             let bm = raw.get("beatmap").unwrap_or(&null);
             let g = |v: &Value, k: &str| v.get(k).cloned().unwrap_or(Value::Null);
             let files = raw.get("files").unwrap_or(&null);
             let background = str_of(files.get("background")).filter(|x| !x.is_empty());
-            t.last_play = Some(LastPlay {
+            let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
+            let play = LastPlay {
                 client: client.into(),
                 mode: raw.pointer("/play/mode").cloned().unwrap_or(Value::Null),
                 beatmap_mode: g(bm, "mode"),
@@ -351,13 +358,22 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                         _ => None,
                     }
                 },
-                completed: {
-                    let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
-                    at("lastObject") > 0.0 && at("live") >= at("lastObject") && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true)
-                },
+                completed: at("lastObject") > 0.0 && at("live") >= at("lastObject") && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true),
                 from_results: t.replay,
                 started_at: t.play_started_at,
-            });
+            };
+            // a finished torii play is kept as it ended: tosu-torii reports torii's results as play, so
+            // play again or going back to song select can come while it still says play
+            let finished = t.last_play.as_ref().filter(|p| t.torii && p.completed && p.started_at == t.play_started_at).cloned();
+            match finished {
+                Some(done) if at("live") < at("lastObject") - RESTART_GAP_MS => {
+                    t.pending_finish = Some(PendingFinish { since: now_ms(), play: done, viewed: None, stale: None });
+                    t.play_started_at = now_ms();
+                    t.last_play = Some(LastPlay { started_at: t.play_started_at, ..play });
+                }
+                Some(_) => {}
+                None => t.last_play = Some(play),
+            }
         }
 
         // multiplayer results aren't resultScreen: stable has its own ranking screens, and to tosu
@@ -1077,6 +1093,44 @@ mod tests {
         assert_eq!(captured(&[lazer("lobby", 0.0), lazer("play", 30_000.0), lazer("play", 91_000.0), lazer("lobby", 91_500.0)]), 1);
         let stable = |state, live| frame("stable", state, live);
         assert_eq!(captured(&[stable("matchSetup", 0.0), stable("play", 91_000.0), stable("rankingVs", 91_500.0)]), 1);
+    }
+
+    // tosu-torii says play on torii's results screen, with the song back at the preview after it
+    #[tokio::test]
+    async fn torii_plays_finished_into_results_read_as_play() {
+        let root = std::env::temp_dir().join(format!("hashi-torii-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        std::fs::write(root.join("torii.ini"), b"").unwrap();
+        let songs = root.join("files").to_string_lossy().into_owned();
+        let torii = |state, live| {
+            let mut f = frame("lazer", state, live);
+            f["folders"] = json!({ "songs": songs });
+            f
+        };
+        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 30_000.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]), 1);
+        // play again from those results never leaves play
+        assert_eq!(
+            captured(&[torii("selectPlay", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]),
+            2
+        );
+        // or the second attempt is quit partway
+        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 30_000.0), torii("selectPlay", 30_100.0)]), 1);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // lazer's own replay seeked back after its end isn't a new play
+    #[tokio::test]
+    async fn lazer_plays_are_not_kept_past_their_end() {
+        let root = std::env::temp_dir().join(format!("hashi-lazer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let songs = root.join("files").to_string_lossy().into_owned();
+        let lazer = |state, live| {
+            let mut f = frame("lazer", state, live);
+            f["folders"] = json!({ "songs": songs });
+            f
+        };
+        assert_eq!(captured(&[lazer("selectPlay", 0.0), lazer("play", 91_000.0), lazer("play", 12_000.0), lazer("selectPlay", 12_100.0)]), 0);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[tokio::test]
