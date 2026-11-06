@@ -1,5 +1,11 @@
 [
   {
+    "version": "0.1.8",
+    "changes": [
+      { "kind": "new", "text": "Hashi works without connecting to Mania Tracker, for the analysis and the skin editor. Pick \"Continue without connecting\" on the first screen. Your plays stay in Hashi and aren't sent, and you can connect later from the settings." }
+    ]
+  },
+  {
     "version": "0.1.7",
     "date": "2026-11-04",
     "changes": [
