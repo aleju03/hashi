@@ -252,6 +252,16 @@
   white-space: nowrap;
 }
 
+.who .name .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+  white-space: nowrap;
+}
+
+.who .name .link:hover {
+  color: #fff;
+}
+
 .who {
   flex: 1;
 }

@@ -457,6 +457,10 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let ok = b.set_analysis(path == "/analysis/on").await;
             return saved(b, ok);
         }
+        if path == "/skip-connect/on" || path == "/skip-connect/off" {
+            let ok = b.set_skip_connect(path == "/skip-connect/on").await;
+            return saved(b, ok);
+        }
         if path == "/show-dans/on" || path == "/show-dans/off" {
             let ok = b.set_show_dans(path == "/show-dans/on").await;
             return saved(b, ok);

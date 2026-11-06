@@ -184,14 +184,22 @@ function settings(c, host, reconnect) {
       el("button", { class: "link", onclick: toggleSettings }, "Back to plays")),
     unsaved && el("p", { class: "status bad" }, unsaved),
     el("p", { class: "group" }, "Mania Tracker"),
-    sharing(),
-    el("div", { class: "setting" },
-      el("div", { class: "text" },
-        el("span", { class: "title" }, "Connected as ", c.username),
-        host && el("span", { class: "line" }, host)),
-      reconnect
-        ? el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect again")
-        : el("button", { class: "key danger", disabled: slow, onclick: () => action("disconnect") }, "Disconnect")),
+    c.username
+      ? [
+          sharing(),
+          el("div", { class: "setting" },
+            el("div", { class: "text" },
+              el("span", { class: "title" }, "Connected as ", c.username),
+              host && el("span", { class: "line" }, host)),
+            reconnect
+              ? el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect again")
+              : el("button", { class: "key danger", disabled: slow, onclick: () => action("disconnect") }, "Disconnect")),
+        ]
+      : el("div", { class: "setting" },
+          el("div", { class: "text" },
+            el("span", { class: "title" }, "Not connected"),
+            el("span", { class: "line" }, "Plays stay in Hashi and aren't sent.")),
+          el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect")),
     computer.length > 0 && [el("p", { class: "group" }, "This computer"), ...computer],
     el("p", { class: "group" }, "Look"),
     snapshot.showDans != null && toggle("Show dans", snapshot.showDans, "show-dans", "The dan next to a play's MSD."),

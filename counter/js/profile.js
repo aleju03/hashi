@@ -88,10 +88,10 @@ function idCard(c, d, days, tip) {
   const main = d.modes.reduce((a, b) => (!a || b.plays > a.plays ? b : a), null);
   return el("section", { class: "panel id-card" },
     el("div", { class: "id-top" },
-      el("span", { class: "id-face" }, c.avatarUrl ? el("img", { src: c.avatarUrl, alt: "" }) : c.username[0].toUpperCase()),
+      el("span", { class: "id-face" }, c.avatarUrl ? el("img", { src: c.avatarUrl, alt: "" }) : playerName(c)[0].toUpperCase()),
       el("div", { class: "id-who" },
         el("span", { class: "id-kind" }, "Player card"),
-        el("b", { class: "id-name" }, c.username),
+        el("b", { class: "id-name" }, playerName(c)),
         el("span", { class: "id-since" }, first ? `With Hashi since ${shortDate(new Date(first))}` : "No plays yet")),
       main && el("span", { class: "id-keys", style: "--tilt: 9deg" }, `${main.keys}K`)),
     el("ul", { class: "id-facts" },
@@ -305,7 +305,7 @@ function profileView() {
     el("div", { class: "head" },
       el("p", { class: "say" }, "Profile"),
       el("div", { class: "head-links" },
-        el("a", { class: "link", href: `${c.origin}/player/${encodeURIComponent(c.username)}`, target: "_blank", rel: "noreferrer" }, "On Mania Tracker"),
+        c.username && el("a", { class: "link", href: `${c.origin}/player/${encodeURIComponent(c.username)}`, target: "_blank", rel: "noreferrer" }, "On Mania Tracker"),
         el("button", { class: "link", onclick: closeProfile }, "Back to plays"))),
     body);
 }

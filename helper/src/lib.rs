@@ -429,6 +429,9 @@ impl Bridge {
             "tosuDashboard": self.env.tosu_can_start.then_some(s.tosu.dashboard).flatten(),
             "showDans": !s.config.settings.as_ref().is_some_and(|x| x.hide_dans),
             "analysis": s.analyzes(),
+            "skipConnect": s.config.settings.as_ref().is_some_and(|x| x.skip_connect),
+            // stands in for the account name when there's none
+            "player": s.queue.items.iter().filter(|i| i.play.player_name.as_str().is_some_and(|n| !n.is_empty())).max_by(|a, b| a.captured_at.cmp(&b.captured_at)).map(|i| &i.play.player_name),
             "thumb": if s.config.settings.as_ref().is_some_and(|x| x.thumb_right) { "right" } else { "left" },
             "unreadNotes": s.config.settings.as_ref().and_then(|x| x.notes_read.as_deref()) != Some(VERSION),
             "guideRead": s.config.settings.as_ref().is_some_and(|x| x.guide_read),
@@ -488,6 +491,13 @@ impl Bridge {
 
     pub(crate) async fn set_show_dans(self: &Arc<Self>, on: bool) -> bool {
         self.st().config.settings.get_or_insert_with(Default::default).hide_dans = !on;
+        let saved = self.save_config().await;
+        self.broadcast();
+        saved
+    }
+
+    pub(crate) async fn set_skip_connect(self: &Arc<Self>, on: bool) -> bool {
+        self.st().config.settings.get_or_insert_with(Default::default).skip_connect = on;
         let saved = self.save_config().await;
         self.broadcast();
         saved

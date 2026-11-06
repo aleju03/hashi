@@ -71,6 +71,9 @@ pub struct Settings {
     pub hide_analysis: bool,
     #[serde(default, rename = "onTop", skip_serializing_if = "std::ops::Not::not")]
     pub on_top: bool,
+    // chose to go on without connecting, so it opens on the plays and not the connect screen
+    #[serde(default, rename = "skipConnect", skip_serializing_if = "std::ops::Not::not")]
+    pub skip_connect: bool,
     // the hand whose thumb plays the middle column of 5K, 7K, 9K. unset is the left
     #[serde(default, rename = "thumbRight", skip_serializing_if = "std::ops::Not::not")]
     pub thumb_right: bool,

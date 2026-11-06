@@ -62,7 +62,7 @@ function tosuHint() {
   if (tosu.blocked) return blockedHint();
   if (snapshot.getTosu) return getTosu();
   if (tosu.connected || tosu.launch === "starting" || tosu.launch === "with-osu") return null;
-  return el("p", { class: "status warn" }, TOSU_HINT);
+  return el("p", { class: "status warn" }, snapshot.connection.username ? TOSU_HINT : "Start tosu so Hashi sees your plays.");
 }
 
 function statusLine(c) {
@@ -88,14 +88,20 @@ function now() {
 // reuse the same <img>, a new one is blank until it decodes
 let avatar = null;
 
+// the account's name, or the osu! one when Hashi isn't connected
+function playerName(c) {
+  return c.username ?? snapshot.player ?? "Player";
+}
+
 function face(c) {
-  if (!c.avatarUrl) return c.username[0].toUpperCase();
+  if (!c.avatarUrl) return playerName(c)[0].toUpperCase();
   if (avatar?.getAttribute("src") !== c.avatarUrl) avatar = el("img", { src: c.avatarUrl, alt: "" });
   return avatar;
 }
 
 function home(c, host) {
   const reconnect = c.status === "revoked" || c.status === "error";
+  const account = !!c.username;
   return el("div", { class: "home" },
     el("div", { class: "me" },
       el("span", { class: "face" }, face(c)),
@@ -108,11 +114,13 @@ function home(c, host) {
               "aria-pressed": String(!!profilePage),
               style: c.accent && `color: ${c.accent}`,
               onclick: () => (profilePage ? closeProfile() : openProfile()),
-            }, c.username)
-            : el("span", { class: "profile", style: c.accent && `color: ${c.accent}` }, c.username),
-          host && el("span", {}, host)),
+            }, playerName(c))
+            : el("span", { class: "profile", style: c.accent && `color: ${c.accent}` }, playerName(c)),
+          account
+            ? host && el("span", {}, host)
+            : el("button", { class: "link", disabled: slow, onclick: () => action("connect") }, "Connect to Mania Tracker")),
         now()),
-      snapshot.tosu.map && el("button", {
+      account && snapshot.tosu.map && el("button", {
         class: `gear${board?.follow ? " on" : ""}`,
         title: "Leaderboard of the map selected in osu!",
         "aria-pressed": String(!!board?.follow),
@@ -128,6 +136,7 @@ function home(c, host) {
     update(),
     tosuHint(),
     statusLine(c),
+    !account && c.status === "disconnected" && c.message && el("p", { class: "status warn" }, c.message),
     reconnect && !settingsOpen
       && el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect again"),
     helperDown && el("p", { class: "status warn" }, "Lost Hashi's helper. Reconnecting."),
@@ -205,7 +214,7 @@ function draw() {
   }
   if (!hasAccount) crossAt = 0;
   wasConnecting = c.status === "connecting";
-  const atHome = hasAccount && !crossAt;
+  const atHome = (hasAccount || (snapshot.skipConnect && c.status !== "connecting")) && !crossAt;
   if (!atHome) {
     settingsOpen = notesOpen = goalsOpen = false;
     analysis = maker = null;
@@ -261,7 +270,11 @@ function draw() {
       ? el("p", { class: "note" },
           again && [el("a", { href: again, target: "_blank", rel: "noreferrer" }, "Open the page again"), " · "],
           el("button", { class: "link", onclick: () => action("cancel") }, "Cancel"))
-      : c.message && el("p", { class: "note" }, c.message),
+      : [
+          c.message && el("p", { class: "note" }, c.message),
+          !crossAt && el("p", { class: "note" },
+            el("button", { class: "link", disabled: slow, onclick: () => action("skip-connect/on") }, "Continue without connecting")),
+        ],
     update(),
     getTosu(),
   ];
