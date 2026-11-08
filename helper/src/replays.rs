@@ -304,7 +304,8 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
     let chart_file = if lazer {
         item.play.chart_file.clone().map(PathBuf::from).filter(|f| f.exists())
     } else {
-        find_chart(b, &item.play.beatmap_md5, item.play.set.as_i64(), item.play.title.as_str().map(String::from)).await?
+        let hint = item.play.chart_file.clone().map(PathBuf::from);
+        find_chart(b, &item.play.beatmap_md5, hint, item.play.set.as_i64(), item.play.title.as_str().map(String::from)).await?
     };
     let Some(chart_file) = chart_file else {
         let msg = if lazer { "Couldn't find lazer's copy of this chart." } else { "No .osu in Songs hashes to this chart's MD5." };
@@ -359,8 +360,8 @@ fn update(b: &Arc<Bridge>, id: &str, f: impl FnOnce(&mut Item)) {
     }
 }
 
-// set folder first, then everything. md5s cached by size+mtime
-async fn find_chart(b: &Arc<Bridge>, md5: &str, set: Option<i64>, title: Option<String>) -> Result<Option<PathBuf>, String> {
+// tosu's path first, then the set folder, then everything. md5s cached by size+mtime
+async fn find_chart(b: &Arc<Bridge>, md5: &str, hint: Option<PathBuf>, set: Option<i64>, title: Option<String>) -> Result<Option<PathBuf>, String> {
     let cached = b.st().chart_index.take();
     let index = match cached {
         Some(i) => i,
@@ -368,7 +369,7 @@ async fn find_chart(b: &Arc<Bridge>, md5: &str, set: Option<i64>, title: Option<
     };
     let songs = b.songs_dir();
     let md5 = md5.to_string();
-    let (found, index, dirty) = tokio::task::spawn_blocking(move || search_songs(&songs, &md5, set, title, index))
+    let (found, index, dirty) = tokio::task::spawn_blocking(move || search_songs(&songs, &md5, hint, set, title, index))
         .await
         .map_err(|e| e.to_string())??;
     if dirty {
@@ -381,13 +382,21 @@ async fn find_chart(b: &Arc<Bridge>, md5: &str, set: Option<i64>, title: Option<
 
 type SearchResult = Result<(Option<PathBuf>, HashMap<String, ChartEntry>, bool), String>;
 
-fn search_songs(songs: &Path, md5: &str, set: Option<i64>, title: Option<String>, mut index: HashMap<String, ChartEntry>) -> SearchResult {
+fn search_songs(songs: &Path, md5: &str, hint: Option<PathBuf>, set: Option<i64>, title: Option<String>, mut index: HashMap<String, ChartEntry>) -> SearchResult {
+    let mut dirty = false;
+    if let Some(hint) = hint {
+        let hash = std::fs::metadata(&hint).ok().filter(|st| st.is_file()).and_then(|st| cached_md5(&hint, &st, &mut index, &mut dirty));
+        if hash.as_deref() == Some(md5) {
+            return Ok((Some(hint), index, dirty));
+        }
+    }
     let folders: Vec<String> = std::fs::read_dir(songs)
         .map_err(|e| format!("Cannot read {}: {e}", songs.display()))?
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
+    let label = title.clone().unwrap_or_else(|| md5.to_string());
     let mut preferred: Vec<&String> = vec![];
     if let Some(set) = set.filter(|s| *s > 0) {
         let prefix = format!("{set} ");
@@ -397,35 +406,50 @@ fn search_songs(songs: &Path, md5: &str, set: Option<i64>, title: Option<String>
         let more: Vec<&String> = folders.iter().filter(|f| f.to_lowercase().contains(&title) && !preferred.contains(f)).collect();
         preferred.extend(more);
     }
-    let rest = folders.iter().filter(|f| !preferred.contains(f));
-    let ordered: Vec<&String> = preferred.iter().copied().chain(rest).collect();
-    let mut dirty = false;
-    for folder in ordered {
-        let Ok(dir) = std::fs::read_dir(songs.join(folder)) else { continue };
-        for e in dir.flatten() {
-            let file = e.path();
-            if !e.file_type().is_ok_and(|t| t.is_file()) || !e.file_name().to_string_lossy().to_lowercase().ends_with(".osu") {
-                continue;
-            }
-            let Ok(st) = e.metadata() else { continue };
-            let key = file.to_string_lossy().into_owned();
-            let (size, mtime) = (st.len(), mtime_ms(&st));
-            let hash = match index.get(&key) {
-                Some(c) if c.size == size && (c.mtime_ms - mtime).abs() < 1.0 => c.md5.clone(),
-                _ => {
-                    let Ok(bytes) = crate::read_capped_sync(&file, crate::MAX_CHART_BYTES) else { continue };
-                    let h = md5_hex(&bytes);
-                    index.insert(key, ChartEntry { size, mtime_ms: mtime, md5: h.clone() });
-                    dirty = true;
-                    h
-                }
-            };
-            if hash == md5 {
-                return Ok((Some(file), index, dirty));
-            }
+    for folder in &preferred {
+        if let Some(file) = search_folder(&songs.join(folder), md5, &mut index, &mut dirty) {
+            return Ok((Some(file), index, dirty));
         }
     }
-    Ok((None, index, dirty))
+    // slow on a big Songs folder the first time, before the index has its md5s
+    log!("{label}: chart not where expected, looking through all of Songs");
+    let started = std::time::Instant::now();
+    let mut found = None;
+    for folder in folders.iter().filter(|f| !preferred.contains(f)) {
+        found = search_folder(&songs.join(folder), md5, &mut index, &mut dirty);
+        if found.is_some() {
+            break;
+        }
+    }
+    log!("{label}: {} after {:.1}s", if found.is_some() { "found" } else { "not in Songs" }, started.elapsed().as_secs_f64());
+    Ok((found, index, dirty))
+}
+
+fn search_folder(dir: &Path, md5: &str, index: &mut HashMap<String, ChartEntry>, dirty: &mut bool) -> Option<PathBuf> {
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        if !e.file_type().is_ok_and(|t| t.is_file()) || !e.file_name().to_string_lossy().to_lowercase().ends_with(".osu") {
+            continue;
+        }
+        let file = e.path();
+        let Ok(st) = e.metadata() else { continue };
+        if cached_md5(&file, &st, index, dirty).as_deref() == Some(md5) {
+            return Some(file);
+        }
+    }
+    None
+}
+
+fn cached_md5(file: &Path, st: &std::fs::Metadata, index: &mut HashMap<String, ChartEntry>, dirty: &mut bool) -> Option<String> {
+    let key = file.to_string_lossy().into_owned();
+    let (size, mtime) = (st.len(), mtime_ms(st));
+    if let Some(c) = index.get(&key).filter(|c| c.size == size && (c.mtime_ms - mtime).abs() < 1.0) {
+        return Some(c.md5.clone());
+    }
+    let bytes = crate::read_capped_sync(file, crate::MAX_CHART_BYTES).ok()?;
+    let h = md5_hex(&bytes);
+    index.insert(key, ChartEntry { size, mtime_ms: mtime, md5: h.clone() });
+    *dirty = true;
+    Some(h)
 }
 
 // keep a copy so retries send the exact same bytes
@@ -563,7 +587,7 @@ fn events_background(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{closest_replay, Fresh};
+    use super::{closest_replay, md5_hex, search_songs, Fresh};
     use crate::types::Item;
 
     const MD5: &str = "0123456789abcdef0123456789abcdef";
@@ -590,5 +614,25 @@ mod tests {
         let pool = [file(190_500)];
         assert_eq!(closest_replay(&pool, &a, [&b].into_iter()), None);
         assert_eq!(closest_replay(&pool, &b, [&a].into_iter()), Some(0));
+    }
+
+    #[test]
+    fn chart_found_outside_its_folder() {
+        let songs = std::env::temp_dir().join(format!("hashi-songs-{}", uuid::Uuid::new_v4()));
+        for (dir, text) in [("1 A - Pack", "other"), ("odd name", "the chart")] {
+            std::fs::create_dir_all(songs.join(dir)).unwrap();
+            std::fs::write(songs.join(dir).join("x.osu"), text).unwrap();
+        }
+        let md5 = md5_hex(b"the chart");
+        let want = songs.join("odd name").join("x.osu");
+        // tosu's path, the folder name doesn't matter
+        let (found, index, _) = search_songs(&songs, &md5, Some(want.clone()), Some(1), Some("Pack".into()), Default::default()).unwrap();
+        assert_eq!(found.as_ref(), Some(&want));
+        assert_eq!(index.len(), 1);
+        // a stale path, and the set and title folders miss, so it looks through everything
+        let stale = songs.join("1 A - Pack").join("x.osu");
+        let (found, _, _) = search_songs(&songs, &md5, Some(stale), Some(1), Some("Pack".into()), index).unwrap();
+        assert_eq!(found, Some(want));
+        std::fs::remove_dir_all(&songs).unwrap();
     }
 }

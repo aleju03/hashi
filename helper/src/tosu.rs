@@ -326,6 +326,15 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             let files = raw.get("files").unwrap_or(&null);
             let background = str_of(files.get("background")).filter(|x| !x.is_empty());
             let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
+            // where tosu said it was, lazer's by hash under files/
+            let map_file = |k: &str| match (str_of(files.get(k)).filter(|x| !x.is_empty()), client == "lazer") {
+                (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
+                (Some(f), false) => match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), &t.stable_dirs) {
+                    (Some(folder), Some((_, songs))) => Some(songs.join(folder.replace('\\', "/")).join(f).to_string_lossy().into_owned()),
+                    _ => None,
+                },
+                _ => None,
+            };
             let play = LastPlay {
                 client: client.into(),
                 mode: raw.pointer("/play/mode").cloned().unwrap_or(Value::Null),
@@ -350,19 +359,8 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                         .cloned()
                         .unwrap_or(Value::Null),
                 },
-                chart_file: if client == "lazer" {
-                    str_of(files.get("beatmap")).filter(|x| !x.is_empty()).map(|f| t.lazer_files_dir.join(f).to_string_lossy().into_owned())
-                } else {
-                    None
-                },
-                audio_file: match (str_of(files.get("audio")).filter(|x| !x.is_empty()), client == "lazer") {
-                    (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
-                    (Some(f), false) => match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), &t.stable_dirs) {
-                        (Some(folder), Some((_, songs))) => Some(songs.join(folder.replace('\\', "/")).join(f).to_string_lossy().into_owned()),
-                        _ => None,
-                    },
-                    _ => None,
-                },
+                chart_file: map_file("beatmap"),
+                audio_file: map_file("audio"),
                 cover: if client == "lazer" {
                     background.map(|file| Cover { lazer: Some(true), folder: None, file })
                 } else {
