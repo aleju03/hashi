@@ -223,6 +223,7 @@ function settings(c, host, reconnect) {
       el("button", { class: "key", onclick: () => openSkin() }, "Open")),
     el("p", { class: "about" }, `Hashi ${snapshot.version}`,
       shownNotes().length > 0 && [" · ", el("button", { class: "link", onclick: openNotes }, "What's new")],
+      snapshot.reports !== false && [" · ", el("button", { class: "link", onclick: openReport }, "Report a problem")],
       snapshot.update && !snapshot.update.step
         && [" · ", el("button", { class: "link", disabled: slow, onclick: getUpdate }, `${snapshot.update.install ? "Update to" : "Get"} ${snapshot.update.version}`)],
 ));
@@ -232,7 +233,7 @@ function toggleSettings() {
   settingsOpen = !settingsOpen;
   if (settingsOpen) {
     goalsOpen = false;
-    notesOpen = false;
+    notesOpen = reportOpen = false;
     analysis = maker = null;
     dropTrainer();
     skinPage = profilePage = null;

@@ -34,7 +34,7 @@ function shownNotes() {
 }
 
 function bottleVersion() {
-  if (!snapshot.unreadNotes || settingsOpen || notesOpen) return null;
+  if (!snapshot.unreadNotes || settingsOpen || notesOpen || reportOpen) return null;
   return notes.find((n) => n.version === thisVersion())?.version;
 }
 
@@ -42,7 +42,7 @@ function openNotes() {
   notesOpen = true;
   notesAt = Date.now();
   uncorkAt = 0;
-  settingsOpen = false;
+  settingsOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
   skinPage = profilePage = null;

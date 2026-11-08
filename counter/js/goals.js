@@ -135,7 +135,7 @@ function goalsUnseen() {
 function toggleGoals() {
   goalsOpen = !goalsOpen;
   if (goalsOpen) {
-    settingsOpen = notesOpen = false;
+    settingsOpen = notesOpen = reportOpen = false;
     analysis = maker = null;
     dropTrainer();
     skinPage = profilePage = null;

@@ -5,7 +5,7 @@ const TIPS_SHOWN = 4;
 function openAnalysis(p) {
   goalsOpen = false;
   skinPage = null;
-  settingsOpen = notesOpen = false;
+  settingsOpen = notesOpen = reportOpen = false;
   board = null;
   clearTimeout(boardTimer);
   analysis = { id: p.id, play: p, data: null, error: null, lane: "presses", allTips: false, openedAt: Date.now(), back: profilePage };

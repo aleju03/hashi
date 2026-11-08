@@ -12,7 +12,7 @@ const SKIN_WHY = {
 // from: a play to watch (id), where in its map to start (map ms), and the analysis to go back to
 function openSkin(from = null) {
   const back = from && analysis;
-  settingsOpen = goalsOpen = notesOpen = false;
+  settingsOpen = goalsOpen = notesOpen = reportOpen = false;
   profilePage = null;
   analysis = maker = null;
   dropTrainer();

@@ -7,6 +7,7 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, Method, Response, StatusCode};
 use axum::Router;
 use bytes::Bytes;
+use serde_json::Value;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::auth::{self, Attempt};
@@ -418,6 +419,23 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
                 Ok(Ok(v)) => json(200, &v),
                 Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
                 Err(_) => empty(500),
+            };
+        }
+        // POST so only the counter can read it, the log has the player's paths in it
+        if path == "/report/log" {
+            let b2 = b.clone();
+            let preview = tokio::task::spawn_blocking(move || crate::report::log_preview(&b2)).await.unwrap_or(Value::Null);
+            return json(200, &preview);
+        }
+        // { "text": "...", "log": true }
+        if path == "/report" {
+            let Ok(bytes) = axum::body::to_bytes(req.into_body(), 64 * 1024).await else { return empty(413) };
+            let Ok(ask) = serde_json::from_slice::<Value>(&bytes) else { return empty(400) };
+            let text = ask.get("text").and_then(Value::as_str).unwrap_or_default();
+            let with_log = ask.get("log").and_then(Value::as_bool).unwrap_or(true);
+            return match crate::report::send(b, text, with_log).await {
+                Ok(sent) => json(200, &sent),
+                Err(message) => json(400, &serde_json::json!({ "error": message })),
             };
         }
         if path == "/notes/read" {

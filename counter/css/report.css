@@ -1,0 +1,324 @@
+.report {
+  padding: 22px 4px 0;
+}
+
+/* the same paper as what's new, tilted the other way */
+.letter.outgoing {
+  margin: 18px 2px 14px 6px;
+  transform: rotate(0.7deg);
+  animation: none;
+}
+
+.letter.outgoing::after {
+  right: auto;
+  left: -1px;
+  background: linear-gradient(225deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%);
+}
+
+.letter .write {
+  --line: 24px;
+  display: block;
+  width: 100%;
+  min-height: calc(var(--line) * 6 + 4px);
+  margin: 12px 0 0;
+  padding: 0 2px 4px;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: linear-gradient(to top, hsl(var(--hue), calc(14% * var(--sat)), 74%) 1.5px, transparent 1.5px) 0 0 / 100% var(--line) repeat-y;
+  color: var(--osu-b5);
+  caret-color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  line-height: var(--line);
+}
+
+.letter .write::placeholder {
+  color: hsl(var(--hue), calc(12% * var(--sat)), 52%);
+}
+
+.letter .write::selection {
+  background: hsl(var(--hue), calc(60% * var(--sat)), 80%);
+}
+
+.letter .foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  margin-top: 12px;
+}
+
+.letter .sign {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 800;
+  color: hsl(var(--hue), calc(70% * var(--sat)), 48%);
+  transform: rotate(-4deg);
+  white-space: nowrap;
+}
+
+.log-tag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.log-tag .link {
+  color: var(--paper-ink);
+  font-weight: 600;
+}
+
+.log-tag .link:hover {
+  color: var(--osu-b5);
+}
+
+.attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--osu-b5);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.attach small {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--paper-ink);
+}
+
+.attach svg {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.attach .check, .attach .clip {
+  display: grid;
+  filter: url(#ink2);
+}
+
+.attach .clip {
+  color: var(--paper-ink);
+}
+
+.attach .tick {
+  stroke: hsl(var(--hue), calc(70% * var(--sat)), 48%);
+  stroke-width: 2.2;
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+  transition: stroke-dashoffset 220ms ease-out;
+}
+
+.attach.on .tick {
+  stroke-dashoffset: 0;
+}
+
+.attach:not(.on) span:not(.check) {
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  opacity: 0.55;
+}
+
+.attach:hover .box {
+  stroke: hsl(var(--hue), calc(70% * var(--sat)), 48%);
+}
+
+.log-peek {
+  position: relative;
+  isolation: isolate;
+  margin: 0 0 14px;
+}
+
+/* the box wobbles, the text stays crisp */
+.log-peek::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  filter: url(#ink3);
+}
+
+.log-peek pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  color: var(--osu-f1);
+  font: 11px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.report .status.bad {
+  margin: 0 0 10px;
+  color: var(--bad);
+}
+
+.send-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.send-row .why {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.report .sent {
+  padding-top: 18px;
+}
+
+.report .sent .again {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.report .sent .link {
+  color: inherit;
+}
+
+.report .sent .lead .link {
+  color: #fff;
+}
+
+.report .sent .link:hover {
+  color: #fff;
+}
+
+/* leaves from where the incoming one washes up */
+.bottle.away {
+  cursor: default;
+  pointer-events: none;
+  animation-name: drift-away;
+  animation-timing-function: cubic-bezier(0.3, 0, 0.7, 1);
+  animation-fill-mode: both;
+}
+
+@keyframes drift-away {
+  from {
+    left: 50%;
+    opacity: 0;
+    transform: translate(-50%, -18px);
+  }
+  8% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    left: calc(100% + 60px);
+    transform: translate(0, 0);
+  }
+}
+
+.ladybug {
+  position: absolute;
+  top: 38%;
+  right: -22px;
+  transform: rotate(-112deg);
+  pointer-events: none;
+}
+
+.ladybug svg {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: var(--osu-b5);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: url(#ink2);
+}
+
+.ladybug .shell {
+  fill: var(--accent);
+}
+
+.ladybug .head, .ladybug .spot {
+  fill: var(--osu-b5);
+  stroke: none;
+}
+
+.ladybug .legs path {
+  transform-box: fill-box;
+  animation: scuttle steps(1) infinite;
+  animation-duration: inherit;
+  animation-delay: inherit;
+}
+
+.ladybug .legs path:first-child {
+  transform-origin: right center;
+}
+
+.ladybug .legs path:last-child {
+  transform-origin: left center;
+  animation-direction: reverse;
+}
+
+@keyframes scuttle {
+  50% {
+    transform: rotate(9deg);
+  }
+}
+
+.bottle-doodle {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.bottle-doodle svg {
+  display: block;
+  overflow: visible;
+}
+
+.bottle-doodle .glass {
+  fill: var(--ink);
+  fill-opacity: 0.12;
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.bottle-doodle .glint {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.5;
+}
+
+.bottle-doodle .cork {
+  fill: var(--osu-b1);
+  stroke: var(--ink);
+  stroke-width: 2;
+}
+
+.bottle-doodle .sand {
+  fill: none;
+  stroke: var(--osu-b3);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ladybug * {
+    animation: none !important;
+  }
+}

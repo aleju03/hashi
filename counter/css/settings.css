@@ -1,20 +1,21 @@
+/* room for the boat on the shore below */
 .settings {
-  padding: 22px 4px 0;
+  padding: 22px 4px 44px;
 }
 
-.settings .head, .notes .head {
+.settings .head, .notes .head, .report .head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   margin-bottom: 12px;
 }
 
-.settings .head .link, .notes .head .link {
+.settings .head .link, .notes .head .link, .report .head .link {
   font-size: 12px;
   color: var(--osu-f1);
 }
 
-.settings .head .link:hover, .notes .head .link:hover {
+.settings .head .link:hover, .notes .head .link:hover, .report .head .link:hover {
   color: #fff;
 }
 

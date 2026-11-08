@@ -144,6 +144,8 @@ function home(c, host) {
       ? settings(c, host, reconnect)
       : notesOpen
         ? notesView()
+      : reportOpen
+        ? reportView()
       : goalsOpen
         ? goalsView()
       : profilePage
@@ -216,7 +218,7 @@ function draw() {
   wasConnecting = c.status === "connecting";
   const atHome = (hasAccount || (snapshot.skipConnect && c.status !== "connecting")) && !crossAt;
   if (!atHome) {
-    settingsOpen = notesOpen = goalsOpen = false;
+    settingsOpen = notesOpen = goalsOpen = reportOpen = false;
     analysis = maker = null;
     dropTrainer();
     skinPage = profilePage = null;
@@ -235,8 +237,8 @@ function draw() {
   }
 
   if (atHome) {
-    app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion())));
-    const view = settingsOpen ? "settings" : notesOpen ? "notes" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
+    app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion(), sentBottle())));
+    const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
     document.documentElement.classList.toggle("roomy", !!(analysis || skinPage) && ROOMY.matches);
     if (view !== shownView) (document.documentElement.classList.contains("framed") ? app : document.scrollingElement).scrollTop = 0;
     shownView = view;

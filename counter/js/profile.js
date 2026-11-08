@@ -1,7 +1,7 @@
 let profilePage = null;
 
 function openProfile() {
-  settingsOpen = goalsOpen = notesOpen = false;
+  settingsOpen = goalsOpen = notesOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
   skinPage = null;

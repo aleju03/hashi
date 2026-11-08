@@ -149,7 +149,7 @@ function kofi() {
   return el("span", { class: "kofi-dock" }, node, el("a", { class: "kofi-say", href: KOFI, target: "_blank", rel: "noreferrer" }, "Support on Ko-fi"));
 }
 
-function shore(boat = false, adrift = null) {
+function shore(boat = false, adrift = null, away = null) {
   const node = el("div", { class: "shore" });
   const width = Math.max(innerWidth, 400);
   // as wide as the window could ever get
@@ -171,6 +171,7 @@ function shore(boat = false, adrift = null) {
   </g></svg>`;
   if (boat) node.append(kofi());
   if (adrift) node.append(bottle(adrift));
+  if (away) node.append(away);
   return node;
 }
 

@@ -32,7 +32,7 @@ function modVariant(mods) {
 // mine: open on the page with your own row. from: the first row shown, the wheel moves it a row at a time
 function openBoard(map, follow = false, mine = false, variant = map) {
   goalsOpen = false;
-  settingsOpen = notesOpen = false;
+  settingsOpen = notesOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
   skinPage = profilePage = null;

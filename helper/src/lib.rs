@@ -15,6 +15,7 @@ mod profile;
 mod queue;
 mod realm;
 mod replays;
+mod report;
 mod skin;
 mod skin_render;
 mod server;
@@ -443,6 +444,8 @@ impl Bridge {
             } else {
                 Some("gstreamer")
             },
+            // false once the site said it takes no reports, null before it was asked
+            "reports": s.caps.as_ref().map(|c| c.get("bug_reports").is_some_and(Value::is_object)),
             "goals": goals::public(self),
             "plays": items.into_iter().map(|i| queue::public_item(i, &self.env.origin, profile.as_deref())).collect::<Vec<_>>(),
         })

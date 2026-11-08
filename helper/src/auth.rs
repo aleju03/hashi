@@ -342,6 +342,30 @@ pub(crate) async fn api(b: &Arc<Bridge>, path: &str, req: Req) -> Result<Resp, F
     Ok(res)
 }
 
+// no token and no proof, for a report from someone who isn't connected
+pub(crate) async fn api_open(b: &Arc<Bridge>, path: &str, req: Req) -> Result<Resp, Fail> {
+    let caps = caps(b).await?;
+    let mut last = None;
+    for url in routes(b, &caps, path, format!("{}{path}", api_base(&caps))) {
+        let mut rb = b.client().request(req.method.clone(), &url).timeout(req.timeout);
+        for (k, v) in &req.headers {
+            rb = rb.header(*k, v);
+        }
+        if let Some(body) = &req.body {
+            rb = rb.body(body.clone());
+        }
+        match rb.send().await {
+            Ok(res) => {
+                let (status, headers) = (res.status().as_u16(), res.headers().clone());
+                let body = res.bytes().await.map_err(|e| Fail::Other(net_message(&e)))?;
+                return Ok(Resp { status, headers, body });
+            }
+            Err(e) => last = Some(Fail::Other(net_message(&e))),
+        }
+    }
+    Err(last.unwrap_or_else(|| Fail::Other("No route to Mania Tracker.".into())))
+}
+
 pub(crate) const GONE: &str = "Mania Tracker doesn't accept this connection anymore. It was removed on the site, or it expired. Connect again.";
 
 pub(crate) fn set_connection(b: &Arc<Bridge>, status: &str, message: Option<String>) {
