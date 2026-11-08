@@ -169,6 +169,17 @@ fn local_path(p: &str) -> Option<PathBuf> {
     wine_path(p, &wine_prefixes())
 }
 
+// osu!.cfg's BeatmapDirectory can be relative to the game folder, and tosu passes that on as is
+fn songs_path(game: &Path, p: &str) -> Option<PathBuf> {
+    if p.is_empty() {
+        return None;
+    }
+    if p.contains(':') || p.starts_with(['\\', '/']) {
+        return local_path(p);
+    }
+    Some(game.join(p.replace('\\', "/")))
+}
+
 // X:\a\b through the prefix's dosdevices/x: link. osu-winello puts osu! on D:
 fn wine_path(p: &str, prefixes: &[PathBuf]) -> Option<PathBuf> {
     let (drive, rest) = p.split_once(":\\")?;
@@ -272,7 +283,9 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             let folder = |k: &str| raw.pointer(&format!("/folders/{k}")).and_then(Value::as_str).unwrap_or_default().to_string();
             let folders = (folder("game"), folder("songs"));
             if t.stable_folders.as_ref() != Some(&folders) {
-                if let (Some(game), Some(songs)) = (local_path(&folders.0), local_path(&folders.1)) {
+                let game = local_path(&folders.0);
+                let songs = game.as_deref().and_then(|g| songs_path(g, &folders.1));
+                if let (Some(game), Some(songs)) = (game, songs) {
                     if t.stable_dirs.as_ref() != Some(&(game.clone(), songs.clone())) && game.is_dir() {
                         log!("osu! is in {}, its songs in {}", game.display(), songs.display());
                         t.stable_dirs = Some((game, songs));
@@ -1043,6 +1056,15 @@ mod tests {
         assert_eq!(super::wine_path("Z:\\home\\a", &prefixes), Some("/home/a".into()));
         assert_eq!(super::wine_path("\\\\server\\x", &prefixes), None);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn songs_relative_to_the_game() {
+        let game = std::path::Path::new("/games/osu!");
+        assert_eq!(super::songs_path(game, "Songs"), Some(game.join("Songs")));
+        assert_eq!(super::songs_path(game, "Maps\\Mania"), Some(game.join("Maps/Mania")));
+        assert_eq!(super::songs_path(game, "/srv/songs"), Some("/srv/songs".into()));
+        assert_eq!(super::songs_path(game, ""), None);
     }
 
     #[test]
