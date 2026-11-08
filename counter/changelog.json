@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.9",
+    "date": "2026-11-08",
+    "changes": [
+      { "kind": "new", "text": "Report a problem from the settings. What you write goes to Mania Tracker along with Hashi's log, so it's easier to find what went wrong." },
+      { "kind": "fixed", "text": "Plays could sit on \"Waiting for replay\" for minutes when a map's folder in Songs is named differently from the map." }
+    ]
+  },
+  {
     "version": "0.1.8",
     "date": "2026-11-06",
     "changes": [
