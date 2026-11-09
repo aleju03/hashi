@@ -4,6 +4,7 @@ const TIPS_SHOWN = 4;
 
 function openAnalysis(p) {
   goalsOpen = false;
+  dropCutter();
   skinPage = null;
   settingsOpen = notesOpen = reportOpen = false;
   board = null;
@@ -18,6 +19,7 @@ function closeAnalysis() {
   profilePage = analysis?.back ?? null;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   render();
 }
 

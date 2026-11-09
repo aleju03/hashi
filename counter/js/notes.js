@@ -45,6 +45,7 @@ function openNotes() {
   settingsOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);

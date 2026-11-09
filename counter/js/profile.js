@@ -4,6 +4,7 @@ function openProfile() {
   settingsOpen = goalsOpen = notesOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   skinPage = null;
   board = null;
   clearTimeout(boardTimer);

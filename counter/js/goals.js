@@ -138,6 +138,7 @@ function toggleGoals() {
     settingsOpen = notesOpen = reportOpen = false;
     analysis = maker = null;
     dropTrainer();
+    dropCutter();
     skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);

@@ -120,6 +120,12 @@ function home(c, host) {
             ? host && el("span", {}, host)
             : el("button", { class: "link", disabled: slow, onclick: () => action("connect") }, "Connect to Mania Tracker")),
         now()),
+      snapshot.tosu.map && el("button", {
+        class: `gear${cutter ? " on" : ""}`,
+        title: "Cut the map selected in osu!",
+        "aria-pressed": String(!!cutter),
+        onclick: () => (cutter ? closeCutter() : openCutter()),
+      }, icon(SCISSORS)),
       account && snapshot.tosu.map && el("button", {
         class: `gear${board?.follow ? " on" : ""}`,
         title: "Leaderboard of the map selected in osu!",
@@ -152,6 +158,8 @@ function home(c, host) {
         ? profileView()
       : skinPage
         ? skinView()
+      : cutter
+        ? cutterView()
       : board
         ? boardView()
       : maker
@@ -221,6 +229,7 @@ function draw() {
     settingsOpen = notesOpen = goalsOpen = reportOpen = false;
     analysis = maker = null;
     dropTrainer();
+    dropCutter();
     skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);
@@ -238,8 +247,8 @@ function draw() {
 
   if (atHome) {
     app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion(), sentBottle())));
-    const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
-    document.documentElement.classList.toggle("roomy", !!(analysis || skinPage) && ROOMY.matches);
+    const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : cutter ? "cut" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
+    document.documentElement.classList.toggle("roomy", !!(analysis || skinPage || cutter) && ROOMY.matches);
     if (view !== shownView) (document.documentElement.classList.contains("framed") ? app : document.scrollingElement).scrollTop = 0;
     shownView = view;
     fitPage();

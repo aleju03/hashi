@@ -1,0 +1,367 @@
+.cutter {
+  padding: 22px 4px 0;
+}
+
+.cutter > .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.cutter > .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.cutter > .head .link:hover {
+  color: #fff;
+}
+
+.cutter .map {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.cutter .map .title, .cutter .map .artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cutter .map .title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.cutter .map .artist {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.cutter > .doing {
+  display: flex;
+  justify-content: center;
+  margin: 48px 0 0;
+  color: var(--osu-f1);
+}
+
+.cut-other {
+  margin: -6px 0 14px;
+}
+
+.cutter .caption .link {
+  color: var(--osu-f1);
+  text-decoration: underline;
+}
+
+.cutter .status {
+  margin-top: 12px;
+}
+
+.cut-stage {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* one size whatever the skin's stage is, so it doesn't jump when the skin loads */
+.cut-view-box {
+  position: relative;
+  flex-shrink: 0;
+  height: 340px;
+  aspect-ratio: 0.85;
+  max-width: 55%;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #000;
+}
+
+.cut-view-box .spinner {
+  position: absolute;
+  top: calc(50% - 6px);
+  left: calc(50% - 6px);
+}
+
+.cut-view {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
+}
+
+.cut-side {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cut-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cut-label {
+  width: 38px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.cut-mark b {
+  flex: 1;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cut-mark .key {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.cut-picked {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cut-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--osu-f1);
+}
+
+.cut-track {
+  position: relative;
+  margin-top: 8px;
+  padding-top: 34px;
+}
+
+.cut-line {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.cut-line .inked {
+  filter: url(#ink3);
+}
+
+.cut-line .hill {
+  fill: var(--osu-b3);
+}
+
+.cut-line .hill.kept {
+  fill: var(--accent);
+  filter: url(#ink3);
+}
+
+.cut-line .ground {
+  fill: var(--ink);
+}
+
+.cut-line .edge {
+  filter: url(#ink2);
+}
+
+.cut-line .edge line {
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  stroke-linecap: round;
+}
+
+.cut-line .edge circle {
+  fill: var(--accent);
+  stroke: var(--osu-b5);
+  stroke-width: 2;
+}
+
+.cut-line .now {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.cut-scissors {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.cut-scissors svg {
+  display: block;
+  overflow: visible;
+}
+
+.cut-scissors .ink {
+  filter: url(#ink2);
+}
+
+.cut-scissors .loop {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+}
+
+.cut-scissors .blade {
+  fill: var(--ink);
+  stroke: var(--ink);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.cut-scissors .pin {
+  fill: var(--osu-b5);
+}
+
+.cut-scissors .half {
+  transform-box: view-box;
+  transform-origin: 10px 15.6px;
+  animation: snip 4.2s ease-in-out infinite;
+}
+
+.cut-scissors .half.other {
+  animation-name: snip-other;
+}
+
+@keyframes snip {
+  0%, 70%, 92%, 100% {
+    transform: rotate(0);
+  }
+
+  80% {
+    transform: rotate(-11deg);
+  }
+}
+
+@keyframes snip-other {
+  0%, 70%, 92%, 100% {
+    transform: rotate(0);
+  }
+
+  80% {
+    transform: rotate(11deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cut-scissors * {
+    animation: none !important;
+  }
+}
+
+.cut-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.cut-clock {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--osu-f1);
+}
+
+.cutter .cut-make .caption {
+  margin: 0 0 12px;
+}
+
+.cut-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.cut-name input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cut-name input::placeholder {
+  color: var(--osu-f1);
+  font-weight: 500;
+}
+
+@media (min-width: 980px) {
+  .roomy .cutter {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto 1fr auto auto auto;
+    grid-template-areas: "head head" "map map" "note note" "view side" "view make" "track track" "tools tools" "sound sound";
+    column-gap: 44px;
+    align-items: start;
+  }
+
+  .roomy .cutter > .head {
+    grid-area: head;
+  }
+
+  .roomy .cutter > .map {
+    grid-area: map;
+  }
+
+  .roomy .cutter > .cut-other, .roomy .cutter > .doing, .roomy .cutter > .cut-error {
+    grid-area: note;
+  }
+
+  .roomy .cut-stage {
+    display: contents;
+  }
+
+  .roomy .cut-view-box {
+    grid-area: view;
+    height: clamp(400px, calc(100vh - 420px), 620px);
+    max-width: none;
+  }
+
+  .roomy .cut-side {
+    grid-area: side;
+    max-width: 420px;
+    padding-top: 8px;
+  }
+
+  .roomy .cutter > .cut-make {
+    grid-area: make;
+    max-width: 420px;
+    margin-top: 26px;
+  }
+
+  .roomy .cut-track {
+    grid-area: track;
+    margin-top: 14px;
+  }
+
+  .roomy .cut-tools {
+    grid-area: tools;
+  }
+
+  .roomy .cutter > .cut-silent {
+    grid-area: sound;
+  }
+}

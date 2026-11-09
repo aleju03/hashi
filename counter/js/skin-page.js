@@ -16,6 +16,7 @@ function openSkin(from = null) {
   profilePage = null;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   board = null;
   clearTimeout(boardTimer);
   const keys = Math.round((from ? from.keys : null) ?? snapshot.tosu.map?.keys ?? snapshot.plays[0]?.play.keys ?? 4);

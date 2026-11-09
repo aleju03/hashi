@@ -71,6 +71,11 @@ worth on that play. On 5K, 7K and 9K the middle column counts for the hand you p
 Plays you finish while sending is off are still analyzed, they just aren't sent. If you'd rather not
 have any of it, turn off Analysis in the settings. Goals and your profile go with it.
 
+To play only part of a long map, select it in osu! and click the scissors next to the gear. The map
+plays in your skin, with the whole of it laid out underneath. Drag the two ends around the part you
+want, or pause on a note and set an end there, to make a new difficulty with only those notes and
+the song cut to fit. It opens in osu! right away. Plays of it aren't sent.
+
 Closing the window quits the app. The hide to tray button keeps it running in the background using
 very little memory.
 

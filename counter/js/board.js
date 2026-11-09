@@ -35,6 +35,7 @@ function openBoard(map, follow = false, mine = false, variant = map) {
   settingsOpen = notesOpen = reportOpen = false;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   skinPage = profilePage = null;
   clearTimeout(boardTimer);
   // the country or friends picked last time stay picked

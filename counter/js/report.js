@@ -14,6 +14,7 @@ function openReport() {
   settingsOpen = notesOpen = goalsOpen = false;
   analysis = maker = null;
   dropTrainer();
+  dropCutter();
   skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);
