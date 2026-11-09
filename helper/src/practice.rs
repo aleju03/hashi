@@ -99,7 +99,7 @@ pub(crate) fn find(b: &Bridge, md5: &str) -> Option<Practice> {
 
 // the version also catches a copy made on another computer
 pub(crate) fn is_practice(b: &Bridge, md5: &str, version: &str) -> bool {
-    version.starts_with(MARK) || find(b, md5).is_some()
+    version.starts_with(MARK) || version.starts_with(crate::cut::MARK) || find(b, md5).is_some() || crate::cut::is_cut(b, md5)
 }
 
 pub(crate) async fn make(b: &Arc<Bridge>, id: &str, o: Options) -> (u16, Value) {
@@ -217,7 +217,7 @@ fn render(item: &Item, replay: &[u8], chart: &[u8], lazer: bool, audio: &Path, b
         .collect();
 
     // the practice map plays without mods, so the play's rate goes into the audio
-    let mut out = Mix { rate: pcm.rate, channels: pcm.channels, parts: vec![], frames: 0 };
+    let mut out = Mix::new(pcm.rate, pcm.channels);
     out.silence(START_SILENCE_MS);
     let mut placed = vec![];
     for &s in &speeds {
@@ -354,11 +354,11 @@ fn render(item: &Item, replay: &[u8], chart: &[u8], lazer: bool, audio: &Path, b
     })
 }
 
-fn or(a: String, b: String) -> String {
+pub(crate) fn or(a: String, b: String) -> String {
     if a.is_empty() { b } else { a }
 }
 
-fn sanitize(s: &str) -> String {
+pub(crate) fn sanitize(s: &str) -> String {
     let clean: String = s.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) || c.is_control() { '_' } else { c }).collect();
     clean.trim().trim_end_matches('.').chars().take(150).collect()
 }
@@ -401,14 +401,19 @@ fn timing_points(text: &str) -> Vec<Point> {
 
 // the beat length that lasts longest, what osu! scales scroll speed against
 fn most_common_beat(points: &[Point], end: f64) -> f64 {
-    let reds: Vec<&Point> = points.iter().filter(|p| p.red).collect();
+    longest_beat(points.iter().filter(|p| p.red).map(|p| (p.time, p.beat)), end)
+}
+
+// reds as (time, beat length), in order
+pub(crate) fn longest_beat(reds: impl Iterator<Item = (f64, f64)>, end: f64) -> f64 {
+    let reds: Vec<(f64, f64)> = reds.collect();
     let mut spans: Vec<(f64, f64)> = vec![];
-    for (k, r) in reds.iter().enumerate() {
-        let until = reds.get(k + 1).map_or(end, |n| n.time).max(r.time);
-        let key = (r.beat * 1000.0).round() / 1000.0;
+    for (k, &(time, beat)) in reds.iter().enumerate() {
+        let until = reds.get(k + 1).map_or(end, |n| n.0).max(time);
+        let key = (beat * 1000.0).round() / 1000.0;
         match spans.iter_mut().find(|s| (s.0 - key).abs() < 1e-9) {
-            Some(s) => s.1 += until - r.time,
-            None => spans.push((key, until - r.time)),
+            Some(s) => s.1 += until - time,
+            None => spans.push((key, until - time)),
         }
     }
     spans.iter().max_by(|x, y| x.1.total_cmp(&y.1)).map_or(500.0, |s| s.0)
@@ -507,7 +512,7 @@ enum Part {
 }
 
 // written straight into the archive, at the longest settings it's hundreds of MB
-struct Mix {
+pub(crate) struct Mix {
     rate: u32,
     channels: usize,
     parts: Vec<Part>,
@@ -515,25 +520,29 @@ struct Mix {
 }
 
 impl Mix {
-    fn ms(&self) -> f64 {
+    pub(crate) fn new(rate: u32, channels: usize) -> Self {
+        Mix { rate, channels, parts: vec![], frames: 0 }
+    }
+
+    pub(crate) fn ms(&self) -> f64 {
         self.frames as f64 * 1000.0 / self.rate as f64
     }
 
-    fn silence(&mut self, ms: f64) {
+    pub(crate) fn silence(&mut self, ms: f64) {
         let n = (ms / 1000.0 * self.rate as f64).round() as usize;
         self.parts.push(Part::Silence(n));
         self.frames += n;
     }
 
     // resampled, so the pitch moves with the speed. fade_from is ms into src
-    fn stretched(&mut self, src: &Pcm, factor: f64, fade_from: f64) {
+    pub(crate) fn stretched(&mut self, src: &Pcm, factor: f64, fade_from: f64) {
         let n = ((src.frames() as f64) / factor).floor() as usize;
         self.parts.push(Part::Stretched { frames: n, factor, fade_from });
         self.frames += n;
     }
 
     // 16-bit PCM, which every osu! plays
-    fn write_wav(&self, src: &Pcm, w: &mut impl std::io::Write) -> std::io::Result<()> {
+    pub(crate) fn write_wav(&self, src: &Pcm, w: &mut impl std::io::Write) -> std::io::Result<()> {
         let ch = self.channels;
         let data_len = (self.frames * ch * 2) as u32;
         let mut head = Vec::with_capacity(44);
@@ -593,6 +602,30 @@ impl Mix {
 
 // from and to are map milliseconds
 pub(crate) fn decode(file: &Path, from_ms: f64, to_ms: f64) -> Result<Pcm, String> {
+    let mut samples: Vec<f32> = vec![];
+    let mut channels = 2;
+    let rate = decode_each(file, from_ms, to_ms, |chunk, ch| {
+        channels = ch;
+        match chunk {
+            Chunk::Samples(s) => samples.extend_from_slice(s),
+            Chunk::Silence(n) => samples.resize(samples.len() + n, 0.0),
+        }
+    })?;
+    if channels > 2 {
+        samples = samples.chunks(channels).flat_map(|f| [f[0], f[1]]).collect();
+        channels = 2;
+    }
+    Ok(Pcm { rate, channels, samples })
+}
+
+pub(crate) enum Chunk<'a> {
+    // interleaved
+    Samples(&'a [f32]),
+    Silence(usize),
+}
+
+// hands over the song a packet at a time with its channel count, so a caller can keep less than all of it
+pub(crate) fn decode_each(file: &Path, from_ms: f64, to_ms: f64, mut take: impl FnMut(Chunk<'_>, usize)) -> Result<u32, String> {
     use symphonia::core::audio::SampleBuffer;
     use symphonia::core::codecs::DecoderOptions;
     use symphonia::core::errors::Error;
@@ -619,7 +652,7 @@ pub(crate) fn decode(file: &Path, from_ms: f64, to_ms: f64) -> Result<Pcm, Strin
     let time_base = track.codec_params.time_base;
     let mut rate = track.codec_params.sample_rate.unwrap_or(44100);
     let mut channels = track.codec_params.channels.map_or(2, |c| c.count());
-    let mut samples: Vec<f32> = vec![];
+    let mut taken = 0;
     let mut seen_frames: u64 = 0;
     loop {
         let packet = match format.next_packet() {
@@ -666,20 +699,17 @@ pub(crate) fn decode(file: &Path, from_ms: f64, to_ms: f64) -> Result<Pcm, Strin
         let skip = if start_ms < from_ms { (((from_ms - start_ms) / 1000.0) * rate as f64) as usize * channels } else { 0 };
         let keep = if end_ms > to_ms { ((((to_ms - start_ms) / 1000.0) * rate as f64) as usize * channels).min(len) } else { len };
         if skip < keep {
+            taken += keep - skip;
             match &decoded {
-                Some(sb) => samples.extend_from_slice(&sb.samples()[skip..keep]),
-                None => samples.resize(samples.len() + keep - skip, 0.0),
+                Some(sb) => take(Chunk::Samples(&sb.samples()[skip..keep]), channels),
+                None => take(Chunk::Silence(keep - skip), channels),
             }
         }
     }
-    if samples.is_empty() {
+    if taken == 0 {
         return Err("The song's audio ends before that stretch.".into());
     }
-    if channels > 2 {
-        samples = samples.chunks(channels).flat_map(|f| [f[0], f[1]]).collect();
-        channels = 2;
-    }
-    Ok(Pcm { rate, channels, samples })
+    Ok(rate)
 }
 
 pub(crate) fn breakdown(p: &Practice, j: &crate::analysis::Judged) -> Value {

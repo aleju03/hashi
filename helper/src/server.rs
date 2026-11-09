@@ -179,6 +179,18 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if path == "/cut/map" {
+            let (status, body) = crate::cut::map(b).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        if let Some(md5) = path.strip_prefix("/cut/song/") {
+            return match crate::cut::song(md5).await {
+                Some(bytes) => Response::builder().header(header::CONTENT_TYPE, "application/octet-stream").body(Body::from(bytes)).unwrap(),
+                None => empty(404),
+            };
+        }
         if path == "/profile" {
             let mut res = json(200, &crate::profile::summary(b).await);
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -446,6 +458,15 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         if let Some(id) = path.strip_prefix("/practice/") {
             let Some(options) = practice::Options::from_query(req.uri().query().unwrap_or("")) else { return empty(400) };
             let (status, body) = practice::make(b, id, options).await;
+            return json(status, &body);
+        }
+        // /cut/<md5>?from=61200&to=92400&name=..., in the map's own ms
+        if let Some(md5) = path.strip_prefix("/cut/") {
+            let q: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+            let text = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+            let num = |k: &str| text(k).and_then(|v| v.parse::<f64>().ok());
+            let (Some(from), Some(to)) = (num("from"), num("to")) else { return empty(400) };
+            let (status, body) = crate::cut::make(b, md5, from, to, text("name")).await;
             return json(status, &body);
         }
         // /goals/<id>/target/<percent>

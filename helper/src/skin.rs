@@ -372,7 +372,7 @@ pub(crate) fn window_line(b: &Bridge) -> Option<String> {
     })
 }
 
-fn selected_chart(b: &Bridge) -> Option<PathBuf> {
+pub(crate) fn selected_chart(b: &Bridge) -> Option<PathBuf> {
     let s = b.st();
     let raw = s.tosu.last_frame.as_ref()?;
     let file = raw.pointer("/files/beatmap").and_then(Value::as_str).filter(|f| !f.is_empty())?;

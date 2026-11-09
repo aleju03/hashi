@@ -2,6 +2,7 @@ mod analysis;
 mod auth;
 mod autostart;
 mod beatmap;
+mod cut;
 mod get_tosu;
 mod goals;
 mod judge;

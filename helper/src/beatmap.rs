@@ -23,7 +23,7 @@ pub struct Chart {
 }
 
 // javascript's parseInt: the leading integer, NaN without one
-fn parse_int(s: &str) -> f64 {
+pub(crate) fn parse_int(s: &str) -> f64 {
     let s = s.trim_start();
     let digits = s.strip_prefix(['-', '+']).unwrap_or(s);
     let len = digits.bytes().take_while(u8::is_ascii_digit).count();
