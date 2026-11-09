@@ -1509,12 +1509,12 @@ function skinEditor(page) {
       el("p", { class: "caption" }, "Lazer imports it and switches to it. To change this skin itself, use File, Edit externally in lazer's skin editor.")]
       : [el("div", { class: "skin-tools apply" },
         el("button", { class: "key go", disabled: !differs || page.applying || page.loading, onclick: () => skinWrite(page, "apply") }, changed || !skinOwnEdits(skinApplied(page)) ? "Apply to skin" : `Put ${page.keys}K back`),
-        page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo Hashi's changes"),
+        page.info?.edited && el("button", { class: "link", disabled: page.applying, onclick: () => skinWrite(page, "undo") }, "Undo the applied changes"),
         page.info?.stored && !page.asNew && el("button", { class: "link", disabled: page.applying, onclick: () => { page.asNew = true; render(); } }, "Save as a new skin instead")),
       page.info?.stored && page.asNew && el("div", { class: "skin-tools apply" },
         skinNameField(page),
         el("button", { class: "key", disabled: !changed || page.applying || page.loading, onclick: () => skinWrite(page, "apply-new") }, "Save as a new skin")),
-      page.info?.edited && el("p", { class: "caption" }, "These edits start from your skin as it was, so applying them replaces what Hashi applied before."),
+      page.info?.edited && el("p", { class: "caption" }, "These edits start from your skin as it was, so applying them replaces what was applied before."),
       page.info?.stored && el("p", { class: "caption" }, "Saved straight into lazer's copy of the skin. Lazer shows it once you switch to another skin and back.")],
     page.saved && el("p", { class: `status ${page.saved.ok ? "good" : "bad"}` }, page.saved.text));
 }

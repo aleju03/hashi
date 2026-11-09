@@ -155,7 +155,7 @@ async fn audio_file(b: &Arc<Bridge>, item: &Item, chart: &[u8]) -> Result<PathBu
     if let Some(f) = selected_audio(b, &item.play.beatmap_md5) {
         return Ok(f);
     }
-    Err("Hashi can't find this song's audio. Select the map in osu! once, then try again.".into())
+    Err("Couldn't find this song's audio. Select the map in osu! once, then try again.".into())
 }
 
 pub(crate) fn selected_audio(b: &Bridge, md5: &str) -> Option<PathBuf> {

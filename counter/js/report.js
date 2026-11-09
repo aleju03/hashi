@@ -164,7 +164,7 @@ function reportPage() {
       el("button", { class: "key go send", disabled: report.sending || !enough(), onclick: sendReport }, report.sending ? "Sending…" : "Send"),
       el("span", { class: "why" }, name
         ? "Replies show up on Mania Tracker."
-        : "Hashi isn't connected, so it goes without your name."),
+        : "Not connected to Mania Tracker, so it goes without your name."),
       emptyBottle()),
   ];
 }

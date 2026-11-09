@@ -110,7 +110,7 @@ function scorecard(d, tip, since) {
       el("div", { class: `grade-stamp ${tone}`, style: `--tilt: ${tilt}deg` }, grade),
       el("div", { class: "score" },
         el("b", {}, pct(d.accuracy)),
-        el("span", {}, Math.abs(d.accuracy - d.judged) >= 0.05 ? `Hashi counts ${pct(d.judged)}` : "accuracy"),
+        el("span", {}, Math.abs(d.accuracy - d.judged) >= 0.05 ? `${pct(d.judged)} judged here` : "accuracy"),
         // with presses on empty columns, the accuracy osu! gives can't show progress: this one can
         d.empty?.shown && el("span", { class: "clean", title: "Accuracy if every press on a column with no note were a miss" },
           `clean ${pct(d.empty.clean)}, goal ${d.empty.goal}%`,

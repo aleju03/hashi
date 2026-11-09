@@ -76,7 +76,7 @@ pub(crate) async fn send(b: &Arc<Bridge>, text: &str, with_log: bool) -> Result<
     }
     let caps = auth::caps(b).await.map_err(|_| "Mania Tracker is not reachable. Try again in a bit.".to_string())?;
     let Some(spec) = caps.get("bug_reports").filter(|v| v.is_object()) else {
-        return Err("Mania Tracker doesn't take reports from Hashi right now.".into());
+        return Err("Mania Tracker doesn't take reports right now.".into());
     };
     let max_log = spec.get("max_log_bytes").and_then(Value::as_u64).map_or(LOG_MAX, |n| n as usize);
     let mut body = json!({
@@ -120,7 +120,7 @@ pub(crate) async fn send(b: &Arc<Bridge>, text: &str, with_log: bool) -> Result<
         (_, "too_many_reports") => "That's a lot of reports for one day. Try again tomorrow.",
         (429, _) => "That's a lot of reports in a row. Try again in an hour.",
         (413, _) => "The log is too big to send. Untick it and send the report without it.",
-        (401 | 403, _) => "Mania Tracker didn't accept Hashi's connection. Connect again in the settings.",
+        (401 | 403, _) => "Mania Tracker didn't accept the connection. Connect again in the settings.",
         (_, "invalid_report") => "Mania Tracker didn't take that report. Write a little more about what happened.",
         _ => "Mania Tracker didn't take the report. Try again in a bit.",
     }

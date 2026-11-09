@@ -319,7 +319,7 @@ function boardView() {
   } else if (!data) {
     body = el("p", { class: "doing" }, el("i", { class: "spinner", style: `animation-delay: -${Date.now() % SPIN_MS}ms` }), "Loading");
   } else if (data.unsupported) {
-    body = el("p", { class: "lead" }, "Mania Tracker can't show leaderboards to Hashi yet.");
+    body = el("p", { class: "lead" }, "Mania Tracker can't show leaderboards here yet.");
   } else if (data.unknown) {
     body = el("p", { class: "lead" }, "Mania Tracker has no leaderboard for this map.");
   } else if (data.friendsNotLoaded) {

@@ -51,13 +51,13 @@ fn work_dir(b: &Bridge) -> PathBuf {
 // link would change lazer's stored file under its old hash.
 pub(crate) fn save(b: &Bridge, found: &crate::skin::Found, change: impl FnOnce(&Path) -> Result<Value, String>) -> Result<Value, String> {
     if !can_save() {
-        return Err("This copy of Hashi can't save to lazer skins. Save as a new skin instead.".into());
+        return Err("This build can't save to lazer skins. Save as a new skin instead.".into());
     }
     // one at a time: saves share the work folder, and a half-copied one would read as files taken out
     static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _saving = SAVING.lock().unwrap_or_else(|e| e.into_inner());
-    let root = game_root(b).ok_or("Hashi can't find lazer's folder.")?;
-    let id = crate::skin::lazer_skin_id(&root).ok_or("Hashi can't tell which skin lazer has on.")?;
+    let root = game_root(b).ok_or("Couldn't find lazer's folder.")?;
+    let id = crate::skin::lazer_skin_id(&root).ok_or("Couldn't tell which skin lazer has on.")?;
     let work = work_dir(b).join("skin");
     let _ = std::fs::remove_dir_all(&work);
     crate::skin_render::copy_tree(&found.dir, &work).map_err(|e| format!("Couldn't copy the skin: {e}"))?;
@@ -220,7 +220,7 @@ fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
     {
         return match windows_install(torii).map(|(d, _)| d).filter(|d| d.join(CORECLR).is_file()) {
             Some(d) => Ok((d, None)),
-            None => Err("Hashi can't find lazer's install to save with.".into()),
+            None => Err("Couldn't find lazer's install to save with.".into()),
         };
     }
     #[cfg(target_os = "linux")]
@@ -241,7 +241,7 @@ fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
                 return Ok((dir, Some(mount)));
             }
         }
-        Err("Hashi can't find lazer's files to save with. Open lazer and try again.".into())
+        Err("Couldn't find lazer's files to save with. Open lazer and try again.".into())
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {

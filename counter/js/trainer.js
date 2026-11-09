@@ -16,7 +16,7 @@ const RAMP_BPM = 10;
 const DIVISIONS = [[1, "1/1"], [2, "1/2"], [4, "1/4"]];
 const UPCOMING = 8;
 const NO_SOUND = {
-  gstreamer: "No sound. Hashi plays it through GStreamer, and its good plugins aren't installed: gst-plugins-good, or gstreamer1.0-plugins-good on Ubuntu and Debian. Install them, then restart Hashi.",
+  gstreamer: "No sound. It plays through GStreamer, and its good plugins aren't installed: gst-plugins-good, or gstreamer1.0-plugins-good on Ubuntu and Debian. Install them, then restart Hashi.",
   appimage: "No sound. The AppImage can't play it on this system. The .deb or .rpm can, with GStreamer's good plugins installed.",
 };
 

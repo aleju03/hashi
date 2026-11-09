@@ -11,7 +11,7 @@
     "version": "0.1.8",
     "date": "2026-11-06",
     "changes": [
-      { "kind": "new", "text": "Hashi works without connecting to Mania Tracker, for the analysis and the skin editor. Pick \"Continue without connecting\" on the first screen. Your plays stay in Hashi and aren't sent, and you can connect later from the settings." }
+      { "kind": "new", "text": "Use the analysis and the skin editor without connecting to Mania Tracker. Pick \"Continue without connecting\" on the first screen. Your plays aren't sent, and you can connect later from the settings." }
     ]
   },
   {
@@ -38,7 +38,7 @@
       { "kind": "new", "text": "Save edits straight into your lazer skin, without Edit externally. Switch skins and back in lazer to see them." },
       { "kind": "new", "text": "Open your skin in a window the size of osu!'s and play the selected map in it with its song. Watch autoplay or play on your keys, judged like stable or lazer at the map's OD and mods. osu! goes quiet while it plays." },
       { "kind": "new", "text": "Leaderboards for your country, continent, a subregion like Southeast Asia, your friends, or any player, past the top 50." },
-      { "kind": "changed", "text": "Sending plays and sharing your live status can both be turned off, and plays you finish still stay in Hashi for their analysis." }
+      { "kind": "changed", "text": "Sending plays and sharing your live status can both be turned off, and plays you finish are still kept for their analysis." }
     ]
   },
   {

@@ -154,6 +154,6 @@ function goalsView() {
       el("button", { class: "link", onclick: toggleGoals }, "Back to plays")),
     el("p", { class: "caption" }, goals.length
       ? "Every play of the map counts as a try. Click a map to open its latest try."
-      : "No goals right now. Hashi sets one when a play presses keys with no notes, and for each practice map you make."),
+      : "No goals right now. One is set when a play presses keys with no notes, and for each practice map you make."),
     goals.length > 0 && el("div", { class: "goals" }, goals.map((g) => goalEntry(g))));
 }

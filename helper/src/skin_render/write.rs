@@ -349,7 +349,7 @@ pub(crate) fn undo(dir: &Path) -> Result<(), String> {
     let ini = ini_of(dir)?;
     let backup = backup_of(&ini);
     if !backup.exists() {
-        return Err("Hashi hasn't changed this skin.".into());
+        return Err("This skin hasn't been changed here.".into());
     }
     std::fs::copy(&backup, &ini).map_err(|e| e.to_string())?;
     if let Some(root) = ini.parent() {

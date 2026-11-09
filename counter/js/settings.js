@@ -106,7 +106,7 @@ function update() {
   if (u.step === "downloading" || u.step === "installing") {
     return el("div", { class: "pinned" },
       el("p", {}, u.step === "installing"
-        ? ["Installing ", version, ", Hashi opens again in a moment."]
+        ? ["Installing ", version, ". It opens again in a moment."]
         : ["Downloading ", version, u.percent != null ? ` · ${u.percent}%` : "", "…"]),
       el("i", { class: "spinner", style: `animation-delay: -${Date.now() % SPIN_MS}ms` }));
   }
@@ -198,7 +198,7 @@ function settings(c, host, reconnect) {
       : el("div", { class: "setting" },
           el("div", { class: "text" },
             el("span", { class: "title" }, "Not connected"),
-            el("span", { class: "line" }, "Plays stay in Hashi and aren't sent.")),
+            el("span", { class: "line" }, "Plays aren't sent.")),
           el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect")),
     computer.length > 0 && [el("p", { class: "group" }, "This computer"), ...computer],
     el("p", { class: "group" }, "Look"),

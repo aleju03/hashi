@@ -127,7 +127,7 @@ function makerView() {
     field("Goal", goal, el("span", { class: "maker-unit" }, "% on a full-speed repeat")),
     el("p", { class: "caption" },
       fits ? `${speeds.map((s) => `${Math.round(s * 100)}%`).join(", ")} of the speed you played, about ${Math.round(total)} seconds in all.` : `A stretch has to be ${STRETCH_MIN} to ${STRETCH_MAX} seconds long.`,
-      " Plays of it stay in Hashi with their own breakdown, they aren't sent to Mania Tracker."),
+      " Plays of it get their own breakdown and aren't sent to Mania Tracker."),
     el("button", { class: "primary maker-go", disabled: m.busy || !fits, onclick: makePractice }, m.busy ? "Cutting the song…" : "Make it and open in osu!"),
     m.error && el("p", { class: "status bad" }, m.error),
     m.result && el("p", { class: "status good" }, `Sent to osu! as “${m.result.version}”. Find it with ${m.title}'s other difficulties.`),

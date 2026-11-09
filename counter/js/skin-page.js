@@ -3,9 +3,9 @@ const SKIN_KEYS = [4, 5, 6, 7, 8, 9, 10].map((k) => [k, `${k}K`]);
 // the notes picked last, generated, long notes or the selected map; a play's own only for that play
 const SKIN_SOURCE = "hashi-skin-source";
 const SKIN_WHY = {
-  lazer: "Hashi couldn't read lazer's skin. In lazer, open the skin editor, then File, Edit externally, and Hashi shows it while that's open.",
+  lazer: "Couldn't read lazer's skin. In lazer, open the skin editor, then File, Edit externally, and it shows here while that's open.",
   builtin: "Lazer's built-in skins aren't shown here, only ones you've imported.",
-  missing: "Hashi can't find this skin's folder in osu!'s Skins.",
+  missing: "Can't find this skin's folder in osu!'s Skins.",
   unknown: "Open osu! with tosu running to see your skin here.",
 };
 

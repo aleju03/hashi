@@ -62,7 +62,7 @@ function tosuHint() {
   if (tosu.blocked) return blockedHint();
   if (snapshot.getTosu) return getTosu();
   if (tosu.connected || tosu.launch === "starting" || tosu.launch === "with-osu") return null;
-  return el("p", { class: "status warn" }, snapshot.connection.username ? TOSU_HINT : "Start tosu so Hashi sees your plays.");
+  return el("p", { class: "status warn" }, snapshot.connection.username ? TOSU_HINT : "Start tosu so your plays show up here.");
 }
 
 function statusLine(c) {
