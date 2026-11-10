@@ -1,7 +1,7 @@
 [
   {
     "version": "0.1.9",
-    "date": "2026-11-08",
+    "date": "2026-11-09",
     "changes": [
       { "kind": "new", "text": "Cut a map down to the part you want to play. Select it in osu!, click the scissors next to the gear, and pick the stretch while it plays in your skin to make a new difficulty with only that part and the song cut to fit." },
       { "kind": "new", "text": "Report a problem from the settings. What you write goes to Mania Tracker along with Hashi's log, so it's easier to find what went wrong." },
