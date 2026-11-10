@@ -5,14 +5,12 @@
 /* the same paper as what's new, tilted the other way */
 .letter.outgoing {
   margin: 18px 2px 14px 6px;
-  transform: rotate(0.7deg);
+  --tilt: 0.7deg;
   animation: none;
 }
 
 .letter.outgoing::after {
-  right: auto;
-  left: -1px;
-  background: linear-gradient(225deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%);
+  background: linear-gradient(225deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%) left bottom / 24px 24px no-repeat;
 }
 
 .letter .write {

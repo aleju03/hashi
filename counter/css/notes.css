@@ -150,8 +150,9 @@
   margin: 18px 6px 10px 2px;
   padding: 20px 20px 16px;
   color: var(--osu-b5);
-  transform: rotate(-0.8deg);
-  animation: unroll 640ms ease-out both;
+  /* only the paper tilts, tilted text comes out blurry in the webview */
+  --tilt: -0.8deg;
+  animation: unroll 640ms ease-out backwards;
 }
 
 .letter::before {
@@ -162,27 +163,28 @@
   border-radius: 4px;
   background: var(--ink);
   filter: url(#ink3);
+  transform: rotate(var(--tilt));
 }
 
 .letter::after {
   content: "";
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 24px;
-  height: 24px;
-  background: linear-gradient(135deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%);
+  /* as big as the paper so it turns around the same middle and the fold stays on the corner */
+  inset: -1px;
+  background: linear-gradient(135deg, hsl(var(--hue), calc(14% * var(--sat)), 68%) 50%, var(--osu-b5) 50%) right bottom / 24px 24px no-repeat;
   filter: url(#ink3);
+  transform: rotate(var(--tilt));
+  pointer-events: none;
 }
 
 @keyframes unroll {
   from {
     clip-path: inset(-40px -40px calc(100% - 6px) -40px);
-    transform: rotate(-0.8deg) translateY(-6px);
+    transform: translateY(-6px);
   }
   to {
     clip-path: inset(-40px);
-    transform: rotate(-0.8deg);
+    transform: none;
   }
 }
 
@@ -221,7 +223,7 @@
 }
 
 .letter .changes li {
-  animation: jot 260ms ease-out both;
+  animation: jot 260ms ease-out backwards;
 }
 
 @keyframes jot {
@@ -241,7 +243,7 @@
   margin: 20px 0 0;
   padding: 18px;
   color: #fff;
-  transform: none;
+  --tilt: 0deg;
   animation: none;
   --paper-ink: var(--osu-f1);
 }
