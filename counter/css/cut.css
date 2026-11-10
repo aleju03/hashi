@@ -272,6 +272,21 @@
   margin: 10px 0 14px;
 }
 
+.cut-sound {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 10px;
+  color: var(--osu-f1);
+  font-weight: 600;
+}
+
+.cut-volume {
+  flex: none;
+  width: 72px;
+}
+
 .cut-clock {
   font-size: 12px;
   font-variant-numeric: tabular-nums;

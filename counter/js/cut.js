@@ -11,6 +11,10 @@ const CUT_HANDLE_PX = 10;
 const CUT_SNAP_PX = 6;
 const CUT_NEAR_MS = 60;
 const CUT_LOOP = "hashi-cut-loop";
+const CUT_VOLUME = "hashi-cut-volume";
+// the game size window's song volume starts at 60 too, and goes up the same curve
+const CUT_VOLUME_FIRST = 60;
+const cutGain = (volume) => (Math.min(100, Math.max(0, volume)) / 100) ** 2;
 const SCISSORS = `<circle cx="2.5" cy="7.6" r="1.6"/><circle cx="7.5" cy="7.6" r="1.6"/><path d="M3.5 6.4 8.2.6M6.5 6.4 1.8.6"/>`;
 const SCISSORS_HALF = `<circle class="loop" cx="5.6" cy="5.2" r="3.7"/><path class="blade" d="M8.1 8.3 12.9 26.6Q10.7 20 9.2 15.8z"/>`;
 
@@ -25,6 +29,7 @@ function openCutter() {
   const c = (cutter = {
     map: null, notes: [], loading: true, error: null, busy: false, made: null, makeError: null,
     from: 0, to: 0, at: 0, end: 1, playing: false, loop: stored(CUT_LOOP, true), speed: stored(SKIN_SPEED, 24),
+    volume: Number(stored(CUT_VOLUME, CUT_VOLUME_FIRST)),
     song: null, songState: "loading", skin: null,
     view: el("canvas", { class: "cut-view", width: 240, height: 340, title: "Click to play or pause" }),
     line: cutLineSvg(),
@@ -136,7 +141,7 @@ async function cutLoadSong(c) {
     const out = song.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
     const gain = audio.createGain();
-    gain.gain.value = 0.8;
+    gain.gain.value = cutGain(c.volume);
     gain.connect(audio.destination);
     Object.assign(c, { audio, song, gain, songState: "ready" });
     if (c.playing && !c.dragging) cutSound(c);
@@ -538,6 +543,24 @@ async function makeCut(c) {
   render();
 }
 
+// kept across redraws so a drag isn't cut off
+function cutVolumeField(c) {
+  const show = (input) => input.style.setProperty("--at", `${input.value}%`);
+  c.volumeField ??= el("input", {
+    type: "range", class: "skin-seek-bar cut-volume", min: 0, max: 100, step: 1, value: c.volume, "aria-label": "Song volume",
+    oninput: (ev) => {
+      c.volume = Number(ev.target.value);
+      c.gain?.gain.setTargetAtTime(cutGain(c.volume), c.audio.currentTime, 0.015);
+      ev.target.title = `Song volume ${c.volume}%`;
+      show(ev.target);
+    },
+    onchange: (ev) => store(CUT_VOLUME, Number(ev.target.value)),
+  });
+  c.volumeField.title = `Song volume ${c.volume}%`;
+  show(c.volumeField);
+  return c.volumeField;
+}
+
 function cutSpeed(c, by) {
   c.speed = Math.min(SKIN_SPEED_MAX, Math.max(SKIN_SPEED_MIN, c.speed + by));
   store(SKIN_SPEED, c.speed);
@@ -603,7 +626,8 @@ function cutterView() {
               store(CUT_LOOP, c.loop);
               render();
             },
-          }, "Loop")),
+          }, "Loop"),
+          el("label", { class: "cut-sound" }, el("span", { "aria-hidden": "true" }, "Volume"), cutVolumeField(c))),
         c.clock,
         el("div", { class: "segs", title: "Scroll speed" },
           el("button", { class: "seg", disabled: c.speed <= SKIN_SPEED_MIN, "aria-label": "Slower", onclick: () => cutSpeed(c, -1) }, "−"),
