@@ -90,6 +90,9 @@ pub(crate) struct TosuState {
     pub replay: bool,
     // the play is in torii, whose tosu-torii reports its results as play
     torii: bool,
+    // the attempt's song time was seen before its first note. song select's preview starts partway
+    // in, and tosu-torii reports it as play too
+    saw_start: bool,
     results_left_at: i64,
     play_started_at: i64,
     pending_finish: Option<PendingFinish>,
@@ -126,6 +129,7 @@ impl TosuState {
             own_results: false,
             replay: false,
             torii: false,
+            saw_start: false,
             results_left_at: 0,
             play_started_at: 0,
             pending_finish: None,
@@ -319,6 +323,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 t.replay = from_results && !t.own_results;
                 t.play_started_at = now_ms();
                 t.torii = client == "lazer" && t.lazer_files_dir.parent().is_some_and(crate::lazer::is_torii);
+                t.saw_start = false;
             }
             let null = Value::Null;
             let bm = raw.get("beatmap").unwrap_or(&null);
@@ -326,6 +331,8 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             let files = raw.get("files").unwrap_or(&null);
             let background = str_of(files.get("background")).filter(|x| !x.is_empty());
             let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
+            let at_start = at("live") <= at("firstObject");
+            t.saw_start |= at_start;
             // where tosu said it was, lazer's by hash under files/
             let map_file = |k: &str| match (str_of(files.get(k)).filter(|x| !x.is_empty()), client == "lazer") {
                 (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
@@ -369,7 +376,10 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                         _ => None,
                     }
                 },
-                completed: at("lastObject") > 0.0 && at("live") >= at("lastObject") && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true),
+                completed: at("lastObject") > 0.0
+                    && at("live") >= at("lastObject")
+                    && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true)
+                    && (t.saw_start || !t.torii),
                 from_results: t.replay,
                 started_at: t.play_started_at,
             };
@@ -380,6 +390,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 Some(done) if at("live") < at("lastObject") - RESTART_GAP_MS => {
                     t.pending_finish = Some(PendingFinish { since: now_ms(), play: done, viewed: None, stale: None });
                     t.play_started_at = now_ms();
+                    t.saw_start = at_start;
                     t.last_play = Some(LastPlay { started_at: t.play_started_at, ..play });
                 }
                 Some(_) => {}
@@ -1127,14 +1138,21 @@ mod tests {
             f["folders"] = json!({ "songs": songs });
             f
         };
-        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 30_000.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]), 1);
+        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 0.0), torii("play", 30_000.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]), 1);
         // play again from those results never leaves play
         assert_eq!(
-            captured(&[torii("selectPlay", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]),
+            captured(&[torii("selectPlay", 0.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 12_000.0), torii("selectPlay", 12_100.0)]),
             2
         );
         // or the second attempt is quit partway
-        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 30_000.0), torii("selectPlay", 30_100.0)]), 1);
+        assert_eq!(captured(&[torii("selectPlay", 0.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 0.0), torii("play", 30_000.0), torii("selectPlay", 30_100.0)]), 1);
+        // song select's preview starts partway in, it looping past the last note isn't another play
+        let mut frames = vec![torii("selectPlay", 0.0), torii("play", 0.0), torii("play", 91_000.0), torii("play", 12_000.0)];
+        frames.extend([torii("play", 91_000.0), torii("play", 12_000.0), torii("play", 91_000.0), torii("play", 12_000.0)]);
+        assert_eq!(captured(&frames), 1);
+        // and a real attempt still counts after it
+        frames.extend([torii("play", 0.0), torii("play", 91_000.0), torii("play", 12_000.0)]);
+        assert_eq!(captured(&frames), 2);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
