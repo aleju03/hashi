@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.1.10",
+    "date": "2026-11-14",
+    "changes": [
+      { "kind": "fixed", "text": "On torii, a play could show up twice, once as NM, with the real one stuck on \"Waiting for replay\"." }
+    ]
+  },
+  {
     "version": "0.1.9",
     "date": "2026-11-09",
     "changes": [
