@@ -14,6 +14,10 @@ use crate::{iso_from_ms, log, now_ms, osr, queue, Bridge, AUTOMATED_MODS, REPLAY
 const LAZER_SCAN_MS: i64 = 2000;
 // a new play's replay is dated when it ended, give or take a second
 const OLD_REPLAY_MS: i64 = 10 * 60_000;
+// lazer's replay is dated before its results come up, a later one is from the next attempt
+const LATER_REPLAY_MS: i64 = 5000;
+// enough for the header up to its date, past lazer's life bar
+const LAZER_HEAD_BYTES: usize = 64 * 1024;
 
 pub(crate) struct Fresh {
     name: String,
@@ -22,6 +26,8 @@ pub(crate) struct Fresh {
     md5: String,
     // stable: from the file name, lazer: mtime
     at: i64,
+    // lazer: the date in its header
+    played_at: Option<i64>,
     seen_at: i64,
 }
 
@@ -100,7 +106,7 @@ fn scan_replay_dir(b: &Arc<Bridge>, initial: bool) {
             log!("ignore {name}: its time is not recent (an imported replay?)");
             continue;
         }
-        s.replays.fresh.push(Fresh { path: Some(path.join(&name)), name, md5, at: ended_at, seen_at: now_ms() });
+        s.replays.fresh.push(Fresh { path: Some(path.join(&name)), name, md5, at: ended_at, played_at: None, seen_at: now_ms() });
     }
 }
 
@@ -141,11 +147,19 @@ fn scan_lazer_files(files: &Path, since: f64, seen: &HashMap<PathBuf, i64>) -> V
                     continue;
                 }
                 let md5 = read_head(&file, 39).and_then(|h| osr::lazer_replay_md5(&h));
+                // only replays get read further, the rest of files/ can be audio and such
+                let played_at = md5
+                    .as_ref()
+                    .and_then(|_| read_head(&file, LAZER_HEAD_BYTES))
+                    .and_then(|h| osr::parse_osr(&h).ok())
+                    .map(|h| h.played_at)
+                    .filter(|at| *at > 0);
                 found.push(Fresh {
                     name: f.file_name().to_string_lossy().into_owned(),
                     path: Some(file),
                     md5: md5.unwrap_or_default(),
                     at: mtime_ms(&fst) as i64,
+                    played_at,
                     seen_at: now_ms(),
                 });
             }
@@ -230,8 +244,9 @@ pub(crate) async fn match_replays(b: &Arc<Bridge>) {
 fn could_be(f: &Fresh, item: &Item) -> bool {
     f.md5 == item.play.beatmap_md5
         && if item.play.is_lazer() {
-            // lazer's file has no time in its name, it just has to be written after the play
-            f.at >= item.detected_at_ms - REPLAY_TICK_TOLERANCE_MS
+            // lazer's file has no time in its name, it just has to be written after the play, and
+            // not be dated after it was seen to end
+            f.at >= item.detected_at_ms - REPLAY_TICK_TOLERANCE_MS && f.played_at.is_none_or(|at| at <= item.detected_at_ms + LATER_REPLAY_MS)
         } else {
             (f.at - item.detected_at_ms).abs() <= REPLAY_TICK_TOLERANCE_MS
         }
@@ -600,7 +615,7 @@ mod tests {
     }
 
     fn file(at: i64) -> Fresh {
-        Fresh { name: format!("{MD5}-{at}.osr"), path: None, md5: MD5.into(), at, seen_at: 0 }
+        Fresh { name: format!("{MD5}-{at}.osr"), path: None, md5: MD5.into(), at, played_at: None, seen_at: 0 }
     }
 
     #[test]
@@ -614,6 +629,24 @@ mod tests {
         let pool = [file(190_500)];
         assert_eq!(closest_replay(&pool, &a, [&b].into_iter()), None);
         assert_eq!(closest_replay(&pool, &b, [&a].into_iter()), Some(0));
+    }
+
+    #[test]
+    fn lazer_play_skips_a_later_attempts_replay() {
+        let lazer = |id: &str, at: i64| {
+            let mut i = play(id, at);
+            i.play.client = Some("lazer".into());
+            i
+        };
+        // torii's finish is seen as its results close, after the replay is written
+        let ghost = lazer("ghost", 100_000);
+        let later = Fresh { played_at: Some(250_000), ..file(250_400) };
+        assert_eq!(closest_replay(std::slice::from_ref(&later), &ghost, [].into_iter()), None);
+        let real = lazer("real", 270_000);
+        assert_eq!(closest_replay(std::slice::from_ref(&later), &real, [&ghost].into_iter()), Some(0));
+        // no date read, as before
+        let undated = file(250_400);
+        assert_eq!(closest_replay(std::slice::from_ref(&undated), &ghost, [].into_iter()), Some(0));
     }
 
     #[test]
