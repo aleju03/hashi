@@ -23,6 +23,7 @@ function openCutter() {
   analysis = maker = null;
   dropTrainer();
   dropCutter();
+  rater = null;
   skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);
@@ -31,6 +32,7 @@ function openCutter() {
     from: 0, to: 0, at: 0, end: 1, playing: false, loop: stored(CUT_LOOP, true), speed: stored(SKIN_SPEED, 24),
     volume: Number(stored(CUT_VOLUME, CUT_VOLUME_FIRST)),
     song: null, songState: "loading", skin: null,
+    rate: 1, keep: true, kept: new Map(), changed: () => cutRateChanged(c),
     view: el("canvas", { class: "cut-view", width: 240, height: 340, title: "Click to play or pause" }),
     line: cutLineSvg(),
     scissors: cutScissors(),
@@ -134,12 +136,8 @@ async function cutLoadSong(c) {
     if (!res.ok) throw new Error();
     const bytes = await res.arrayBuffer();
     if (cutter !== c) return;
-    const rate = new DataView(bytes, 0, 8).getUint32(0, true);
-    const pcm = new Int16Array(bytes, 8, (bytes.byteLength - 8) >> 1);
     const audio = new Context();
-    const song = audio.createBuffer(1, pcm.length, rate);
-    const out = song.getChannelData(0);
-    for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+    const song = cutBuffer(audio, bytes);
     const gain = audio.createGain();
     gain.gain.value = cutGain(c.volume);
     gain.connect(audio.destination);
@@ -151,15 +149,27 @@ async function cutLoadSong(c) {
   if (cutter === c) render();
 }
 
+function cutBuffer(audio, bytes) {
+  const rate = new DataView(bytes, 0, 8).getUint32(0, true);
+  const pcm = new Int16Array(bytes, 8, (bytes.byteLength - 8) >> 1);
+  const buffer = audio.createBuffer(1, pcm.length, rate);
+  const out = buffer.getChannelData(0);
+  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 32768;
+  return buffer;
+}
+
+// DT and HT come stretched from the helper. Until one arrives, and for NC and DC, the song plays faster
 function cutSound(c) {
   cutSilence(c);
   if (!c.song) return;
   c.audio.resume().catch(() => {});
   const source = c.audio.createBufferSource();
-  source.buffer = c.song;
+  const kept = c.keep && c.rate !== 1 ? c.kept.get(c.rate) : null;
+  source.buffer = kept ?? c.song;
+  source.playbackRate.value = kept ? 1 : c.rate;
   source.connect(c.gain);
   const when = c.audio.currentTime + 0.03;
-  source.start(when, Math.max(0, c.at / 1000));
+  source.start(when, Math.max(0, c.at / 1000 / (kept ? c.rate : 1)));
   Object.assign(c, { source, startedAt: when, startedFrom: c.at, ctxTime: null, ctxMoved: performance.now() });
 }
 
@@ -185,8 +195,29 @@ function cutHeard(c) {
   if (stalled) return null;
   const late = (a.outputLatency || 0) + (a.baseLatency || 0);
   const ctxNow = c.ctxTime + (now - c.ctxMoved) / 1000;
-  return c.startedFrom + Math.max(0, ctxNow - late - c.startedAt) * 1000;
+  return c.startedFrom + Math.max(0, ctxNow - late - c.startedAt) * 1000 * c.rate;
 }
+
+function cutRateChanged(c) {
+  c.made = null;
+  clearTimeout(c.rateTimer);
+  if (c.playing && !c.dragging) cutSound(c);
+  if (!c.keep || c.rate === 1 || c.kept.has(c.rate) || !c.audio) return;
+  // a few clicks on + shouldn't stretch the song for each
+  c.rateTimer = setTimeout(async () => {
+    const rate = c.rate;
+    try {
+      const res = await fetch(`${BRIDGE}/cut/song/${c.map.md5}?rate=${rate}`);
+      if (!res.ok) return;
+      const bytes = await res.arrayBuffer();
+      if (cutter !== c) return;
+      c.kept.set(rate, cutBuffer(c.audio, bytes));
+      if (c.rate === rate && c.keep && c.playing && !c.dragging) cutSound(c);
+    } catch {}
+  }, 300);
+}
+
+const cutLead = (c) => CUT_LEAD_MS * c.rate;
 
 function cutPlay(c) {
   if (!c.map) return;
@@ -194,7 +225,7 @@ function cutPlay(c) {
     c.playing = false;
     cutSilence(c);
   } else {
-    if (c.at >= c.end - 100) c.at = Math.max(0, c.from - CUT_LEAD_MS);
+    if (c.at >= c.end - 100) c.at = Math.max(0, c.from - cutLead(c));
     c.playing = true;
     cutSound(c);
   }
@@ -303,12 +334,13 @@ addEventListener("keydown", (e) => {
   else if (e.code === "KeyO") cutMark(c, "to");
   else if (e.code === "ArrowLeft") cutSeek(c, c.at - step);
   else if (e.code === "ArrowRight") cutSeek(c, c.at + step);
-  else if (e.code === "Home") cutSeek(c, c.from - CUT_LEAD_MS);
+  else if (e.code === "Home") cutSeek(c, c.from - cutLead(c));
   else return;
   e.preventDefault();
 });
 
-const cutScroll = (c) => skinSpeedMs(c.speed, c.skin?.scene.ownHit);
+// notes come down as fast as in osu! at that rate, so more of the map is on screen
+const cutScroll = (c) => skinSpeedMs(c.speed, c.skin?.scene.ownHit) * c.rate;
 
 function cutTick(c, t) {
   if (cutter !== c) return;
@@ -318,9 +350,9 @@ function cutTick(c, t) {
   if (c.playing && !c.dragging) {
     const heard = cutHeard(c);
     // never back: until the song is heard after a seek, the notes wait for it
-    const at = heard == null ? c.at + dt : Math.max(c.at, heard);
-    const until = c.to + CUT_HOLD_MS;
-    if (c.loop && c.at <= until && at > until) cutSeek(c, c.from - CUT_LEAD_MS);
+    const at = heard == null ? c.at + dt * c.rate : Math.max(c.at, heard);
+    const until = c.to + CUT_HOLD_MS * c.rate;
+    if (c.loop && c.at <= until && at > until) cutSeek(c, c.from - cutLead(c));
     else if (at >= c.end) {
       c.at = c.end;
       c.playing = false;
@@ -529,7 +561,7 @@ async function makeCut(c) {
   c.made = c.makeError = null;
   render();
   try {
-    const q = new URLSearchParams({ from: c.from, to: c.to, name: c.nameField?.value.trim() ?? "" });
+    const q = new URLSearchParams({ from: c.from, to: c.to, name: c.nameField?.value.trim() ?? "", rate: c.rate, pitch: c.keep ? "keep" : "change" });
     const res = await fetch(`${BRIDGE}/cut/${c.map.md5}?${q}`, { method: "POST" });
     const body = await res.json().catch(() => ({}));
     if (cutter !== c) return;
@@ -572,7 +604,7 @@ function cutDefaultName(c) {
   const [i, j] = [cutIndex(c.notes, c.from), cutIndex(c.notes, c.to + 1e-6) - 1];
   if (j < i) return "";
   const at = (ms) => clock(Math.floor(ms / 1000));
-  return `Hashi cut ${c.map.version ?? ""} ${at(c.notes[i].t)}-${at(c.notes[j].t)}`;
+  return `${c.map.version ?? ""} cut ${at(c.notes[i].t)}-${at(c.notes[j].t)}${rateSuffix(c.rate)}`.trim();
 }
 
 function cutNameField(c) {
@@ -583,6 +615,10 @@ function cutNameField(c) {
 
 function cutterView() {
   const c = cutter;
+  if (snapshot.tosu.client === "lazer" && c.rate !== 1) {
+    c.rate = 1;
+    c.changed();
+  }
   const m = c.map;
   const selected = snapshot.tosu.map;
   const other = m && selected && selected.md5 !== m.md5;
@@ -635,7 +671,11 @@ function cutterView() {
           el("button", { class: "seg", disabled: c.speed >= SKIN_SPEED_MAX, "aria-label": "Faster", onclick: () => cutSpeed(c, 1) }, "+"))),
       (c.silent || c.songState === "none") && el("p", { class: "caption cut-silent" }, NO_SOUND[snapshot.soundHelp] ?? "No sound. Check that your computer has a working audio output."),
       part("cut-make",
-        el("p", { class: "caption" }, "A new difficulty with only the notes between the two lines, and the song cut to fit. Plays of it aren't sent to Mania Tracker."),
+        el("p", { class: "caption" }, `A new difficulty with only the notes between the two lines, and the song cut to fit${c.rate === 1 ? "" : `, at ${rateText(c.rate)}x`}. Plays of it aren't sent to Mania Tracker.`),
+        snapshot.tosu.client !== "lazer" && el("div", { class: "cut-rate" },
+          el("span", { class: "cut-label" }, "Rate"),
+          rateStepper(c),
+          c.rate !== 1 && pitchSegs(c)),
         el("label", { class: "cut-name" }, el("span", { class: "cut-label" }, "Name"), cutNameField(c)),
         el("button", { class: "primary cut-go", disabled: c.busy || cutCount(c) === 0 || c.to - c.from < CUT_SHORTEST_MS, onclick: () => makeCut(c) }, c.busy ? "Cutting the song…" : "Make it and open in osu!"),
         c.makeError && el("p", { class: "status bad" }, c.makeError),

@@ -297,6 +297,14 @@
   margin: 0 0 12px;
 }
 
+.cut-rate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 12px;
+}
+
 .cut-name {
   display: flex;
   align-items: center;
