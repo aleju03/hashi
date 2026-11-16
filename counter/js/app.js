@@ -126,6 +126,12 @@ function home(c, host) {
         "aria-pressed": String(!!cutter),
         onclick: () => (cutter ? closeCutter() : openCutter()),
       }, icon(SCISSORS)),
+      snapshot.tosu.map && snapshot.tosu.client !== "lazer" && el("button", {
+        class: `gear${rater ? " on" : ""}`,
+        title: "Change the rate of the map selected in osu!",
+        "aria-pressed": String(!!rater),
+        onclick: () => (rater ? closeRater() : openRater()),
+      }, icon(GAUGE)),
       account && snapshot.tosu.map && el("button", {
         class: `gear${board?.follow ? " on" : ""}`,
         title: "Leaderboard of the map selected in osu!",
@@ -160,6 +166,8 @@ function home(c, host) {
         ? skinView()
       : cutter
         ? cutterView()
+      : rater
+        ? raterView()
       : board
         ? boardView()
       : maker
@@ -230,13 +238,16 @@ function draw() {
     analysis = maker = null;
     dropTrainer();
     dropCutter();
+    rater = null;
     skinPage = profilePage = null;
     board = null;
     clearTimeout(boardTimer);
   }
+  if (snapshot.tosu.client === "lazer") rater = null;
   boardChanged();
   analysisChanged();
   skinFollow();
+  raterFollow();
 
   if (!snapshot.titlebar && location.origin === BRIDGE) {
     app.append(el("div", { class: "corner" },
@@ -247,8 +258,8 @@ function draw() {
 
   if (atHome) {
     app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion(), sentBottle())));
-    const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : cutter ? "cut" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
-    document.documentElement.classList.toggle("roomy", !!(analysis || skinPage || cutter) && ROOMY.matches);
+    const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : cutter ? "cut" : rater ? "rate" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
+    document.documentElement.classList.toggle("roomy", !!(analysis || skinPage || cutter || rater) && ROOMY.matches);
     if (view !== shownView) (document.documentElement.classList.contains("framed") ? app : document.scrollingElement).scrollTop = 0;
     shownView = view;
     fitPage();

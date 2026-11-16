@@ -5,6 +5,7 @@ function openProfile() {
   analysis = maker = null;
   dropTrainer();
   dropCutter();
+  rater = null;
   skinPage = null;
   board = null;
   clearTimeout(boardTimer);

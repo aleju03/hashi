@@ -14,6 +14,7 @@ mod practice;
 mod presence;
 mod profile;
 mod queue;
+mod rate;
 mod realm;
 mod replays;
 mod report;

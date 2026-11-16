@@ -1,0 +1,334 @@
+.rater {
+  padding: 22px 4px 0;
+}
+
+.rater > .head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.rater > .head .link {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.rater > .head .link:hover {
+  color: #fff;
+}
+
+.rater .map {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+
+.rater .map .title, .rater .map .artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rater .map .title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.rater .map .artist {
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.rater .map .facts {
+  margin-top: 3px;
+}
+
+.rater > .doing {
+  display: flex;
+  justify-content: center;
+  margin: 48px 0 0;
+  color: var(--osu-f1);
+}
+
+.rate-change {
+  margin-bottom: 18px;
+}
+
+.rate-dial {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rate-dial:focus {
+  outline: none;
+}
+
+.rate-dial:focus-visible .dial-needle circle {
+  stroke: #fff;
+}
+
+.dial-inked, .dial-fill {
+  filter: url(#ink3);
+}
+
+.dial-rail {
+  stroke: var(--osu-b3);
+  stroke-width: 9;
+}
+
+.dial-ticks {
+  stroke: var(--osu-b1);
+  stroke-width: 2;
+}
+
+.dial-fill {
+  stroke: var(--accent);
+  stroke-width: 9;
+}
+
+.dial-name {
+  fill: var(--osu-f1);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dial-needle {
+  filter: url(#ink2);
+}
+
+.dial-hand {
+  fill: var(--ink);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.dial-needle circle {
+  fill: var(--accent);
+  stroke: var(--osu-b5);
+  stroke-width: 3;
+}
+
+.dial-read {
+  fill: #fff;
+  font-size: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.dial-mod {
+  fill: var(--accent);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dial-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.dial-doodles {
+  stroke: var(--ink);
+  stroke-width: 1.8;
+  filter: url(#ink2);
+}
+
+.dial-doodles .head {
+  fill: var(--osu-b5);
+}
+
+.dial-doodles .shell {
+  fill: var(--osu-b3);
+}
+
+.dial-doodles .coat {
+  fill: var(--osu-b3);
+}
+
+.rate-dial.slow .shell, .rate-dial.fast .coat {
+  fill: var(--accent);
+}
+
+.dial-doodles .eye {
+  fill: var(--ink);
+  stroke: none;
+}
+
+.dial-doodles .ground, .dial-doodles .whoosh {
+  stroke: var(--osu-b1);
+}
+
+.tortoise .legs path {
+  animation: plod steps(1) infinite;
+  animation-duration: inherit;
+  animation-delay: inherit;
+}
+
+.tortoise .legs path:last-child {
+  animation-direction: reverse;
+}
+
+@keyframes plod {
+  50% {
+    transform: translate(1.5px, -1.5px);
+  }
+}
+
+.hare .leap, .hare .whoosh {
+  animation: leap steps(1) infinite;
+  animation-duration: inherit;
+  animation-delay: inherit;
+}
+
+.hare .whoosh {
+  animation-name: whoosh;
+}
+
+@keyframes leap {
+  50% {
+    transform: translateY(-2.5px);
+  }
+}
+
+@keyframes whoosh {
+  50% {
+    transform: translateX(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dial-doodles * {
+    animation: none !important;
+  }
+}
+
+.rate-facts {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  margin-top: 10px;
+}
+
+.rate-fact {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: baseline;
+  column-gap: 6px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rate-fact-label {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.rate-was, .rate-arrow {
+  color: var(--osu-f1);
+}
+
+.rate-input {
+  width: 52px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--osu-b3);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.rate-controls .maker-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rate-controls .maker-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.rate-controls .maker-label {
+  width: 48px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--osu-f1);
+}
+
+.rate-controls .caption {
+  margin: 4px 0 12px;
+}
+
+.rate-controls .status {
+  margin-top: 12px;
+}
+
+@media (min-width: 980px) {
+  .roomy .rater {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
+    grid-template-areas: "head head" "map controls" "change controls" "note controls" ". controls";
+    grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 56px;
+    align-items: start;
+  }
+
+  .roomy .rater > .head {
+    grid-area: head;
+    margin-bottom: 18px;
+  }
+
+  .roomy .rater > .map {
+    grid-area: map;
+  }
+
+  .roomy .rater .map .title {
+    font-size: 22px;
+  }
+
+  .roomy .rater .map .artist {
+    font-size: 14px;
+  }
+
+  .roomy .rater > .doing, .roomy .rater > .status {
+    grid-area: note;
+  }
+
+  .roomy .rate-change {
+    grid-area: change;
+    max-width: 620px;
+    margin-top: 10px;
+  }
+
+  .roomy .rate-facts {
+    gap: 64px;
+    margin-top: 18px;
+  }
+
+  .roomy .rate-fact {
+    font-size: 16px;
+  }
+
+  .roomy .rate-controls {
+    grid-area: controls;
+    padding-top: 4px;
+  }
+}

@@ -501,7 +501,7 @@ pub(crate) struct Pcm {
 }
 
 impl Pcm {
-    fn frames(&self) -> usize {
+    pub(crate) fn frames(&self) -> usize {
         self.samples.len() / self.channels.max(1)
     }
 }
@@ -541,24 +541,9 @@ impl Mix {
         self.frames += n;
     }
 
-    // 16-bit PCM, which every osu! plays
     pub(crate) fn write_wav(&self, src: &Pcm, w: &mut impl std::io::Write) -> std::io::Result<()> {
         let ch = self.channels;
-        let data_len = (self.frames * ch * 2) as u32;
-        let mut head = Vec::with_capacity(44);
-        head.extend_from_slice(b"RIFF");
-        head.extend_from_slice(&(36 + data_len).to_le_bytes());
-        head.extend_from_slice(b"WAVEfmt ");
-        head.extend_from_slice(&16u32.to_le_bytes());
-        head.extend_from_slice(&1u16.to_le_bytes());
-        head.extend_from_slice(&(ch as u16).to_le_bytes());
-        head.extend_from_slice(&self.rate.to_le_bytes());
-        head.extend_from_slice(&(self.rate * ch as u32 * 2).to_le_bytes());
-        head.extend_from_slice(&(ch as u16 * 2).to_le_bytes());
-        head.extend_from_slice(&16u16.to_le_bytes());
-        head.extend_from_slice(b"data");
-        head.extend_from_slice(&data_len.to_le_bytes());
-        w.write_all(&head)?;
+        w.write_all(&wav_header(self.rate, ch, self.frames))?;
 
         let mut buf: Vec<u8> = Vec::with_capacity(1 << 16);
         let mut put = |w: &mut dyn std::io::Write, s: f32| -> std::io::Result<()> {
@@ -598,6 +583,25 @@ impl Mix {
         }
         w.write_all(&buf)
     }
+}
+
+// 16-bit PCM, which every osu! plays
+pub(crate) fn wav_header(rate: u32, channels: usize, frames: usize) -> Vec<u8> {
+    let data_len = (frames * channels * 2) as u32;
+    let mut head = Vec::with_capacity(44);
+    head.extend_from_slice(b"RIFF");
+    head.extend_from_slice(&(36 + data_len).to_le_bytes());
+    head.extend_from_slice(b"WAVEfmt ");
+    head.extend_from_slice(&16u32.to_le_bytes());
+    head.extend_from_slice(&1u16.to_le_bytes());
+    head.extend_from_slice(&(channels as u16).to_le_bytes());
+    head.extend_from_slice(&rate.to_le_bytes());
+    head.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+    head.extend_from_slice(&(channels as u16 * 2).to_le_bytes());
+    head.extend_from_slice(&16u16.to_le_bytes());
+    head.extend_from_slice(b"data");
+    head.extend_from_slice(&data_len.to_le_bytes());
+    head
 }
 
 // from and to are map milliseconds

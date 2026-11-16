@@ -185,8 +185,17 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        if path == "/rate/map" {
+            let (status, body) = crate::rate::map(b).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        // /cut/song/<md5>?rate=1.2
         if let Some(md5) = path.strip_prefix("/cut/song/") {
-            return match crate::cut::song(md5).await {
+            let rate = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "rate").and_then(|(_, v)| v.parse::<f64>().ok());
+            let Some(rate) = crate::rate::checked(rate.unwrap_or(1.0)) else { return empty(400) };
+            return match crate::cut::song(md5, rate).await {
                 Some(bytes) => Response::builder().header(header::CONTENT_TYPE, "application/octet-stream").body(Body::from(bytes)).unwrap(),
                 None => empty(404),
             };
@@ -460,13 +469,21 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let (status, body) = practice::make(b, id, options).await;
             return json(status, &body);
         }
-        // /cut/<md5>?from=61200&to=92400&name=..., in the map's own ms
+        // /cut/<md5>?from=61200&to=92400&name=...&rate=1.2&pitch=keep, in the map's own ms
         if let Some(md5) = path.strip_prefix("/cut/") {
             let q: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
             let text = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
             let num = |k: &str| text(k).and_then(|v| v.parse::<f64>().ok());
             let (Some(from), Some(to)) = (num("from"), num("to")) else { return empty(400) };
-            let (status, body) = crate::cut::make(b, md5, from, to, text("name")).await;
+            let (status, body) = crate::cut::make(b, md5, from, to, text("name"), num("rate").unwrap_or(1.0), text("pitch").as_deref() == Some("keep")).await;
+            return json(status, &body);
+        }
+        // /rate/<md5>?rate=1.25&pitch=keep, pitch=keep is DT or HT, anything else NC or DC
+        if let Some(md5) = path.strip_prefix("/rate/") {
+            let q: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
+            let text = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+            let Some(rate) = text("rate").and_then(|v| v.parse::<f64>().ok()).filter(|r| r.is_finite()) else { return empty(400) };
+            let (status, body) = crate::rate::make(b, md5, rate, text("pitch").as_deref() == Some("keep")).await;
             return json(status, &body);
         }
         // /goals/<id>/target/<percent>

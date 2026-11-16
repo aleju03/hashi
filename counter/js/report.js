@@ -15,6 +15,7 @@ function openReport() {
   analysis = maker = null;
   dropTrainer();
   dropCutter();
+  rater = null;
   skinPage = profilePage = null;
   board = null;
   clearTimeout(boardTimer);

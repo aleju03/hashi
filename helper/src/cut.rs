@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use crate::beatmap::parse_int;
-use crate::practice::{decode, decode_each, general_value, or, sanitize, Chunk, Mix};
+use crate::practice::{decode, decode_each, general_value, or, sanitize, Chunk, Mix, Pcm};
 use crate::{log, Bridge};
 
-// see practice::is_practice
+// what cuts were called before, see practice::is_practice
 pub(crate) const MARK: &str = "Hashi cut";
 const AUDIO_FILE: &str = "hashi-cut.wav";
 const START_SILENCE_MS: f64 = 1000.0;
@@ -18,12 +18,12 @@ const FADE_MS: f64 = 1500.0;
 const SAMPLES_MAX_BYTES: u64 = 64 << 20;
 const SHORTEST_MS: f64 = 1000.0;
 
-struct Source {
-    md5: String,
-    chart: PathBuf,
-    audio: PathBuf,
-    background: Option<PathBuf>,
-    lazer: bool,
+pub(crate) struct Source {
+    pub md5: String,
+    pub chart: PathBuf,
+    pub audio: PathBuf,
+    pub background: Option<PathBuf>,
+    pub lazer: bool,
 }
 
 // by md5, so the map cut is the one the page shows even after another is selected
@@ -38,7 +38,7 @@ fn remember(s: Source) {
     all.push(Arc::new(s));
 }
 
-fn source(md5: &str) -> Option<Arc<Source>> {
+pub(crate) fn source(md5: &str) -> Option<Arc<Source>> {
     SOURCES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|s| s.md5 == md5).cloned()
 }
 
@@ -59,28 +59,43 @@ fn selected_background(b: &Bridge) -> Option<PathBuf> {
     f.is_file().then_some(f)
 }
 
-pub(crate) async fn map(b: &Arc<Bridge>) -> (u16, Value) {
-    let Some(chart) = crate::skin::selected_chart(b) else { return (404, json!({ "error": "Select a map in osu! first." })) };
+pub(crate) struct Selected {
+    pub md5: String,
+    pub text: String,
+    pub chart: crate::beatmap::Chart,
+}
+
+// the map selected in osu!, remembered by md5 for make and rate::make
+pub(crate) async fn load_selected(b: &Arc<Bridge>) -> Result<Selected, (u16, Value)> {
+    let Some(chart) = crate::skin::selected_chart(b) else { return Err((404, json!({ "error": "Select a map in osu! first." }))) };
     let lazer = b.st().tosu.client.as_deref() == Some("lazer");
-    let Ok(bytes) = crate::read_capped(&chart, crate::MAX_CHART_BYTES).await else { return (404, json!({ "error": "Couldn't read the map." })) };
+    let Ok(bytes) = crate::read_capped(&chart, crate::MAX_CHART_BYTES).await else { return Err((404, json!({ "error": "Couldn't read the map." }))) };
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let parsed = match crate::beatmap::parse_chart(&text) {
         Ok(c) if !c.notes.is_empty() => c,
-        Ok(_) => return (422, json!({ "error": "This map has no notes." })),
-        Err(_) => return (422, json!({ "error": "That isn't a mania map." })),
+        Ok(_) => return Err((422, json!({ "error": "This map has no notes." }))),
+        Err(_) => return Err((422, json!({ "error": "That isn't a mania map." }))),
     };
     let md5 = crate::replays::md5_hex(&bytes);
-    let Some(audio) = crate::practice::selected_audio(b, &md5) else { return (404, json!({ "error": "Couldn't find this map's song." })) };
+    let Some(audio) = crate::practice::selected_audio(b, &md5) else { return Err((404, json!({ "error": "Couldn't find this map's song." }))) };
     let background = selected_background(b);
     remember(Source { md5: md5.clone(), chart, audio, background, lazer });
-    let meta = |k: &str| general_value(&text, k);
-    let notes: Vec<Value> = parsed.notes.iter().map(|n| json!([n.column, n.time, if n.is_hold { json!(n.end_time) } else { Value::Null }])).collect();
+    Ok(Selected { md5, text, chart: parsed })
+}
+
+pub(crate) async fn map(b: &Arc<Bridge>) -> (u16, Value) {
+    let s = match load_selected(b).await {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let meta = |k: &str| general_value(&s.text, k);
+    let notes: Vec<Value> = s.chart.notes.iter().map(|n| json!([n.column, n.time, if n.is_hold { json!(n.end_time) } else { Value::Null }])).collect();
     (
         200,
         json!({
-            "md5": md5,
-            "keys": parsed.keys,
-            "od": parsed.od,
+            "md5": s.md5,
+            "keys": s.chart.keys,
+            "od": s.chart.od,
             "artist": meta("Artist"),
             "title": meta("Title"),
             "version": meta("Version"),
@@ -89,27 +104,31 @@ pub(crate) async fn map(b: &Arc<Bridge>) -> (u16, Value) {
     )
 }
 
-// [rate u32][channels u32][mono i16...], so the page doesn't need a decoder for the format
-pub(crate) async fn song(md5: &str) -> Option<Vec<u8>> {
+// [rate u32][channels u32][mono i16...], so the page doesn't need a decoder for the format.
+// At another speed it's stretched with the pitch kept: the page does NC and DC by playing it faster
+pub(crate) async fn song(md5: &str, speed: f64) -> Option<Vec<u8>> {
     let src = source(md5)?;
     tokio::task::spawn_blocking(move || {
-        let mut out = vec![0u8; 8];
+        let mut mono: Vec<f32> = vec![];
         let rate = decode_each(&src.audio, 0.0, f64::INFINITY, |chunk, ch| {
             let ch = ch.max(1);
             match chunk {
-                Chunk::Samples(s) => {
-                    for frame in s.chunks(ch) {
-                        let m = frame.iter().sum::<f32>() / ch as f32;
-                        out.extend_from_slice(&((m.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
-                    }
-                }
-                Chunk::Silence(n) => out.resize(out.len() + n / ch * 2, 0),
+                Chunk::Samples(s) => mono.extend(s.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32)),
+                Chunk::Silence(n) => mono.resize(mono.len() + n / ch, 0.0),
             }
         })
         .map_err(|e| log!("cut: {e}"))
         .ok()?;
-        out[..4].copy_from_slice(&rate.to_le_bytes());
-        out[4..8].copy_from_slice(&1u32.to_le_bytes());
+        let mut pcm = Pcm { rate, channels: 1, samples: mono };
+        if speed != 1.0 {
+            pcm = crate::rate::changed(&pcm, speed, true);
+        }
+        let mut out = Vec::with_capacity(8 + pcm.samples.len() * 2);
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+        for x in &pcm.samples {
+            out.extend_from_slice(&((x.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+        }
         Some(out)
     })
     .await
@@ -118,10 +137,14 @@ pub(crate) async fn song(md5: &str) -> Option<Vec<u8>> {
 }
 
 // from and to are map ms, notes whose heads fall between them are kept
-pub(crate) async fn make(b: &Arc<Bridge>, md5: &str, from: f64, to: f64, name: Option<String>) -> (u16, Value) {
+pub(crate) async fn make(b: &Arc<Bridge>, md5: &str, from: f64, to: f64, name: Option<String>, speed: f64, keep_pitch: bool) -> (u16, Value) {
     let Some(src) = source(md5) else { return (404, json!({ "error": "This map isn't open here anymore. Open it again." })) };
     if !(from.is_finite() && to.is_finite() && from >= 0.0 && to - from >= SHORTEST_MS) {
         return (400, json!({ "error": "Pick a stretch at least a second long." }));
+    }
+    let Some(speed) = crate::rate::checked(speed) else { return (400, json!({ "error": crate::rate::RANGE_ERROR })) };
+    if src.lazer && speed != 1.0 {
+        return (400, json!({ "error": "Use Rate Adjust in lazer." }));
     }
     let bytes = match crate::read_capped(&src.chart, crate::MAX_CHART_BYTES).await {
         Ok(b) if crate::replays::md5_hex(&b) == src.md5 => b,
@@ -134,7 +157,7 @@ pub(crate) async fn make(b: &Arc<Bridge>, md5: &str, from: f64, to: f64, name: O
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let src2 = src.clone();
     let name = name.map(|n| clean_name(&n)).filter(|n| !n.is_empty());
-    let made = tokio::task::spawn_blocking(move || render(&text, &src2, from, to, name.as_deref(), &out_dir)).await.unwrap_or_else(|_| Err("Couldn't make the map.".into()));
+    let made = tokio::task::spawn_blocking(move || render(&text, &src2, from, to, name.as_deref(), speed, keep_pitch, &out_dir)).await.unwrap_or_else(|_| Err("Couldn't make the map.".into()));
     match made {
         Ok(m) => {
             log!("cut {} made, {} notes", m.version, m.notes);
@@ -182,23 +205,23 @@ struct Made {
     notes: usize,
 }
 
-struct Object {
-    time: f64,
-    end: f64,
-    hold: bool,
-    fields: Vec<String>,
+pub(crate) struct Object {
+    pub time: f64,
+    pub end: f64,
+    pub hold: bool,
+    pub fields: Vec<String>,
 }
 
 impl Object {
     // the hit sample's file name, last in the last field, which a hold's end time shares
-    fn sample_file(&self) -> Option<String> {
+    pub fn sample_file(&self) -> Option<String> {
         let last = self.fields.last()?;
         let rest = if self.hold { last.split_once(':')?.1 } else { last.as_str() };
         rest.splitn(5, ':').nth(4).map(|f| f.trim().to_lowercase()).filter(|f| !f.is_empty())
     }
 }
 
-fn section<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
+pub(crate) fn section<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
     let head = format!("[{name}]");
     let mut inside = false;
     let mut out = vec![];
@@ -214,7 +237,7 @@ fn section<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
     out
 }
 
-fn objects(text: &str) -> Vec<Object> {
+pub(crate) fn objects(text: &str) -> Vec<Object> {
     section(text, "HitObjects")
         .into_iter()
         .filter_map(|line| {
@@ -264,13 +287,14 @@ fn most_common_beat(points: &[Point], end: f64) -> f64 {
     crate::practice::longest_beat(points.iter().filter(|p| p.red).map(|p| (p.time, p.beat)), end)
 }
 
-fn number(t: f64) -> String {
+pub(crate) fn number(t: f64) -> String {
     let r = (t * 1000.0).round() / 1000.0;
     if r == r.trunc() { format!("{}", r as i64) } else { format!("{r}") }
 }
 
 // map_end and cut_end are where each one's last note ends, what osu! weighs beat lengths up to
-fn timing(points: &[Point], seg_a: f64, seg_b: f64, map_end: f64, cut_end: f64, shift: impl Fn(f64) -> f64) -> Result<Vec<String>, String> {
+#[allow(clippy::too_many_arguments)]
+fn timing(points: &[Point], seg_a: f64, seg_b: f64, map_end: f64, cut_end: f64, speed: f64, shift: impl Fn(f64) -> f64) -> Result<Vec<String>, String> {
     let mut placed: Vec<Point> = vec![];
     let first_red = points.iter().filter(|p| p.red && p.time <= seg_a).last().or(points.iter().find(|p| p.red)).ok_or("The map has no timing.")?;
     if first_red.time <= seg_a {
@@ -290,6 +314,9 @@ fn timing(points: &[Point], seg_a: f64, seg_b: f64, map_end: f64, cut_end: f64, 
     for (k, p) in placed.iter().enumerate() {
         let mut fields = p.fields.clone();
         fields[0] = number(p.time);
+        if p.red && speed != 1.0 {
+            fields[1] = format!("{}", p.beat / speed);
+        }
         if !p.red && !same {
             fields[1] = number(p.beat / ratio);
         }
@@ -307,7 +334,8 @@ fn timing(points: &[Point], seg_a: f64, seg_b: f64, map_end: f64, cut_end: f64, 
     Ok(lines)
 }
 
-fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, out_dir: &Path) -> Result<Made, String> {
+#[allow(clippy::too_many_arguments)]
+fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, speed: f64, keep_pitch: bool, out_dir: &Path) -> Result<Made, String> {
     let all = objects(text);
     let kept: Vec<&Object> = all.iter().filter(|o| o.time >= from && o.time <= to).collect();
     if kept.is_empty() {
@@ -315,14 +343,18 @@ fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, out_
     }
     let first = kept.iter().map(|o| o.time).fold(f64::MAX, f64::min);
     let last = kept.iter().map(|o| o.end).fold(f64::MIN, f64::max);
-    let seg_a = from.min(first - LEAD_MS).max(0.0);
-    let hold_until = to.max(last) + HOLD_MS;
-    let seg_b = hold_until + FADE_MS;
-    let pcm = decode(&src.audio, seg_a, seg_b)?;
+    // the lead, hold and fade last as long at any speed
+    let seg_a = from.min(first - LEAD_MS * speed).max(0.0);
+    let hold_until = to.max(last) + HOLD_MS * speed;
+    let seg_b = hold_until + FADE_MS * speed;
+    let mut pcm = decode(&src.audio, seg_a, seg_b)?;
+    if speed != 1.0 {
+        pcm = crate::rate::changed(&pcm, speed, keep_pitch);
+    }
     let mut mix = Mix::new(pcm.rate, pcm.channels);
     mix.silence(START_SILENCE_MS);
-    mix.stretched(&pcm, 1.0, hold_until - seg_a);
-    let shift = |t: f64| t - seg_a + START_SILENCE_MS;
+    mix.stretched(&pcm, 1.0, (hold_until - seg_a) / speed);
+    let shift = |t: f64| (t - seg_a) / speed + START_SILENCE_MS;
 
     let hit_objects: Vec<String> = kept
         .iter()
@@ -337,7 +369,7 @@ fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, out_
         })
         .collect();
     let map_end = all.iter().map(|o| o.end).fold(0.0, f64::max);
-    let timing_lines = timing(&points(text), seg_a, seg_b, map_end, shift(last), shift)?;
+    let timing_lines = timing(&points(text), seg_a, seg_b, map_end, shift(last), speed, shift)?;
 
     let meta = |k: &str| general_value(text, k).unwrap_or_default();
     let clock = |ms: f64| {
@@ -345,22 +377,9 @@ fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, out_
         format!("{}:{:02}", s / 60, s % 60)
     };
     let last_head = kept.iter().map(|o| o.time).fold(f64::MIN, f64::max);
-    let version = name.map_or_else(|| format!("{MARK} {} {}-{}", meta("Version"), clock(first), clock(last_head)), String::from);
+    let version = name.map_or_else(|| format!("{} cut {}-{}{}", meta("Version"), clock(first), clock(last_head), crate::rate::suffix(speed)).trim_start().to_string(), String::from);
     let difficulty = section(text, "Difficulty").join("\n");
-    // by its bytes, lazer's files have no extension
-    let bg = src
-        .background
-        .as_ref()
-        .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() <= crate::MAX_IMAGE_BYTES))
-        .and_then(|p| std::fs::read(p).ok())
-        .and_then(|bytes| {
-            let ext = match crate::replays::sniff_image(&bytes)? {
-                "image/png" => "png",
-                "image/bmp" => "bmp",
-                _ => "jpg",
-            };
-            Some((format!("bg.{ext}"), bytes))
-        });
+    let bg = background(src);
     let bg_name = bg.as_ref().map(|(n, _)| n.clone());
     let osu = format!(
         "osu file format v14\n\n[General]\nAudioFilename: {AUDIO_FILE}\nAudioLeadIn: 0\nPreviewTime: -1\nCountdown: 0\nSampleSet: {}\nStackLeniency: 0.7\nMode: 3\nLetterboxInBreaks: 0\nSpecialStyle: {}\nWidescreenStoryboard: 0\n\n\
@@ -396,26 +415,47 @@ fn render(text: &str, src: &Source, from: f64, to: f64, name: Option<&str>, out_
         zip.start_file(n, stored).map_err(|e| bad(&e))?;
         zip.write_all(bytes).map_err(|e| bad(&e))?;
     }
-    // lazer stores set files by hash
-    if !src.lazer {
-        let named: Vec<String> = kept.iter().filter_map(|o| o.sample_file()).collect();
-        let mut room = SAMPLES_MAX_BYTES;
-        for (path, name) in samples(src.chart.parent().unwrap_or(Path::new(""))) {
-            let lower = name.to_lowercase();
-            if lower == AUDIO_FILE || !(is_hitsound(&lower) || named.contains(&lower)) {
-                continue;
-            }
-            let Ok(bytes) = std::fs::read(&path) else { continue };
-            if bytes.len() as u64 > room {
-                break;
-            }
-            room -= bytes.len() as u64;
-            zip.start_file(&name, if lower.ends_with(".wav") { deflated } else { stored }).map_err(|e| bad(&e))?;
-            zip.write_all(&bytes).map_err(|e| bad(&e))?;
-        }
-    }
+    let named: Vec<String> = kept.iter().filter_map(|o| o.sample_file()).collect();
+    add_samples(&mut zip, src, &named, AUDIO_FILE).map_err(|e| bad(&e))?;
     zip.finish().map_err(|e| bad(&e))?;
     Ok(Made { md5, version, file: file.to_string_lossy().into_owned(), notes: kept.len() })
+}
+
+// by its bytes, lazer's files have no extension
+pub(crate) fn background(src: &Source) -> Option<(String, Vec<u8>)> {
+    let p = src.background.as_ref().filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() <= crate::MAX_IMAGE_BYTES))?;
+    let bytes = std::fs::read(p).ok()?;
+    let ext = match crate::replays::sniff_image(&bytes)? {
+        "image/png" => "png",
+        "image/bmp" => "bmp",
+        _ => "jpg",
+    };
+    Some((format!("bg.{ext}"), bytes))
+}
+
+// named are lowercase file names the notes ask for
+pub(crate) fn add_samples(zip: &mut zip::ZipWriter<std::fs::File>, src: &Source, named: &[String], audio_file: &str) -> zip::result::ZipResult<()> {
+    // lazer stores set files by hash
+    if src.lazer {
+        return Ok(());
+    }
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let deflated = zip::write::SimpleFileOptions::default();
+    let mut room = SAMPLES_MAX_BYTES;
+    for (path, name) in samples(src.chart.parent().unwrap_or(Path::new(""))) {
+        let lower = name.to_lowercase();
+        if lower == audio_file || !(is_hitsound(&lower) || named.contains(&lower)) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        if bytes.len() as u64 > room {
+            break;
+        }
+        room -= bytes.len() as u64;
+        zip.start_file(&name, if lower.ends_with(".wav") { deflated } else { stored })?;
+        zip.write_all(&bytes)?;
+    }
+    Ok(())
 }
 
 // soft-hitclap2.wav and the like. Anything else has to be named by a kept note: dan sets keep their
@@ -453,7 +493,7 @@ mod tests {
         let pts = points(MAP);
         // from 12.3 s: the red line moves to the last whole beat before it, the green stays in effect
         let shift = |t: f64| t - 12300.0 + START_SILENCE_MS;
-        let lines = timing(&pts, 12300.0, 30000.0, 22000.0, shift(30000.0), shift).unwrap();
+        let lines = timing(&pts, 12300.0, 30000.0, 22000.0, shift(30000.0), 1.0, shift).unwrap();
         assert_eq!(lines[0], "700,500,4,1,0,60,1,0");
         // the cut's longest beat is 250 against the whole map's 500, so every speed doubles back
         assert_eq!(lines[1], "700,-25,4,1,0,60,0,1");
@@ -463,14 +503,24 @@ mod tests {
     }
 
     #[test]
+    fn a_faster_cut_shortens_red_beats_only() {
+        let pts = points(MAP);
+        let shift = |t: f64| (t - 12300.0) / 1.5 + START_SILENCE_MS;
+        let lines = timing(&pts, 12300.0, 30000.0, 22000.0, shift(30000.0), 1.5, shift).unwrap();
+        assert_eq!(lines[0], "800,333.3333333333333,4,1,0,60,1,0");
+        assert_eq!(lines[1], "800,-25,4,1,0,60,0,1");
+        assert_eq!(lines[2], "6133.333,166.66666666666666,4,1,0,60,1,0");
+    }
+
+    #[test]
     fn a_cut_of_one_tempo_is_left_as_it_was() {
         let pts = points(MAP);
-        let lines = timing(&pts, 500.0, 9000.0, 22000.0, 9000.0, |t| t - 500.0 + START_SILENCE_MS).unwrap();
+        let lines = timing(&pts, 500.0, 9000.0, 22000.0, 9000.0, 1.0, |t| t - 500.0 + START_SILENCE_MS).unwrap();
         assert_eq!(lines, ["1000,500,4,1,0,60,1,0"]);
     }
 
     // cuts a map on disk without opening osu!, from and to in seconds:
-    // HASHI_CUT=<.osu> HASHI_FROM=60 HASHI_TO=90 cargo test -p mania-bridge-helper cut_real_map -- --ignored --nocapture
+    // HASHI_CUT=<.osu> HASHI_FROM=60 HASHI_TO=90 HASHI_SPEED=1.3 cargo test -p mania-bridge-helper cut_real_map -- --ignored --nocapture
     #[test]
     #[ignore]
     fn cut_real_map() {
@@ -484,7 +534,8 @@ mod tests {
         let src = Source { md5: String::new(), chart: osu.clone(), audio, background: None, lazer: false };
         let out = std::env::temp_dir().join("hashi-cut-test");
         std::fs::create_dir_all(&out).unwrap();
-        let made = render(&text, &src, from, to, std::env::var("HASHI_NAME").ok().as_deref(), &out).unwrap();
+        let speed: f64 = std::env::var("HASHI_SPEED").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0);
+        let made = render(&text, &src, from, to, std::env::var("HASHI_NAME").ok().as_deref(), speed, true, &out).unwrap();
         println!("made {} with {} notes: {}", made.version, made.notes, made.file);
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&made.file).unwrap()).unwrap();
@@ -497,11 +548,11 @@ mod tests {
         let after = crate::beatmap::parse_chart(&cut).unwrap();
         let inside: Vec<_> = before.notes.iter().filter(|n| n.time >= from && n.time <= to).collect();
         assert_eq!(after.notes.len(), inside.len());
-        let shift = after.notes[0].time - inside[0].time;
+        let shift = after.notes[0].time - inside[0].time / speed;
         for (a, b) in after.notes.iter().zip(&inside) {
             assert_eq!(a.column, b.column);
-            assert!((a.time - b.time - shift).abs() <= 1.0);
-            assert!(((a.end_time - a.time) - (b.end_time - b.time)).abs() <= 1.0);
+            assert!((a.time - b.time / speed - shift).abs() <= 1.0);
+            assert!(((a.end_time - a.time) - (b.end_time - b.time) / speed).abs() <= 1.0);
         }
         println!("first note at {} ms in the cut, {} ms in the map", after.notes[0].time, inside[0].time);
         println!("{}", cut.lines().skip_while(|l| *l != "[TimingPoints]").take_while(|l| *l != "[HitObjects]").collect::<Vec<_>>().join("\n"));
