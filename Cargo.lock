@@ -2907,7 +2907,7 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "mania-bridge"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "ab_glyph",
  "bytemuck",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "mania-bridge-helper"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "arboard",
  "async-stream",
