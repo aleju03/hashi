@@ -17,7 +17,14 @@ pub(super) struct Layout {
     pub scale: f64,
 }
 
-pub(super) fn layout(widths: &[f64], column_width: f64, spacings: &[f64], spacing: f64, column_start: Option<f64>, keys: usize, width: f64) -> Layout {
+// where the stage goes across the screen: stable puts its left edge at ColumnStart, the default
+// when the skin has none; lazer centres it
+pub(super) enum Start {
+    At(Option<f64>),
+    Centred,
+}
+
+pub(super) fn layout(widths: &[f64], column_width: f64, spacings: &[f64], spacing: f64, start: Start, keys: usize, width: f64) -> Layout {
     let raw: Vec<f64> = (0..keys).map(|c| widths.get(c).copied().unwrap_or(column_width).max(8.0)).collect();
     let gaps: Vec<f64> = (0..keys.saturating_sub(1)).map(|c| spacings.get(c).copied().unwrap_or(spacing).max(0.0)).collect();
     let raw_stage = raw.iter().sum::<f64>() + gaps.iter().sum::<f64>();
@@ -26,7 +33,10 @@ pub(super) fn layout(widths: &[f64], column_width: f64, spacings: &[f64], spacin
     let scale = (HEIGHT / 480.0).min(width * STAGE_MAX_FRACTION / raw_stage);
     let lane_widths: Vec<f64> = raw.iter().map(|w| w * scale).collect();
     let stage_width = raw_stage * scale;
-    let stage_x = (column_start.unwrap_or(COLUMN_START) * scale).min(width - stage_width).max(0.0);
+    let stage_x = match start {
+        Start::At(column_start) => (column_start.unwrap_or(COLUMN_START) * scale).min(width - stage_width).max(0.0),
+        Start::Centred => ((width - stage_width) / 2.0).max(0.0),
+    };
     let mut lane_xs = Vec::with_capacity(keys);
     let mut x = stage_x;
     for (c, w) in lane_widths.iter().enumerate() {
@@ -215,5 +225,21 @@ mod body_tile_tests {
         assert_eq!(t, [(0.0, 4.0, 0.0, 4.0), (4.0, 6.0, 3.0, 1.0), (10.0, 4.0, 0.0, 4.0), (14.0, 6.0, 3.0, 1.0), (20.0, 4.0, 0.0, 4.0), (24.0, 1.0, 3.0, 1.0)]);
         // an image kept whole repeats as before
         assert_eq!(super::body_tiles(0.0, 10.0, 4.0, 4.0, 1.0).len(), 3);
+    }
+
+    #[test]
+    fn each_gap_has_its_own_spacing() {
+        let l = super::layout(&[85.0; 4], 85.0, &[0.0, 55.0, 0.0], 0.0, super::Start::At(Some(230.0)), 4, 1280.0);
+        let k = l.scale;
+        assert_eq!(l.lane_xs[1] - l.lane_xs[0], 85.0 * k);
+        assert_eq!(l.lane_xs[2] - l.lane_xs[1], (85.0 + 55.0) * k);
+        assert_eq!(l.stage_width, 395.0 * k);
+        assert_eq!(l.stage_x, 230.0 * k);
+    }
+
+    #[test]
+    fn lazer_centres_the_stage() {
+        let l = super::layout(&[85.0; 4], 85.0, &[0.0, 55.0, 0.0], 0.0, super::Start::Centred, 4, 1152.0);
+        assert_eq!(l.stage_x * 2.0 + l.stage_width, 1152.0);
     }
 }

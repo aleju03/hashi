@@ -1113,7 +1113,7 @@ fn shot(args: &Args, out: &str) -> Result<(), String> {
     let info: serde_json::Value = serde_json::from_slice(&info).map_err(|e| e.to_string())?;
     let dir = std::path::PathBuf::from(info["folder"].as_str().ok_or("No skin.")?);
     let (w, h) = args.size.unwrap_or((1280, 720));
-    let (json, sprites) = mania_bridge::player::scene(&dir, args.keys, "shot", "", Some(f64::from(w) / f64::from(h)))?;
+    let (json, sprites) = mania_bridge::player::scene(&dir, args.keys, "shot", "", Some(f64::from(w) / f64::from(h)), info["client"] == "lazer")?;
     let mut gpu = Gpu::new(None, false)?;
     let mut text = text::Text::new();
     let stage = Stage::new(&json, &sprites, &mut gpu, None);

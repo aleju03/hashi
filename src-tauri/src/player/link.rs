@@ -221,7 +221,8 @@ fn follow(port: u16, aspect: f64, proxy: EventLoopProxy<News>, shared: Shared, r
 fn scene(port: u16, live: &Live, aspect: f64) -> Option<Scene> {
     let info = get_json(port, "/skin")?;
     let dir = PathBuf::from(info.get("folder")?.as_str()?);
-    match mania_bridge::player::scene(&dir, live.keys, &live.at, &live.edits, Some(aspect)) {
+    let lazer = info.get("client").and_then(|c| c.as_str()) == Some("lazer");
+    match mania_bridge::player::scene(&dir, live.keys, &live.at, &live.edits, Some(aspect), lazer) {
         Ok((json, sprites)) => Some(Scene { json, sprites }),
         Err(e) => {
             eprintln!("skin: {e}");

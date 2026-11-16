@@ -109,6 +109,9 @@ pub(super) struct Profile {
     pub combo_origin: f64,
     // placed by lazer's HUD editor, which lazer goes by instead of ComboPosition
     pub combo_hud: bool,
+    // drawn by lazer, which centres the stage whatever ColumnStart says. Set by whoever draws it, as
+    // it's where the skin is used and not in the skin
+    pub centred: bool,
     pub keys_under_notes: bool,
     pub body_styles: Vec<f64>,
     pub lazer_bodies: bool,
@@ -151,6 +154,7 @@ impl Profile {
             combo_hidden: false,
             combo_origin: 0.0,
             combo_hud: false,
+            centred: false,
             keys_under_notes: false,
             body_styles: vec![],
             lazer_bodies: false,
@@ -827,6 +831,7 @@ fn build(skin: &Skin, block: &Block, fonts: &HashMap<String, String>, base: &Pro
         combo_hidden: opt_number(block.get("ComboPosition")).is_some_and(|v| v > 480.0),
         combo_origin: 0.0,
         combo_hud: false,
+        centred: false,
         keys_under_notes: opt_number(block.get("KeysUnderNotes")) == Some(1.0),
         body_styles,
         lazer_bodies: false,

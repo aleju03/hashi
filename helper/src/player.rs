@@ -11,8 +11,9 @@ pub struct Sprite {
 }
 
 // the scene as the skin page gets it (scene.rs's json) and its sprites by index
-pub fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<(serde_json::Value, Vec<Sprite>), String> {
-    let (json, sprites) = crate::skin_render::player_scene(dir, keys, at, edits, aspect)?;
+// `lazer` when /skin's client says the skin is lazer's
+pub fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool) -> Result<(serde_json::Value, Vec<Sprite>), String> {
+    let (json, sprites) = crate::skin_render::player_scene(dir, keys, at, edits, aspect, lazer)?;
     Ok((json, sprites.into_iter().map(|(width, height, rgba)| Sprite { width, height, rgba }).collect()))
 }
 

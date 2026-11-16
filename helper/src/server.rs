@@ -282,7 +282,8 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         if path == "/skin/scene" {
             let (Some((keys, at, edits)), Ok(found)) = (skin_query(&req), crate::skin::current(b)) else { return empty(404) };
             let aspect = skin_aspect(&req);
-            return match tokio::task::spawn_blocking(move || crate::skin_render::scene(&found.dir, keys, &at, &edits, aspect)).await {
+            let lazer = found.client == "lazer";
+            return match tokio::task::spawn_blocking(move || crate::skin_render::scene(&found.dir, keys, &at, &edits, aspect, lazer)).await {
                 Ok(Ok(scene)) => {
                     let mut res = json(200, &scene);
                     res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -296,7 +297,8 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         if let Some(id) = path.strip_prefix("/skin/sprite/").and_then(|r| r.strip_suffix(".png")) {
             let (Ok(id), Some((keys, at, edits)), Ok(found)) = (id.parse::<usize>(), skin_query(&req), crate::skin::current(b)) else { return empty(404) };
             let aspect = skin_aspect(&req);
-            return match tokio::task::spawn_blocking(move || crate::skin_render::sprite(&found.dir, keys, &at, &edits, aspect, id)).await {
+            let lazer = found.client == "lazer";
+            return match tokio::task::spawn_blocking(move || crate::skin_render::sprite(&found.dir, keys, &at, &edits, aspect, lazer, id)).await {
                 Ok(Ok(Some(bytes))) => Response::builder()
                     .header(header::CONTENT_TYPE, "image/png")
                     .header(header::CACHE_CONTROL, "max-age=3600")
@@ -316,9 +318,10 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         }
         if path == "/skin.png" {
             let (Some((keys, at, edits)), Ok(found)) = (skin_query(&req), crate::skin::current(b)) else { return empty(404) };
+            let lazer = found.client == "lazer";
             let draw = move || match edits.is_empty() {
-                true => crate::skin_render::render(&found.dir, keys),
-                false => crate::skin_render::render_edited(&found.dir, keys, &at, &edits),
+                true => crate::skin_render::render(&found.dir, keys, lazer),
+                false => crate::skin_render::render_edited(&found.dir, keys, &at, &edits, lazer),
             };
             return match tokio::task::spawn_blocking(draw).await {
                 Ok(Ok(bytes)) => Response::builder()

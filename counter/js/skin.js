@@ -1420,7 +1420,8 @@ function skinStage(page) {
       "100%", e.comboScale != null && reset("comboScale")),
     skinAccuracy(page),
     el("div", { class: "skin-group" }, el("span", {}, "Columns")),
-    skinRow("ColumnStart",
+    // lazer centres the stage whatever ColumnStart says
+    page.info?.client !== "lazer" && skinRow("ColumnStart",
       ["From the left edge", start !== centred && [" · ", el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.start = centred === ownStart ? null : centred)) }, `Centre (${centred})`)]],
       skinNumber(page, "ColumnStart", start, 0, SKIN_COLUMN_START_MAX, (v) => skinChange(page, (x) => (x.start = v === ownStart ? null : v))),
       ownStart, e.start != null && reset("start")),

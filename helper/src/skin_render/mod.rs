@@ -42,9 +42,11 @@ const PINK: Rgba = [255, 102, 171, 255];
 
 // mania-hub's skin preview (src/lib/skin-preview-render.ts) ported as is, down to Chrome's canvas
 // quirks, since that one is checked against the game 1:1. A change there belongs here too.
-pub(crate) fn render(dir: &Path, keys: usize) -> Result<Vec<u8>, String> {
+// `lazer` is for a skin lazer draws, which centres the stage whatever ColumnStart says
+pub(crate) fn render(dir: &Path, keys: usize, lazer: bool) -> Result<Vec<u8>, String> {
     let keys = keys.clamp(1, 10);
-    let (settings, profile) = load::import(dir, keys)?;
+    let (settings, mut profile) = load::import(dir, keys)?;
+    profile.centred = lazer;
     Builder::new(&settings, &profile, keys, WIDTH).scene().png()
 }
 
@@ -77,10 +79,10 @@ fn slot<T>(slot: &Slot<T>, key: String, make: impl FnOnce() -> Result<T, String>
     Ok(v)
 }
 
-fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<Arc<Scene>, String> {
+fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64, lazer: bool) -> Result<Arc<Scene>, String> {
     let keys = keys.clamp(1, 10);
     let base_key = format!("{}\n{keys}\n{at}", dir.display());
-    let key = format!("{base_key}\n{width}\n{edits}");
+    let key = format!("{base_key}\n{width}\n{lazer}\n{edits}");
     if let Some((_, s)) = SCENES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key) {
         return Ok(s.clone());
     }
@@ -90,7 +92,8 @@ fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<
             let (settings, profile) = load::import_from(&skin, keys)?;
             Ok(Base { settings, profile, skin, sources: Default::default() })
         })?;
-        let (profile, _, _) = edit::apply(&base.profile, &edit::Edits::parse(edits), keys, &base.skin, &base.sources, false);
+        let (mut profile, _, _) = edit::apply(&base.profile, &edit::Edits::parse(edits), keys, &base.skin, &base.sources, false);
+        profile.centred = lazer;
         let mut builder = Builder::new(&base.settings, &profile, keys, width);
         // recoloured notes would tint the backdrop, which should stay the skin's while it's edited
         builder.accent = skin_accent(&base.profile);
@@ -126,25 +129,25 @@ fn width_for(aspect: Option<f64>) -> f64 {
 }
 
 // everything the page needs to draw the preview itself, sprites by index
-pub(crate) fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<Value, String> {
-    Ok(cached(dir, keys, at, edits, width_for(aspect))?.json())
+pub(crate) fn scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool) -> Result<Value, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect), lazer)?.json())
 }
 
-pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, id: usize) -> Result<Option<Vec<u8>>, String> {
-    Ok(cached(dir, keys, at, edits, width_for(aspect))?.sprite_png(id))
+pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool, id: usize) -> Result<Option<Vec<u8>>, String> {
+    Ok(cached(dir, keys, at, edits, width_for(aspect), lazer)?.sprite_png(id))
 }
 
 // the scene for the game size window, which draws it itself: what the page gets, with each
 // sprite's premultiplied RGBA pixels instead of a png
-pub(crate) fn player_scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>) -> Result<(Value, Vec<(u32, u32, Vec<u8>)>), String> {
-    let scene = cached(dir, keys, at, edits, width_for(aspect))?;
+pub(crate) fn player_scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool) -> Result<(Value, Vec<(u32, u32, Vec<u8>)>), String> {
+    let scene = cached(dir, keys, at, edits, width_for(aspect), lazer)?;
     let sprites = scene.sprites.iter().map(|t| (t.pixmap.width(), t.pixmap.height(), t.pixmap.data().to_vec())).collect();
     Ok((scene.json(), sprites))
 }
 
 // the still with edits drawn in, to check the page against
-pub(crate) fn render_edited(dir: &Path, keys: usize, at: &str, edits: &str) -> Result<Vec<u8>, String> {
-    cached(dir, keys, at, edits, WIDTH)?.png()
+pub(crate) fn render_edited(dir: &Path, keys: usize, at: &str, edits: &str, lazer: bool) -> Result<Vec<u8>, String> {
+    cached(dir, keys, at, edits, WIDTH, lazer)?.png()
 }
 
 fn own_names(skin: &load::Skin, p: &Profile, keys: usize) -> Vec<Value> {
@@ -292,7 +295,8 @@ struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     fn new(s: &'a Settings, p: &'a Profile, keys: usize, width: f64) -> Self {
-        let l = pattern::layout(&p.column_widths, p.column_width, &p.column_spacings, p.column_spacing, p.column_start, keys, width);
+        let start = if p.centred { pattern::Start::Centred } else { pattern::Start::At(p.column_start) };
+        let l = pattern::layout(&p.column_widths, p.column_width, &p.column_spacings, p.column_spacing, start, keys, width);
         Builder { s, p, keys, width, l, up: s.upscroll, sprites: vec![], accent: skin_accent(p) }
     }
 
@@ -833,8 +837,8 @@ mod tests {
             let name = entry.file_name().to_string_lossy().into_owned();
             for &k in &keys {
                 let made = match &edits {
-                    Some(e) => super::render_edited(&entry.path(), k, "", e),
-                    None => super::render(&entry.path(), k),
+                    Some(e) => super::render_edited(&entry.path(), k, "", e, false),
+                    None => super::render(&entry.path(), k, false),
                 };
                 match made {
                     Ok(png) => std::fs::write(format!("{out}/{name}_{k}k.png"), png).unwrap(),
