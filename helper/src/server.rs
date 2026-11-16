@@ -231,8 +231,20 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             return res;
         }
+        // /skin/upload/<id>.png, an image added for a stage's side
+        if let Some(id) = path.strip_prefix("/skin/upload/").and_then(|r| r.strip_suffix(".png")) {
+            let id = id.to_string();
+            return match tokio::task::spawn_blocking(move || crate::skin_render::upload_png(&id)).await {
+                Ok(Some(bytes)) => Response::builder()
+                    .header(header::CONTENT_TYPE, "image/png")
+                    .header(header::CACHE_CONTROL, "max-age=86400")
+                    .body(Body::from(bytes))
+                    .unwrap(),
+                _ => empty(404),
+            };
+        }
         // /skin/thumb?path=mania\note1&at=.., and /skin/rim?..&ends=0 for a body's art
-        if path == "/skin/images" || path == "/skin/thumb" || path == "/skin/rim" {
+        if path == "/skin/images" || path == "/skin/thumb" || path == "/skin/rim" || path == "/skin/art" || path == "/skin/split" {
             let query: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
             let get = |name: &str| query.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_default();
             let Ok(found) = crate::skin::current(b) else { return empty(404) };
@@ -244,6 +256,12 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
                     Err(_) => empty(500),
                 };
             }
+            if path == "/skin/split" {
+                return match tokio::task::spawn_blocking(move || crate::skin_render::split(&found.dir, &at, &reference)).await {
+                    Ok(Some(v)) => json(200, &v),
+                    _ => empty(404),
+                };
+            }
             if path == "/skin/images" {
                 return match tokio::task::spawn_blocking(move || crate::skin_render::images(&found.dir, &at)).await {
                     Ok(Ok(v)) => json(200, &v),
@@ -251,7 +269,8 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
                     Err(_) => empty(500),
                 };
             }
-            return match tokio::task::spawn_blocking(move || crate::skin_render::thumb(&found.dir, &at, &reference)).await {
+            let full = path == "/skin/art";
+            return match tokio::task::spawn_blocking(move || if full { crate::skin_render::art(&found.dir, &at, &reference) } else { crate::skin_render::thumb(&found.dir, &at, &reference) }).await {
                 Ok(Some(bytes)) => Response::builder()
                     .header(header::CONTENT_TYPE, "image/png")
                     .header(header::CACHE_CONTROL, "max-age=3600")
@@ -383,6 +402,33 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             return match tosu::set_dashboard(b, path == "/tosu-dashboard/on").await {
                 Ok(()) => json(200, &b.snapshot()),
                 Err(e) => json(500, &serde_json::json!({ "error": e })),
+            };
+        }
+        // the image file itself as the body
+        if path == "/skin/upload" {
+            let Ok(bytes) = axum::body::to_bytes(req.into_body(), crate::MAX_IMAGE_BYTES as usize).await else { return empty(413) };
+            return match tokio::task::spawn_blocking(move || crate::skin_render::save_upload(&bytes)).await {
+                Ok(Ok(v)) => json(200, &v),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
+        // /skin/join?at=.., the pictures as JSON in the body
+        if path == "/skin/join" {
+            let Ok(found) = crate::skin::current(b) else { return empty(404) };
+            let at = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "at").map(|(_, v)| v.into_owned()).unwrap_or_default();
+            let Ok(body) = axum::body::to_bytes(req.into_body(), 1 << 20).await else { return empty(413) };
+            return match tokio::task::spawn_blocking(move || crate::skin_render::join(&found.dir, &at, &body)).await {
+                Ok(Ok(v)) => json(200, &v),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
+            };
+        }
+        if path == "/skin/paste" {
+            return match tokio::task::spawn_blocking(crate::skin_render::paste_upload).await {
+                Ok(Ok(v)) => json(200, &v),
+                Ok(Err(e)) => json(422, &serde_json::json!({ "error": e })),
+                Err(_) => empty(500),
             };
         }
         // /skin/apply-new?keys=7&edits=<json>&name=..

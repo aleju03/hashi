@@ -7,13 +7,13 @@ mod pattern;
 mod scene;
 mod write;
 
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
 use tiny_skia::BlendMode;
 
-pub(crate) use library::{images, rim, thumb};
+pub(crate) use library::{art, images, join, rim, split, thumb};
 pub(crate) use write::{applied, apply, copy_tree, edited, fix_tiffs, pack, tiffs, undo};
 
 use canvas::{tinted, Draw, Texture};
@@ -108,6 +108,7 @@ fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64) -> Result<
         scene.own_key_bottom = key_bottom(&base.profile, keys);
         scene.own_bottom_art = bottom_art(&base.profile);
         scene.own = own_names(&base.skin, &base.profile, keys);
+        scene.own_sides = own_sides(&base.skin, &base.profile);
         scene
     });
     let mut kept = SCENES.lock().unwrap_or_else(|e| e.into_inner());
@@ -161,6 +162,79 @@ fn own_names(skin: &load::Skin, p: &Profile, keys: usize) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+// blank art, which skins use to hide a side, is no picture to move
+fn own_sides(skin: &load::Skin, p: &Profile) -> Value {
+    let side = |a: &Option<Asset>| {
+        let asset = a.as_ref()?;
+        let tex = asset.image.as_ref()?;
+        tex.alpha_top()?;
+        Some(serde_json::json!({ "src": library::name_of(skin, asset)?, "w": asset.native_width(tex), "h": edit::SIDE_HEIGHT }))
+    };
+    // at its own size, in 480ths
+    let over = || {
+        let asset = p.stage.bottom.as_ref()?;
+        let tex = asset.image.as_ref()?;
+        tex.alpha_top()?;
+        let u = edit::BOTTOM_UNITS;
+        Some(serde_json::json!({ "src": library::name_of(skin, asset)?, "w": asset.native_width(tex) * u, "h": asset.native_height(tex) * u }))
+    };
+    serde_json::json!({ "left": side(&p.stage.left), "right": side(&p.stage.right), "over": over() })
+}
+
+// Images added from the computer for a stage's sides, kept by Hashi rather than in a skin until one is
+// applied. Set once at start
+static UPLOADS: OnceLock<PathBuf> = OnceLock::new();
+const UPLOAD_MAX: u32 = 4096;
+
+pub(crate) fn set_uploads_dir(dir: PathBuf) {
+    let _ = UPLOADS.set(dir);
+}
+
+fn uploaded(id: &str) -> Option<PathBuf> {
+    let ok = id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit());
+    ok.then(|| UPLOADS.get().map(|d| d.join(format!("{id}.png")))).flatten().filter(|p| p.is_file())
+}
+
+const NOT_AN_IMAGE: &str = "Couldn't read that as a picture. Try a PNG or JPG.";
+
+pub(crate) fn save_upload(bytes: &[u8]) -> Result<Value, String> {
+    keep(image::load_from_memory(bytes).map_err(|_| NOT_AN_IMAGE.to_string())?)
+}
+
+// The picture copied, read here since Linux's webview doesn't hand the page one. A file copied in a
+// file manager comes as its path
+pub(crate) fn paste_upload() -> Result<Value, String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|_| "Couldn't read what's copied.".to_string())?;
+    if let Ok(img) = clipboard.get_image() {
+        let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned()).ok_or(NOT_AN_IMAGE)?;
+        return keep(image::DynamicImage::ImageRgba8(rgba));
+    }
+    let files = clipboard.get().file_list().unwrap_or_default();
+    let file = files.first().ok_or("There's no picture copied.")?;
+    let bytes = std::fs::read(file).map_err(|_| "Couldn't read the copied file.".to_string())?;
+    save_upload(&bytes)
+}
+
+// the image as a png of at most UPLOAD_MAX on a side, named by its content
+pub(super) fn keep(img: image::DynamicImage) -> Result<Value, String> {
+    let dir = UPLOADS.get().ok_or("No folder for images.")?;
+    let img = if img.width() > UPLOAD_MAX || img.height() > UPLOAD_MAX { img.resize(UPLOAD_MAX, UPLOAD_MAX, image::imageops::FilterType::Triangle) } else { img };
+    let img = img.to_rgba8();
+    let mut png = vec![];
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    let id = crate::replays::md5_hex(&png);
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let file = dir.join(format!("{id}.png"));
+    if !file.is_file() {
+        std::fs::write(&file, &png).map_err(|e| format!("Couldn't keep the image ({e})."))?;
+    }
+    Ok(serde_json::json!({ "src": format!("upload:{id}"), "w": img.width(), "h": img.height() }))
+}
+
+pub(crate) fn upload_png(id: &str) -> Option<Vec<u8>> {
+    std::fs::read(uploaded(id)?).ok()
 }
 
 // each column's transparent lead-in at the tail end of the body, in skin units
@@ -442,6 +516,8 @@ impl<'a> Builder<'a> {
             own_bottom_art: None,
             note_pad,
             own: vec![],
+            stage_edges: [self.l.stage_x, self.l.stage_x + self.l.stage_width],
+            own_sides: Value::Null,
             body_color: s.ln_body_color,
             base,
             hint,
@@ -728,17 +804,23 @@ fn accent(p: &Profile) -> Option<Rgba> {
 
 #[cfg(test)]
 mod tests {
-    // renders every skin in SKIN_RENDER_DIR to SKIN_RENDER_OUT as <skin>_<keys>k.png
+    // renders every skin in SKIN_RENDER_DIR to SKIN_RENDER_OUT as <skin>_<keys>k.png, with the page's
+    // edits in SKIN_RENDER_EDITS when set
     #[test]
     #[ignore]
     fn render_skins() {
         let dir = std::env::var("SKIN_RENDER_DIR").expect("SKIN_RENDER_DIR");
         let out = std::env::var("SKIN_RENDER_OUT").expect("SKIN_RENDER_OUT");
         let keys: Vec<usize> = std::env::var("SKIN_RENDER_KEYS").unwrap_or("4,7".into()).split(',').filter_map(|k| k.parse().ok()).collect();
+        let edits = std::env::var("SKIN_RENDER_EDITS").ok();
         for entry in std::fs::read_dir(dir).unwrap().flatten().filter(|e| e.path().is_dir()) {
             let name = entry.file_name().to_string_lossy().into_owned();
             for &k in &keys {
-                match super::render(&entry.path(), k) {
+                let made = match &edits {
+                    Some(e) => super::render_edited(&entry.path(), k, "", e),
+                    None => super::render(&entry.path(), k),
+                };
+                match made {
                     Ok(png) => std::fs::write(format!("{out}/{name}_{k}k.png"), png).unwrap(),
                     Err(e) => println!("{name} {k}K: {e}"),
                 }

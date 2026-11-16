@@ -25,7 +25,16 @@ function openSkin(from = null) {
     source: from ? "play" : ["mix", "lns", "selected"].find((s) => s === stored(SKIN_SOURCE, "mix")) ?? "mix", play: from, back, map: null,
     keys: keys >= 4 && keys <= 10 ? keys : 4, info: null, stamp: Date.now(), loading: true, error: null,
     // kept across renders so the running preview isn't torn down by every update
-    canvas: el("canvas", { class: "skin-shot", width: 1280, height: 720, title: "Click to pause or play", onclick: () => skinPause(skinPage) }),
+    canvas: el("canvas", {
+      class: "skin-shot", width: 1280, height: 720, title: "Click to pause or play",
+      // a picture dragged beside the stage isn't a click on the preview
+      onclick: () => (skinPage.noPause ? (skinPage.noPause = false) : skinPause(skinPage)),
+      onpointerdown: (ev) => skinSideDrag(skinPage, ev),
+      onpointermove: (ev) => skinSideCursor(skinPage, ev),
+      ondragover: (ev) => skinSideDragOver(skinPage, ev),
+      ondrop: (ev) => skinSideDrop(skinPage, ev),
+      oncontextmenu: (ev) => skinSideMenuOpen(skinPage, ev),
+    }),
     fpsNode: el("span", { class: "skin-fps" }),
     live: null, playing: true, speed: stored(SKIN_SPEED, 24),
     get scroll() {
@@ -184,7 +193,7 @@ function skinView() {
   skinShare(p);
   p.canvas.classList.toggle("loading", p.loading);
   p.canvas.setAttribute("aria-label", info?.found ? `${info.name} in ${p.keys}K` : "");
-  return el("div", { class: "skin-page" },
+  return el("div", { class: "skin-page", ondragover: (ev) => skinSideDragOver(skinPage, ev), ondrop: (ev) => skinSideDrop(skinPage, ev) },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Skin editor"),
       el("button", { class: "link", onclick: closeSkin }, p.back ? "Back to the analysis" : "Back to plays")),
@@ -220,5 +229,6 @@ function skinView() {
     el("div", { class: "skin-shot-box" }, p.canvas, p.fpsNode),
     // the game size window follows once it's let go
     !SKIN_FREEZE && skinSeekBar(p, () => render())),
-    info?.found && p.live && !SKIN_FREEZE && skinEditor(p));
+    info?.found && p.live && !SKIN_FREEZE && skinEditor(p),
+    p.sideMenu && skinSideMenu(p));
 }

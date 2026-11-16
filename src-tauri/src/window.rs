@@ -121,6 +121,8 @@ fn build(app: &AppHandle, args: &Args, visible: bool) -> tauri::Result<()> {
         .always_on_top(args.on_top)
         // the theme's --osu-b5, no white flash before the page paints
         .background_color(backdrop(args.theme))
+        // the page takes dropped files itself, a picture onto the skin preview
+        .disable_drag_drop_handler()
         // links that would open a new window (target=_blank) go to the browser instead
         .on_new_window(|url, _| {
             if matches!(url.scheme(), "http" | "https") {

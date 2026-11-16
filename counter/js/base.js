@@ -119,6 +119,14 @@ const TRAY = `<path d="M1 1l6 6M7 3v4H3M.5 9.5h9"/>`;
 const CHART = `<path d="M1 9.5h8M2.5 7.5v-2M5 7.5V1.5M7.5 7.5v-4" stroke-linecap="round"/>`;
 const PIN = `<path class="head" d="M3 .5h4V4l1.5 1.5h-7L3 4z" stroke-linejoin="round"/><path d="M5 5.5v4"/>`;
 
+// the window leaves dropped files to the page, which would otherwise open one in its place
+addEventListener("dragover", (ev) => {
+  if (!ev.dataTransfer?.types.includes("Files")) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "none";
+});
+addEventListener("drop", (ev) => ev.dataTransfer?.types.includes("Files") && ev.preventDefault());
+
 function windowAction(name) {
   fetch(`${BRIDGE}/window/${name}`, { method: "POST" }).catch(() => {});
 }

@@ -9,6 +9,7 @@ license.workspace = true
 name = "mania_bridge"
 
 [dependencies]
+arboard = { version = "3.7.0", features = ["wayland-data-control"] }
 async-stream = "0.3"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
 base64 = "0.22"

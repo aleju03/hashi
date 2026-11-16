@@ -124,6 +124,11 @@ pub(super) struct Scene {
     pub note_pad: f64,
     // each column's images as skin.ini names them, before any edit
     pub own: Vec<Value>,
+    // the stage's left and right edges across the card
+    pub stage_edges: [f64; 2],
+    // StageLeft's, StageRight's and StageBottom's images before any edit, by name and size in a 768-tall
+    // screen's pixels
+    pub own_sides: Value,
     pub body_color: Rgba,
     pub base: Vec<Op>,
     pub hint: Vec<Op>,
@@ -362,6 +367,8 @@ impl Scene {
             "ownBottomArt": self.own_bottom_art,
             "notePad": self.note_pad,
             "own": self.own,
+            "stageEdges": self.stage_edges,
+            "ownSides": self.own_sides,
             "bodyColor": self.body_color,
             "sprites": self.sprites.iter().map(|t| json!([t.width(), t.height(), t.id])).collect::<Vec<_>>(),
             "base": ops_json(&self.base),

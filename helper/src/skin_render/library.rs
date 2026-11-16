@@ -262,6 +262,43 @@ pub(crate) fn rim(dir: &Path, at: &str, reference: &str, ends: bool) -> Value {
     v
 }
 
+// an image at full size as a png, what a stage's side picture is drawn from while it's dragged
+pub(crate) fn art(dir: &Path, at: &str, reference: &str) -> Option<Vec<u8>> {
+    let lib = library(dir, at);
+    let raw = load::raw(edit::layer_file(&lib.skin, reference)?.as_path())?;
+    let img = image::RgbaImage::from_raw(raw.w, raw.h, raw.rgba)?;
+    let mut out = std::io::Cursor::new(vec![]);
+    img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
+}
+
+// the pictures in the body, { layers: [..] }, made one picture: { src, x, y, w, h } with its place
+pub(crate) fn join(dir: &Path, at: &str, body: &[u8]) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Ask {
+        layers: Vec<edit::Layer>,
+    }
+    let ask: Ask = serde_json::from_slice(body).map_err(|_| "Couldn't read the pictures.".to_string())?;
+    let lib = library(dir, at);
+    let (img, [x, y, w, h]) = edit::joined(&ask.layers, &lib.skin).ok_or("Couldn't join those.")?;
+    let mut kept = super::keep(image::DynamicImage::ImageRgba8(img))?;
+    kept["x"] = json!(x);
+    kept["y"] = json!(y);
+    kept["w"] = json!(w);
+    kept["h"] = json!(h);
+    Ok(kept)
+}
+
+// a picture's separate parts, for splitting it into one picture each: { w, h, pieces: [[x, y, w, h]] }
+// in its pixels, no pieces when it's one or too many to be of use
+pub(crate) fn split(dir: &Path, at: &str, reference: &str) -> Option<Value> {
+    let lib = library(dir, at);
+    let raw = load::raw(edit::layer_file(&lib.skin, reference)?.as_path())?;
+    let pieces = edit::pieces(&raw);
+    let pieces = if (2..=edit::SPLIT_MAX).contains(&pieces.len()) { pieces } else { vec![] };
+    Some(json!({ "w": raw.w, "h": raw.h, "pieces": pieces }))
+}
+
 fn make_thumb(skin: &Skin, reference: &str) -> Option<Vec<u8>> {
     let asset = skin.swap(reference, true)?;
     let raw = load::raw(asset.path.as_ref()?)?;

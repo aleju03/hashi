@@ -19,7 +19,8 @@ function skinAspect(page) {
 }
 
 async function loadSkinScene(page) {
-  const edits = page.editsJson ?? skinEditsJson(page);
+  const hidden = page.sideHidden ?? null;
+  const edits = skinSideScene(page, page.editsJson ?? skinEditsJson(page));
   const query = `keys=${page.keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}${skinAspect(page)}`;
   const res = await fetch(`${BRIDGE}/skin/scene?${query}`);
   if (!res.ok) throw new Error("scene");
@@ -40,7 +41,7 @@ async function loadSkinScene(page) {
     known.set(id, img);
     return img;
   }));
-  return { scene, images };
+  return { scene, images, hidden };
 }
 
 function refreshSkin(page) {
@@ -291,8 +292,10 @@ function skinDraw(live, holds, taps, pressed) {
   stack(layers.line);
   if (!s.keysUnderNotes) keys();
   stack(layers.over);
+  skinSidePictures(ctx);
   s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.lighting, images));
   stack(layers.top);
+  skinSideMarks(ctx);
 }
 
 function skinFrozen(live) {
@@ -594,6 +597,8 @@ function skinFresh() {
     comboScale: null,
     // by part, per column: { width: percent, outline: { size, color, outside }, rim: "keep" | "remove" }
     shapes: {},
+    // each a list of pictures, see skin-sides.js, null keeping the skin's own
+    sides: { left: null, right: null }, sideWhich: "left", sideAt: null, sideAlso: [],
   };
 }
 
@@ -636,6 +641,8 @@ function skinEditsJson(page) {
       return Object.keys(one).length ? one : null;
     });
   }
+  const sides = ["left", "right", "over"].filter((s) => e.sides?.[s]);
+  if (sides.length) out.sides = Object.fromEntries(sides.map((s) => [s, e.sides[s]]));
   // the accuracy's place is the whole skin's, so it goes with whichever keymode is applied
   if (page.wide?.percentWidth != null) out.percentWidth = page.wide.percentWidth;
   return Object.keys(out).length ? JSON.stringify(out) : "";
@@ -700,7 +707,7 @@ function skinRestored(state) {
 }
 
 // which columns and parts are picked isn't an edit, going back leaves it as it is
-const SKIN_PICKS = ["picks", "parts", "swapPart", "swapCols"];
+const SKIN_PICKS = ["picks", "parts", "swapPart", "swapCols", "sideWhich", "sideAt", "sideAlso"];
 const SKIN_HISTORY_KEPT = 100;
 
 const skinHistory = (page) => ((page.history ??= {})[page.keys] ??= { undo: [], redo: [] });
@@ -1393,7 +1400,8 @@ function skinStage(page) {
     skinRow("Judgement line", "The line notes are hit on",
       segs([[true, "On"], [false, "Off"]], line, (on) => skinChange(page, (x) => (x.line = on === s.ownLine ? null : on)), "Judgement line"),
       s.ownLine ? "on" : "off", e.line != null && reset("line")),
-    bottomAt != null && skinRow("StageBottom art", "The middle of its art, higher sits lower",
+    // pictures placed over the stage are StageBottom's art, placed there instead
+    bottomAt != null && !e.sides?.over && skinRow("StageBottom art", "The middle of its art, higher sits lower",
       skinNumber(page, "StageBottom art", bottomAt, 0, 480, (v) => skinChange(page, (x) => (x.bottom = ownBottom - v))),
       ownBottom, !!e.bottom && reset("bottom", 0)),
     el("div", { class: "skin-group" }, el("span", {}, "Judgements and combo")),
@@ -1492,7 +1500,7 @@ function skinEditor(page) {
   const h = skinHistory(page);
   return el("div", { class: "skin-editor" },
     el("div", { class: "skin-tools skin-tabs" },
-      segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colors"], ["stage", "Stage"]], tab, (t) => { page.tab = t; render(); }, "Edit"),
+      segs([["lns", "Long notes"], ["parts", "Parts"], ["colours", "Colors"], ["stage", "Stage"], ["sides", "Sides"]], tab, (t) => { page.tab = t; page.canvas.style.cursor = ""; render(); }, "Edit"),
       el("div", { class: "segs skin-undo" },
         el("button", { class: "seg", disabled: !h.undo.length, title: "Undo (Ctrl+Z)", onclick: () => skinUndo(page, true) }, "Undo"),
         el("button", { class: "seg", disabled: !h.redo.length, title: "Redo (Ctrl+Y)", onclick: () => skinUndo(page, false) }, "Redo"),
@@ -1501,7 +1509,7 @@ function skinEditor(page) {
           // the picked columns stay picked
           onclick: () => skinChange(page, (x) => Object.assign(x, skinFresh(), Object.fromEntries(SKIN_PICKS.map((k) => [k, x[k]])))),
         }, "Reset all"))),
-    tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : tab === "stage" ? skinStage(page) : skinColours(page),
+    tab === "lns" ? skinLongNotes(page) : tab === "parts" ? skinParts(page) : tab === "stage" ? skinStage(page) : tab === "sides" ? skinSides(page) : skinColours(page),
     page.info?.stored && !page.info.saves
       ? [el("div", { class: "skin-tools apply" },
         skinNameField(page),

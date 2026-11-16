@@ -738,6 +738,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
     if opts.log_file {
         open_log_file(&env.data_dir);
     }
+    crate::skin_render::set_uploads_dir(env.data_dir.join("skin-images"));
     if let Some(why) = not_moved {
         log!("{why}");
     }

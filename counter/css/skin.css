@@ -484,7 +484,7 @@
   cursor: pointer;
 }
 
-.skin-thumb img {
+.skin-thumb img, .skin-thumb canvas {
   position: absolute;
   inset: 4px;
   width: calc(100% - 8px);
@@ -536,4 +536,98 @@
 
 .skin-undo .seg:disabled {
   opacity: 0.3;
+}
+
+.skin-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 10px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--osu-b5);
+}
+
+.skin-layer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.skin-layer.on {
+  background: var(--osu-b4);
+}
+
+.skin-layer.on .skin-thumb {
+  border-color: #fff;
+}
+
+.skin-layer-name {
+  flex: 1 1 100px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.skin-side-place {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.skin-side-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skin-side-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--osu-b4);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+}
+
+.skin-side-menu button {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skin-side-menu button:hover:not(:disabled) {
+  background: var(--osu-b3);
+}
+
+.skin-side-menu button:disabled {
+  color: var(--osu-f1);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.skin-side-menu .cancel {
+  color: var(--osu-f1);
 }

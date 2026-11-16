@@ -55,6 +55,8 @@ pub(crate) struct Edits {
     // right-aligned, so a wider % pushes the numbers further left. For the whole skin
     #[serde(rename = "percentWidth")]
     pub percent_width: Option<f64>,
+    // StageLeft, StageRight and StageBottom drawn anew from pictures placed on the screen; None keeps the skin's
+    pub sides: Sides,
 }
 
 impl Edits {
@@ -130,6 +132,33 @@ fn hex(s: &str) -> Option<Rgba> {
     let hex = s.strip_prefix('#')?;
     let v = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6)?;
     Some([(v >> 16) as u8, (v >> 8) as u8, v as u8, 255])
+}
+
+#[derive(Deserialize, Default, Clone)]
+#[serde(default)]
+pub(crate) struct Sides {
+    pub left: Option<Vec<Layer>>,
+    pub right: Option<Vec<Layer>>,
+    // StageBottom, which the game draws over the notes: x from the stage's middle
+    pub over: Option<Vec<Layer>>,
+}
+
+// An image beside the stage, in pixels of a 768-tall screen measured from the stage's edge: x is its
+// left edge, negative on the left. The game stretches a side's image to the screen's height and gives
+// it its own width, so one drawn 768 tall shows as placed at any size
+#[derive(Deserialize, Clone)]
+pub(crate) struct Layer {
+    // a skin image as skin.ini would name it, or "upload:<id>" for one added from the computer
+    pub src: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    #[serde(default)]
+    pub flip: bool,
+    // the part of the image it shows, in the file's pixels; all of it when None
+    #[serde(default)]
+    pub crop: Option<[f64; 4]>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -252,7 +281,7 @@ impl Edits {
             Part::Tail => &s.tail,
             Part::Key => &s.key,
             Part::KeyDown => &s.key_down,
-            Part::StageBottom => return None,
+            Part::StageBottom | Part::StageLeft | Part::StageRight => return None,
         };
         shape.as_ref().filter(|s| s.width().is_some() || s.outline().is_some() || s.rim().is_some())
     }
@@ -268,6 +297,8 @@ pub(super) enum Part {
     KeyDown,
     // the stage's, not a column's
     StageBottom,
+    StageLeft,
+    StageRight,
 }
 
 impl Part {
@@ -280,6 +311,8 @@ impl Part {
             Part::Key => "key",
             Part::KeyDown => "keydown",
             Part::StageBottom => "stage-bottom",
+            Part::StageLeft => "stage-left",
+            Part::StageRight => "stage-right",
         }
     }
 
@@ -292,6 +325,8 @@ impl Part {
             Part::Key => format!("KeyImage{column}"),
             Part::KeyDown => format!("KeyImage{column}D"),
             Part::StageBottom => "StageBottom".into(),
+            Part::StageLeft => "StageLeft".into(),
+            Part::StageRight => "StageRight".into(),
         }
     }
 }
@@ -372,7 +407,7 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
                 Part::Tail => &mut column.tail,
                 Part::Key => &mut column.key,
                 Part::KeyDown => &mut column.key_down,
-                Part::StageBottom => continue,
+                Part::StageBottom | Part::StageLeft | Part::StageRight => continue,
             };
             *slot = Some(asset);
             swapped.push((c, part, reference.to_string()));
@@ -450,8 +485,10 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
             }
         }
     }
-    // a row of StageBottom's art is a 480th of the stage, half of one at @2x
-    if let (Some(up), Some(asset)) = (edits.bottom_raise.filter(|r| r.abs() >= 0.5 && r.abs() <= 480.0), out.stage.bottom.clone()) {
+    // a row of StageBottom's art is a 480th of the stage, half of one at @2x. Pictures placed over the
+    // stage replace it, raised or not
+    let raise = edits.bottom_raise.filter(|r| r.abs() >= 0.5 && r.abs() <= 480.0 && edits.sides.over.is_none());
+    if let (Some(up), Some(asset)) = (raise, out.stage.bottom.clone()) {
         let mut frames = vec![];
         let mut new = asset.clone();
         for (i, frame) in std::iter::once(&asset).chain(&asset.frames).enumerate() {
@@ -470,7 +507,202 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
         }
         out.stage.bottom = Some(new);
     }
+    for (part, layers) in [(Part::StageLeft, &edits.sides.left), (Part::StageRight, &edits.sides.right), (Part::StageBottom, &edits.sides.over)] {
+        let Some(layers) = layers else { continue };
+        let raw = side(layers, part, skin, sources, full);
+        // written at @2x so art added from the computer stays sharp on a big screen
+        let scale = if full || part == Part::StageBottom { 2.0 } else { 1.0 };
+        let Some((image, width, height, source_height)) = load::texture(Raw::new(raw.rgba.clone(), raw.w, raw.h)) else { continue };
+        let asset = Asset { width: Some(width), height: Some(height), source_height, scale, image: Some(image), frames: vec![], path: None };
+        match part {
+            Part::StageLeft => out.stage.left = Some(asset),
+            Part::StageRight => out.stage.right = Some(asset),
+            _ => out.stage.bottom = Some(asset),
+        }
+        if full {
+            made.push(Made { column: 0, part, frames: vec![raw], scale });
+        }
+    }
     (out, made, swapped)
+}
+
+// StageBottom's art is drawn at its own size in 480ths of the screen's height, not stretched to it
+pub(super) const BOTTOM_UNITS: f64 = SIDE_HEIGHT / 480.0;
+
+pub(super) const SIDE_HEIGHT: f64 = 768.0;
+// past a 21:9 screen's edge from a stage at its far side, and under the texture limit at @2x
+const SIDE_REACH: f64 = 2048.0;
+const LAYER_MAX: f64 = 4096.0;
+
+// what a layer's src points at
+pub(super) fn layer_file(skin: &Skin, src: &str) -> Option<PathBuf> {
+    match src.strip_prefix("upload:") {
+        Some(id) => super::uploaded(id),
+        None => skin.swap(src, false)?.path,
+    }
+}
+
+fn fine(l: &&Layer) -> bool {
+    [l.x, l.y, l.w, l.h].iter().all(|v| v.is_finite()) && l.w >= 1.0 && l.h >= 1.0
+}
+
+// A side's image reaches from the stage's edge as far out as the furthest layer and is the screen's
+// height, which the game stretches it to. StageBottom's is centred on the stage and reaches up to the
+// highest layer, at @2x of its 480ths
+fn side(layers: &[Layer], part: Part, skin: &Skin, sources: &Sources, full: bool) -> Raw {
+    let ends = |l: &Layer| [l.x, l.x + l.w.min(LAYER_MAX)];
+    let (k, from_x, from_y, wide, tall) = match part {
+        Part::StageBottom => {
+            let half = layers.iter().filter(fine).flat_map(ends).map(f64::abs).fold(1.0, f64::max).min(SIDE_REACH / 2.0);
+            let top = layers.iter().filter(fine).map(|l| l.y).fold(SIDE_HEIGHT - 1.0, f64::min).max(0.0);
+            (2.0 / BOTTOM_UNITS, -half, top, half * 2.0, SIDE_HEIGHT - top)
+        }
+        _ => {
+            let left = part == Part::StageLeft;
+            let reach = layers.iter().filter(fine).map(|l| if left { -l.x } else { ends(l)[1] }).fold(1.0, f64::max).min(SIDE_REACH);
+            (if full { 2.0 } else { 1.0 }, if left { -reach } else { 0.0 }, 0.0, reach, SIDE_HEIGHT)
+        }
+    };
+    let (w, h) = ((wide * k).ceil() as u32, (tall * k).round().max(1.0) as u32);
+    let canvas = drawn(layers, skin, sources, k, from_x, from_y, w, h);
+    Raw::new(canvas.into_raw(), w, h)
+}
+
+// the layers drawn bottom first, `k` pixels per unit, the canvas's corner at from_x, from_y
+#[allow(clippy::too_many_arguments)]
+fn drawn(layers: &[Layer], skin: &Skin, sources: &Sources, k: f64, from_x: f64, from_y: f64, w: u32, h: u32) -> image::RgbaImage {
+    let mut canvas = image::RgbaImage::new(w, h);
+    for l in layers.iter().filter(fine) {
+        let Some(src) = layer_file(skin, &l.src).and_then(|p| source(sources, &p)) else { continue };
+        let (lw, lh) = ((l.w.min(LAYER_MAX) * k).round().max(1.0) as u32, (l.h.min(LAYER_MAX) * k).round().max(1.0) as u32);
+        let part = l.crop.and_then(|c| cropped(&src, c));
+        let Some(mut img) = sized(part.as_ref().unwrap_or(&src), lw, lh) else { continue };
+        if l.flip {
+            image::imageops::flip_horizontal_in_place(&mut img);
+        }
+        image::imageops::overlay(&mut canvas, &img, ((l.x - from_x) * k).round() as i64, ((l.y - from_y) * k).round() as i64);
+    }
+    canvas
+}
+
+// Pictures made one, as they show together: the image and where it goes. As sharp as the sharpest of
+// them, so joining what was split gives back its art
+const JOIN_SHARPEST: f64 = 4.0;
+
+pub(super) fn joined(layers: &[Layer], skin: &Skin) -> Option<(image::RgbaImage, [f64; 4])> {
+    let sources = Sources::default();
+    let fine: Vec<&Layer> = layers.iter().filter(fine).collect();
+    let x0 = fine.iter().map(|l| l.x).fold(f64::INFINITY, f64::min);
+    let y0 = fine.iter().map(|l| l.y).fold(f64::INFINITY, f64::min);
+    let x1 = fine.iter().map(|l| l.x + l.w.min(LAYER_MAX)).fold(f64::NEG_INFINITY, f64::max);
+    let y1 = fine.iter().map(|l| l.y + l.h.min(LAYER_MAX)).fold(f64::NEG_INFINITY, f64::max);
+    if !(x1 > x0 && y1 > y0) {
+        return None;
+    }
+    let sharpest = fine
+        .iter()
+        .filter_map(|l| {
+            let src = source(&sources, &layer_file(skin, &l.src)?)?;
+            let width = l.crop.map_or(src.w as f64, |c| c[2]);
+            Some(width / l.w)
+        })
+        .fold(1.0, f64::max);
+    let (wide, tall) = (x1 - x0, y1 - y0);
+    let k = sharpest.min(JOIN_SHARPEST).min(LAYER_MAX / wide).min(LAYER_MAX / tall);
+    let (w, h) = ((wide * k).round().max(1.0) as u32, (tall * k).round().max(1.0) as u32);
+    let layers: Vec<Layer> = fine.into_iter().cloned().collect();
+    Some((drawn(&layers, skin, &sources, k, x0, y0, w, h), [x0, y0, wide, tall]))
+}
+
+// [x, y, w, h] of it, None when that's all of it or nothing
+fn cropped(src: &Raw, [x, y, w, h]: [f64; 4]) -> Option<Raw> {
+    let x0 = (x.max(0.0).round() as u32).min(src.w);
+    let y0 = (y.max(0.0).round() as u32).min(src.h);
+    let x1 = ((x + w).round().max(0.0) as u32).min(src.w);
+    let y1 = ((y + h).round().max(0.0) as u32).min(src.h);
+    if x1 <= x0 || y1 <= y0 || (x0, y0, x1, y1) == (0, 0, src.w, src.h) {
+        return None;
+    }
+    let row = src.w as usize * 4;
+    let rgba = (y0..y1).flat_map(|r| &src.rgba[r as usize * row + x0 as usize * 4..r as usize * row + x1 as usize * 4]).copied().collect();
+    Some(Raw::new(rgba, x1 - x0, y1 - y0))
+}
+
+// Where a picture's separate parts are, in its pixels: what's seen, grouped across gaps narrower
+// than SPLIT_GAP of its size so a line of text stays one part. Read on a grid of SPLIT_CELLS across
+pub(super) const SPLIT_MAX: usize = 32;
+const SPLIT_GAP: f64 = 0.015;
+const SPLIT_CELLS: u32 = 512;
+
+pub(super) fn pieces(src: &Raw) -> Vec<[u32; 4]> {
+    let cell = (src.w.max(src.h)).div_ceil(SPLIT_CELLS).max(2);
+    let (gw, gh) = (src.w.div_ceil(cell) as usize, src.h.div_ceil(cell) as usize);
+    let mut seen = vec![false; gw * gh];
+    for (i, p) in src.rgba.chunks_exact(4).enumerate() {
+        if p[3] >= 25 {
+            let (x, y) = (i % src.w as usize, i / src.w as usize);
+            seen[(y / cell as usize) * gw + x / cell as usize] = true;
+        }
+    }
+    let gap = ((src.w.max(src.h) as f64 * SPLIT_GAP) / cell as f64).ceil().max(1.0) as isize;
+    let mut group = vec![usize::MAX; gw * gh];
+    let mut boxes: Vec<[usize; 4]> = vec![];
+    for start in 0..seen.len() {
+        if !seen[start] || group[start] != usize::MAX {
+            continue;
+        }
+        let id = boxes.len();
+        let mut b = [start % gw, start / gw, start % gw, start / gw];
+        group[start] = id;
+        let mut todo = vec![start];
+        while let Some(at) = todo.pop() {
+            let (x, y) = ((at % gw) as isize, (at / gw) as isize);
+            b = [b[0].min(x as usize), b[1].min(y as usize), b[2].max(x as usize), b[3].max(y as usize)];
+            for ny in (y - gap).max(0)..=(y + gap).min(gh as isize - 1) {
+                for nx in (x - gap).max(0)..=(x + gap).min(gw as isize - 1) {
+                    let n = ny as usize * gw + nx as usize;
+                    if seen[n] && group[n] == usize::MAX {
+                        group[n] = id;
+                        todo.push(n);
+                    }
+                }
+            }
+        }
+        boxes.push(b);
+    }
+    let c = cell as usize;
+    let mut out: Vec<[u32; 4]> = boxes
+        .iter()
+        .map(|b| {
+            let (x0, y0) = (b[0] * c, b[1] * c);
+            let (x1, y1) = (((b[2] + 1) * c).min(src.w as usize), ((b[3] + 1) * c).min(src.h as usize));
+            [x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32]
+        })
+        .collect();
+    out.sort_by_key(|p| (p[1], p[0]));
+    out
+}
+
+// resized with its colour premultiplied, so see-through edges don't pick up a dark rim
+fn sized(src: &Raw, w: u32, h: u32) -> Option<image::RgbaImage> {
+    let mut rgba = src.rgba.clone();
+    for p in rgba.chunks_exact_mut(4) {
+        let a = p[3] as u32;
+        for c in &mut p[..3] {
+            *c = ((*c as u32 * a + 127) / 255) as u8;
+        }
+    }
+    let img = image::RgbaImage::from_raw(src.w, src.h, rgba)?;
+    let mut out = if (src.w, src.h) == (w, h) { img } else { image::imageops::resize(&img, w, h, image::imageops::FilterType::Triangle) };
+    for p in out.pixels_mut() {
+        let a = p[3] as u32;
+        if a > 0 && a < 255 {
+            for c in &mut p.0[..3] {
+                *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+    }
+    Some(out)
 }
 
 fn slot(column: &load::Column, part: Part) -> Option<&Asset> {
@@ -481,7 +713,7 @@ fn slot(column: &load::Column, part: Part) -> Option<&Asset> {
         Part::Tail => column.tail.as_ref(),
         Part::Key => column.key.as_ref(),
         Part::KeyDown => column.key_down.as_ref(),
-        Part::StageBottom => None,
+        Part::StageBottom | Part::StageLeft | Part::StageRight => None,
     }
 }
 
@@ -493,7 +725,7 @@ fn slot_mut(column: &mut load::Column, part: Part) -> Option<&mut Option<Asset>>
         Part::Tail => &mut column.tail,
         Part::Key => &mut column.key,
         Part::KeyDown => &mut column.key_down,
-        Part::StageBottom => return None,
+        Part::StageBottom | Part::StageLeft | Part::StageRight => return None,
     })
 }
 
