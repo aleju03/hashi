@@ -59,13 +59,21 @@ async function watchSkin(page) {
     }
     if (skinPage !== page || page.loading || page.applying) continue;
     const was = page.info ?? {};
-    if (info.found !== was.found || info.folder !== was.folder || info.why !== was.why) loadSkin();
+    if (info.found !== was.found || info.folder !== was.folder || info.why !== was.why) {
+      // edits are made against one skin; Edit externally moves the same skin to another folder
+      loadSkin(info.name !== was.name || info.client !== was.client);
+    }
     else if (JSON.stringify(info.gameSize) !== JSON.stringify(was.gameSize)) {
       page.info.gameSize = info.gameSize;
       if (page.live) refreshSkin(page);
       render();
     }
   }
+}
+
+// another skin starts from what's applied to it, and its images aren't the last one's
+function skinForget(page) {
+  Object.assign(page, { edits: {}, history: {}, wide: null, sideArt: null, blanks: null, sideMenu: null, sideError: null, sideNote: null });
 }
 
 const STAGE = `<path d="M.5 .5v9M9.5 .5v9"/><circle cx="2.9" cy="7.6" r="1.3"/><circle cx="7.1" cy="7.6" r="1.3"/><rect x="1.6" y="3.4" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/><rect x="5.8" y=".8" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/>`;
@@ -124,7 +132,8 @@ function skinFollow() {
   skinSource(p, "selected");
 }
 
-async function loadSkin() {
+// `forget` drops the last skin's edits, just before the new one's applied edits come back
+async function loadSkin(forget = false) {
   const page = skinPage;
   page.stamp = Date.now();
   page.loading = true;
@@ -137,6 +146,7 @@ async function loadSkin() {
     page.error = "Couldn't reach Hashi's helper.";
   }
   if (skinPage !== page) return;
+  if (forget) skinForget(page);
   page.edits ??= {};
   for (const [keys, a] of Object.entries(page.applied ?? {})) {
     if (!/^\d+$/.test(keys)) continue;
