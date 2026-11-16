@@ -59,6 +59,8 @@ async function watchSkin(page) {
   }
 }
 
+const STAGE = `<path d="M.5 .5v9M9.5 .5v9"/><circle cx="2.9" cy="7.6" r="1.3"/><circle cx="7.1" cy="7.6" r="1.3"/><rect x="1.6" y="3.4" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/><rect x="5.8" y=".8" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/>`;
+
 function closeSkin() {
   const back = skinPage?.back;
   skinPage = null;

@@ -144,6 +144,12 @@ function home(c, host) {
         "aria-pressed": String(goalsOpen),
         onclick: toggleGoals,
       }, icon(TARGET)),
+      el("button", {
+        class: `gear${skinPage ? " on" : ""}`,
+        title: "Skin editor",
+        "aria-pressed": String(!!skinPage),
+        onclick: () => (skinPage ? closeSkin() : openSkin()),
+      }, icon(STAGE)),
       el("button", { class: `gear${settingsOpen ? " on" : ""}`, title: "Settings", "aria-pressed": String(settingsOpen), onclick: toggleSettings }, icon(GEAR))),
     update(),
     tosuHint(),
