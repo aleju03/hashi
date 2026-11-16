@@ -582,26 +582,25 @@ impl<'a> Builder<'a> {
         ops
     }
 
-    // keys+1 boundaries, outer edges included; a skin that never sets ColumnLineWidth gets 2-unit
-    // lines everywhere and explicit zeros hide them
+    // As lazer draws them: each column has its left line, ColumnLineWidth[i], and its right one,
+    // [i + 1], inside its own edges, so touching columns double the line between them and a gap gets
+    // one each side. The widths are in 768ths, not the columns' 480ths. A skin that never sets
+    // ColumnLineWidth gets 2 everywhere and explicit zeros hide them
     fn column_lines(&self) -> Vec<Op> {
         let (p, l, keys) = (self.p, &self.l, self.keys);
         let color = p.line_color.unwrap_or(WHITE);
+        let units = |boundary: usize| if p.line_widths.is_empty() { 2.0 } else { p.line_widths.get(boundary).copied().unwrap_or(0.0) };
+        let px = |u: f64| (u * UNIT * l.scale).max(1.0);
         let mut ops = vec![];
-        for boundary in 0..=keys {
-            let units = if p.line_widths.is_empty() { 2.0 } else { p.line_widths.get(boundary).copied().unwrap_or(0.0) };
-            if units <= 0.0 {
-                continue;
+        for col in 0..keys {
+            let (x, lane) = (l.lane_xs[col], l.lane_widths[col]);
+            if units(col) > 0.0 {
+                ops.push(Op::Fill { rect: [x, 0.0, px(units(col)), HEIGHT], color, alpha: 1.0 });
             }
-            let w = (units * l.scale).max(1.0);
-            let x = if boundary == 0 {
-                l.stage_x
-            } else if boundary == keys {
-                l.stage_x + l.stage_width - w
-            } else {
-                (l.lane_xs[boundary - 1] + l.lane_widths[boundary - 1] + l.lane_xs[boundary]) / 2.0 - w / 2.0
-            };
-            ops.push(Op::Fill { rect: [x, 0.0, w, HEIGHT], color, alpha: 1.0 });
+            if units(col + 1) > 0.0 {
+                let w = px(units(col + 1));
+                ops.push(Op::Fill { rect: [x + lane - w, 0.0, w, HEIGHT], color, alpha: 1.0 });
+            }
         }
         ops
     }

@@ -26,7 +26,10 @@ pub(super) enum Start {
 
 pub(super) fn layout(widths: &[f64], column_width: f64, spacings: &[f64], spacing: f64, start: Start, keys: usize, width: f64) -> Layout {
     let raw: Vec<f64> = (0..keys).map(|c| widths.get(c).copied().unwrap_or(column_width).max(8.0)).collect();
-    let gaps: Vec<f64> = (0..keys.saturating_sub(1)).map(|c| spacings.get(c).copied().unwrap_or(spacing).max(0.0)).collect();
+    // lazer leaves gaps a short list doesn't reach at 0; with no list, `spacing` is every gap's
+    let gaps: Vec<f64> = (0..keys.saturating_sub(1))
+        .map(|c| if spacings.is_empty() { spacing } else { spacings.get(c).copied().unwrap_or(0.0) }.max(0.0))
+        .collect();
     let raw_stage = raw.iter().sum::<f64>() + gaps.iter().sum::<f64>();
     // skin units are 480ths of the screen height, so on a 16:9 card ColumnStart lands where it
     // does in game
@@ -235,6 +238,9 @@ mod body_tile_tests {
         assert_eq!(l.lane_xs[2] - l.lane_xs[1], (85.0 + 55.0) * k);
         assert_eq!(l.stage_width, 395.0 * k);
         assert_eq!(l.stage_x, 230.0 * k);
+        // what a short list doesn't reach is no gap
+        let l = super::layout(&[30.0; 10], 30.0, &[2.0; 6], 2.0, super::Start::At(None), 10, 1280.0);
+        assert_eq!(l.lane_xs[9] - l.lane_xs[6], 90.0 * l.scale);
     }
 
     #[test]

@@ -91,7 +91,7 @@ pub(super) struct Profile {
     pub column_width: f64,
     pub column_spacing: f64,
     pub column_widths: Vec<f64>,
-    // a gap after each column but the last, the first repeating where the list runs out
+    // a gap after each column but the last, as listed; any the list doesn't reach is 0
     pub column_spacings: Vec<f64>,
     pub line_widths: Vec<f64>,
     pub line_color: Option<Rgba>,
