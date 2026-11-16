@@ -61,8 +61,8 @@ fn ini_name(dir: &Path) -> Option<String> {
     })
 }
 
-// with osu! closed tosu reports nothing, stable keeps the skin in osu!.<user>.cfg
-fn cfg_skin(game: &Path) -> Option<String> {
+// with osu! closed tosu reports nothing, stable keeps its settings in osu!.<user>.cfg
+fn cfg_text(game: &Path) -> Option<String> {
     let cfg = std::fs::read_dir(game)
         .ok()?
         .flatten()
@@ -71,11 +71,28 @@ fn cfg_skin(game: &Path) -> Option<String> {
             n.starts_with("osu!.") && n.ends_with(".cfg") && n != "osu!.cfg"
         })
         .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?;
-    let text = String::from_utf8_lossy(&std::fs::read(cfg.path()).ok()?).into_owned();
+    Some(String::from_utf8_lossy(&std::fs::read(cfg.path()).ok()?).into_owned())
+}
+
+fn cfg_value(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| {
         let (k, v) = l.split_once('=')?;
-        (k.trim() == "Skin").then(|| v.trim().to_string()).filter(|v| !v.is_empty())
+        (k.trim() == key).then(|| v.trim().to_string()).filter(|v| !v.is_empty())
     })
+}
+
+fn cfg_skin(game: &Path) -> Option<String> {
+    cfg_value(&cfg_text(game)?, "Skin")
+}
+
+// the size it was last set to, for when osu! is closed
+fn cfg_size(game: &Path) -> Option<GameSize> {
+    let text = cfg_text(game)?;
+    let n = |k: &str| cfg_value(&text, k).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+    if cfg_value(&text, "Fullscreen").as_deref() == Some("1") {
+        return Some(pixels(n("WidthFullscreen"), n("HeightFullscreen")).unwrap_or(GameSize::Screen));
+    }
+    pixels(n("Width"), n("Height"))
 }
 
 pub(crate) fn current(b: &Bridge) -> Result<Found, &'static str> {
@@ -255,11 +272,12 @@ pub(crate) enum GameSize {
 
 // the size osu! draws at: lazer's framework.ini says, stable's settings come through tosu
 pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
-    let (lazer, lazer_dir, resolution) = {
+    let (lazer, lazer_dir, resolution, game) = {
         let s = b.st();
         let frame = s.tosu.last_frame.as_ref();
         let lazer = s.tosu.client.as_deref() == Some("lazer") || frame.and_then(|f| f.get("client")).and_then(Value::as_str) == Some("lazer");
-        (lazer, s.tosu.lazer_files_dir.parent().map(Path::to_path_buf), frame.and_then(|f| f.pointer("/settings/resolution")).cloned())
+        let game = s.tosu.stable_dirs.as_ref().map(|(g, _)| g.clone()).unwrap_or_else(|| b.env.osu_dir.clone());
+        (lazer, s.tosu.lazer_files_dir.parent().map(Path::to_path_buf), frame.and_then(|f| f.pointer("/settings/resolution")).cloned(), game)
     };
     if let Some(size) = tiled_size() {
         return Some(size);
@@ -269,7 +287,7 @@ pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
             return size;
         }
     }
-    let r = resolution?;
+    let Some(r) = resolution else { return (!lazer).then(|| cfg_size(&game)).flatten() };
     let n = |k: &str| r.get(k).and_then(Value::as_f64).unwrap_or(0.0);
     if r.get("fullscreen").and_then(Value::as_bool) == Some(true) {
         return Some(pixels(n("widthFullscreen"), n("heightFullscreen")).unwrap_or(GameSize::Screen));
