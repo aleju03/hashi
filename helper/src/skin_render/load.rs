@@ -11,6 +11,8 @@ use super::ini::{self, clamp_int, color, color_alpha, hex, number_list, opt_numb
 
 const MAX_KEYS: usize = 10;
 const MAX_FRAMES: usize = 60;
+// lazer draws a 55 between two columns as 55, so no cap a real skin would reach
+const SPACING_MAX: f64 = 480.0;
 // past this the GPU refuses the texture, and the TS this mirrors caps it before the renderer sees it
 pub(super) const MAX_TEXTURE: u32 = 4096;
 // stretched this far past square the art is a Percy-style LN body, cropped rather than scaled so
@@ -89,6 +91,8 @@ pub(super) struct Profile {
     pub column_width: f64,
     pub column_spacing: f64,
     pub column_widths: Vec<f64>,
+    // a gap after each column but the last, the first repeating where the list runs out
+    pub column_spacings: Vec<f64>,
     pub line_widths: Vec<f64>,
     pub line_color: Option<Rgba>,
     pub backgrounds: Vec<Option<Rgba>>,
@@ -133,6 +137,7 @@ impl Profile {
             column_width: width,
             column_spacing: spacing,
             column_widths: vec![],
+            column_spacings: vec![],
             line_widths: vec![],
             line_color: None,
             backgrounds: vec![],
@@ -714,7 +719,7 @@ fn build(skin: &Skin, block: &Block, fonts: &HashMap<String, String>, base: &Pro
     let column_spacing = clamp_int(
         spacings.first().copied().or_else(|| opt_number(block.get("ColumnSpacing"))).unwrap_or(base.column_spacing),
         0.0,
-        40.0,
+        SPACING_MAX,
     );
     let smallest = widths.iter().copied().reduce(f64::min);
     let note_height_scale =
@@ -807,6 +812,7 @@ fn build(skin: &Skin, block: &Block, fonts: &HashMap<String, String>, base: &Pro
         column_width,
         column_spacing,
         column_widths: widths.iter().take(MAX_KEYS).map(|w| w.clamp(20.0, 160.0)).collect(),
+        column_spacings: spacings.iter().take(MAX_KEYS).map(|s| clamp_int(*s, 0.0, SPACING_MAX)).collect(),
         line_widths,
         line_color: color_alpha(block.get("ColourColumnLine")),
         // the TS only keeps an opaque Colour{n}, a translucent one leaves the default black

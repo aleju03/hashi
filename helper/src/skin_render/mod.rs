@@ -292,7 +292,7 @@ struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     fn new(s: &'a Settings, p: &'a Profile, keys: usize, width: f64) -> Self {
-        let l = pattern::layout(&p.column_widths, p.column_width, p.column_spacing, p.column_start, keys, width);
+        let l = pattern::layout(&p.column_widths, p.column_width, &p.column_spacings, p.column_spacing, p.column_start, keys, width);
         Builder { s, p, keys, width, l, up: s.upscroll, sprites: vec![], accent: skin_accent(p) }
     }
 
@@ -366,7 +366,23 @@ impl<'a> Builder<'a> {
 
         let mut base = self.backdrop(accent);
         let l = &self.l;
-        base.push(Op::Fill { rect: [l.stage_x, 0.0, l.stage_width, HEIGHT], color: BLACK, alpha: 1.0 });
+        // column by column, so a ColumnSpacing gap shows what's behind the stage as in game. Columns
+        // that touch are one rect, which leaves no seam between them
+        let mut run: Option<(f64, f64)> = None;
+        for col in 0..keys {
+            let (x, w) = (l.lane_xs[col], l.lane_widths[col]);
+            run = match run {
+                Some((from, to)) if (x - to).abs() < 0.01 => Some((from, x + w)),
+                Some((from, to)) => {
+                    base.push(Op::Fill { rect: [from, 0.0, to - from, HEIGHT], color: BLACK, alpha: 1.0 });
+                    Some((x, x + w))
+                }
+                None => Some((x, x + w)),
+            };
+        }
+        if let Some((from, to)) = run {
+            base.push(Op::Fill { rect: [from, 0.0, to - from, HEIGHT], color: BLACK, alpha: 1.0 });
+        }
         for col in 0..keys {
             if let Some(Some(bg)) = p.backgrounds.get(col) {
                 let rect = [l.lane_xs[col], 0.0, l.lane_widths[col], HEIGHT];

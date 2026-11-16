@@ -388,6 +388,7 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
     }
     if let Some(s) = edits.column_spacing.filter(|s| s.is_finite()) {
         out.column_spacing = s.clamp(0.0, COLUMN_SPACING_MAX).round();
+        out.column_spacings = vec![out.column_spacing; keys.saturating_sub(1)];
     }
     if let Some(s) = edits.combo_scale() {
         out.combo_scale *= s;

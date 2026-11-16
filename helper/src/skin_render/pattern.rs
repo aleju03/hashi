@@ -17,22 +17,21 @@ pub(super) struct Layout {
     pub scale: f64,
 }
 
-pub(super) fn layout(widths: &[f64], column_width: f64, spacing: f64, column_start: Option<f64>, keys: usize, width: f64) -> Layout {
+pub(super) fn layout(widths: &[f64], column_width: f64, spacings: &[f64], spacing: f64, column_start: Option<f64>, keys: usize, width: f64) -> Layout {
     let raw: Vec<f64> = (0..keys).map(|c| widths.get(c).copied().unwrap_or(column_width).max(8.0)).collect();
-    let spacing = spacing.max(0.0);
-    let raw_stage = raw.iter().sum::<f64>() + spacing * (keys - 1) as f64;
+    let gaps: Vec<f64> = (0..keys.saturating_sub(1)).map(|c| spacings.get(c).copied().unwrap_or(spacing).max(0.0)).collect();
+    let raw_stage = raw.iter().sum::<f64>() + gaps.iter().sum::<f64>();
     // skin units are 480ths of the screen height, so on a 16:9 card ColumnStart lands where it
     // does in game
     let scale = (HEIGHT / 480.0).min(width * STAGE_MAX_FRACTION / raw_stage);
     let lane_widths: Vec<f64> = raw.iter().map(|w| w * scale).collect();
-    let gap = spacing * scale;
-    let stage_width = lane_widths.iter().sum::<f64>() + gap * (keys - 1) as f64;
+    let stage_width = raw_stage * scale;
     let stage_x = (column_start.unwrap_or(COLUMN_START) * scale).min(width - stage_width).max(0.0);
     let mut lane_xs = Vec::with_capacity(keys);
     let mut x = stage_x;
-    for w in &lane_widths {
+    for (c, w) in lane_widths.iter().enumerate() {
         lane_xs.push(x);
-        x += w + gap;
+        x += w + gaps.get(c).copied().unwrap_or(0.0) * scale;
     }
     Layout { stage_x, stage_width, lane_xs, lane_widths, scale }
 }
