@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.11",
+    "date": "2026-11-16",
+    "changes": [
+      { "kind": "new", "text": "Added a rate changer for stable." },
+      { "kind": "new", "text": "On stable, cuts can be rate changed too." },
+      { "kind": "new", "text": "Added mania stage editing support for the skin editor, you can paste or drag images, move and resize them beside or over the stage." }
+    ]
+  },
+  {
     "version": "0.1.10",
     "date": "2026-11-14",
     "changes": [
