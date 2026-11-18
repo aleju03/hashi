@@ -77,7 +77,7 @@
   stroke: #fff;
 }
 
-.dial-inked, .dial-fill {
+.dial-inked {
   filter: url(#ink3);
 }
 
@@ -91,8 +91,8 @@
   stroke-width: 2;
 }
 
+/* --dial is set by the rate (rate.js dialColor), not the player's accent: some don't fit */
 .dial-fill {
-  stroke: var(--accent);
   stroke-width: 9;
 }
 
@@ -114,7 +114,7 @@
 }
 
 .dial-needle circle {
-  fill: var(--accent);
+  fill: var(--dial);
   stroke: var(--osu-b5);
   stroke-width: 3;
 }
@@ -127,7 +127,7 @@
 }
 
 .dial-mod {
-  fill: var(--accent);
+  fill: var(--dial);
   font-size: 15px;
   font-weight: 700;
 }
@@ -156,7 +156,7 @@
 }
 
 .rate-dial.slow .shell, .rate-dial.fast .coat {
-  fill: var(--accent);
+  fill: var(--dial);
 }
 
 .dial-doodles .eye {
@@ -214,10 +214,17 @@
 
 .rate-facts {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-  gap: 40px;
+  gap: 10px 32px;
   margin-top: 10px;
 }
+
+.rate-fact.stale b, .rate-fact.stale .rate-was {
+  opacity: 0.4;
+}
+
+
 
 .rate-fact {
   display: grid;

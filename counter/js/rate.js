@@ -143,6 +143,30 @@ const TORTOISE_MS = 1800;
 const HARE_MS = 600;
 
 const dialTurn = (rate) => Math.log2(rate) * DIAL_TURN;
+
+// stronger the further from 1x, through osu!'s DT red at 1.5x and HT lime at 0.75x
+const DIAL_FAST = [[0, [255, 194, 102]], [Math.log2(1.5), [255, 102, 102]], [1, [255, 51, 85]]];
+const DIAL_SLOW = [[0, [226, 255, 158]], [-Math.log2(0.75), [178, 255, 102]], [1, [95, 217, 122]]];
+// short pieces, each coloured for its own spot, so the fill shades from 1x out to the rate
+function dialFill(turn) {
+  const out = [];
+  const step = 2.5 * Math.sign(turn);
+  for (let a = 0; Math.abs(a) < Math.abs(turn); a += step) {
+    const b = Math.abs(a + step) > Math.abs(turn) ? turn : a + step;
+    out.push(svg("path", { d: dialArc(a, b, DIAL_R), stroke: dialColor(2 ** (b / DIAL_TURN)) }));
+  }
+  return out;
+}
+
+function dialColor(rate) {
+  if (rate === 1) return "";
+  const stops = rate > 1 ? DIAL_FAST : DIAL_SLOW;
+  const t = Math.min(1, Math.abs(Math.log2(rate)));
+  const i = t <= stops[1][0] ? 0 : 1;
+  const [[a, from], [b, to]] = [stops[i], stops[i + 1]];
+  const k = (t - a) / (b - a);
+  return `rgb(${from.map((c, j) => Math.round(c + (to[j] - c) * k)).join(" ")})`;
+}
 function dialAt(turn, radius) {
   const a = turn * Math.PI / 180;
   return `${(DIAL_X + radius * Math.sin(a)).toFixed(1)} ${(DIAL_Y - radius * Math.cos(a)).toFixed(1)}`;
@@ -184,8 +208,9 @@ function rateDial(r) {
       return `<text class="dial-name" x="${nx}" y="${Number(ny) + 4}" text-anchor="middle">${rateText(x)}x</text>`;
     }).join("");
     const node = svg("svg", { class: "rate-dial", viewBox: `0 0 ${DIAL_W} ${DIAL_H}`, role: "slider", tabindex: 0, "aria-label": "Rate", "aria-valuemin": RATE_MIN, "aria-valuemax": RATE_MAX });
-    node.innerHTML = `<g class="dial-inked"><path class="dial-rail" d="${dialArc(-DIAL_TURN, DIAL_TURN, DIAL_R)}"/><path class="dial-ticks" d="${ticks}"/></g>
-      <path class="dial-fill"/>
+    // the fill inks with the rail: on its own, a short arc's filter region (its bounds without the
+    // stroke) is a couple of pixels tall and clips the stroke flat
+    node.innerHTML = `<g class="dial-inked"><path class="dial-rail" d="${dialArc(-DIAL_TURN, DIAL_TURN, DIAL_R)}"/><path class="dial-ticks" d="${ticks}"/><g class="dial-fill"/></g>
       ${names}
       <g class="dial-needle"><g class="dial-hand"><path d="M${DIAL_X - 4.5} ${DIAL_Y}L${DIAL_X} ${DIAL_Y - DIAL_R + 16}L${DIAL_X + 4.5} ${DIAL_Y}z"/></g><circle cx="${DIAL_X}" cy="${DIAL_Y}" r="8.5"/></g>
       <g class="dial-doodles" style="${loop(TORTOISE_MS)}">${TORTOISE}</g>
@@ -199,9 +224,11 @@ function rateDial(r) {
   const d = r.dial;
   const turn = dialTurn(r.rate);
   d.node.setAttribute("class", `rate-dial${r.rate > 1 ? " fast" : r.rate < 1 ? " slow" : ""}`);
+  d.node.style.setProperty("--dial", dialColor(r.rate) || "var(--ink)");
   d.node.setAttribute("aria-valuenow", r.rate);
   d.node.setAttribute("aria-valuetext", `${rateText(r.rate)}x`);
-  d.fill.setAttribute("d", r.rate === 1 ? "" : dialArc(0, turn, DIAL_R));
+  if (d.turn !== turn) d.fill.replaceChildren(...dialFill(turn));
+  d.turn = turn;
   d.hand.setAttribute("transform", `rotate(${turn.toFixed(2)} ${DIAL_X} ${DIAL_Y})`);
   d.rate.textContent = `${rateText(r.rate)}x`;
   d.mod.textContent = r.rate === 1 ? "" : rateMod(r.rate, r.keep);
@@ -238,6 +265,59 @@ function rateDialEvents(r, node) {
   });
 }
 
+// the map's MSD and dan at 1x and at the dial's rate, worked out here. while a new rate is worked
+// out the last one stays, faded
+function rateDanAt(r, rate, wait) {
+  r.dans ??= new Map();
+  if (r.dans.has(rate)) return r.dans.get(rate);
+  if (!r.danAsked?.has(rate)) {
+    (r.danAsked ??= new Set()).add(rate);
+    const load = async () => {
+      let data = {};
+      try {
+        const res = await fetch(`${BRIDGE}/dan/rate/${r.map.md5}?rate=${rate}`);
+        if (res.ok) data = await res.json();
+      } catch {}
+      data.keys = r.map.keys;
+      await drawnBadges(data);
+      r.dans.set(rate, data);
+      if (rater === r) render();
+    };
+    if (wait) {
+      // the rate passed over on the way never loads, so it's asked for again if it comes back
+      clearTimeout(r.danTimer);
+      if (r.danPending != null) r.danAsked.delete(r.danPending);
+      r.danPending = rate;
+      r.danTimer = setTimeout(() => { r.danPending = null; load(); }, 200);
+    } else load();
+  }
+  return null;
+}
+
+function rateDanFacts(r) {
+  const was = rateDanAt(r, 1, false);
+  const got = rateDanAt(r, r.rate, true);
+  if (got) r.danShown = got;
+  const now = got ?? r.danShown;
+  if (!was || !now) return null;
+  const stale = !got;
+  const showDans = snapshot.showDans !== false;
+  const msd = (d) => (d.msd != null ? d.msd.toFixed(2) : "–");
+  const badge = (d) => (d.dan ? danBadge(d.dan, d.keys) : el("span", {}, "–"));
+  return [
+    (was.msd != null || now.msd != null) && el("div", { class: `rate-fact${stale ? " stale" : ""}` },
+      el("span", { class: "rate-fact-label" }, "MSD"),
+      el("span", { class: "rate-was" }, msd(was)),
+      el("span", { class: "rate-arrow", "aria-hidden": "true" }, "→"),
+      el("b", {}, msd(now))),
+    showDans && (was.dan || now.dan) && el("div", { class: `rate-fact rate-dan${stale ? " stale" : ""}` },
+      el("span", { class: "rate-fact-label" }, "Dan"),
+      el("span", { class: "rate-was" }, badge(was)),
+      el("span", { class: "rate-arrow", "aria-hidden": "true" }, "→"),
+      el("b", {}, badge(now))),
+  ];
+}
+
 function raterView() {
   const r = rater;
   const m = r.map;
@@ -267,7 +347,8 @@ function raterView() {
         rateDial(r),
         el("div", { class: "rate-facts" },
           fact("BPM", bpm(m.bpm), bpm(m.bpm * r.rate)),
-          fact("Length", clock(m.length / 1000), clock(m.length / 1000 / r.rate)))),
+          fact("Length", clock(m.length / 1000), clock(m.length / 1000 / r.rate)),
+          rateDanFacts(r))),
       el("div", { class: "rate-controls" },
         field("Rate", rateStepper(r), r.rate !== 1 && pitchSegs(r)),
         el("p", { class: "caption" },
