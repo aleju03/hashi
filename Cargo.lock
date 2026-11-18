@@ -671,6 +671,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "chart-parser"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+]
+
+[[package]]
+name = "chart-pipeline"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "chart-parser",
+ "dan-core",
+ "jsmath",
+ "leoblack-estimators",
+ "leoblack-ett",
+ "leoblack-interlude",
+ "leoblack-parser",
+ "leoblack-patterns",
+ "leoblack-rework",
+ "ln-skill",
+ "prism",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -995,6 +1021,25 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+
+[[package]]
+name = "dan-calc"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "chart-pipeline",
+ "dan-core",
+ "leoblack-parser",
+]
+
+[[package]]
+name = "dan-core"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "chart-parser",
+ "jsmath",
+]
 
 [[package]]
 name = "darling"
@@ -2680,6 +2725,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsmath"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+
+[[package]]
 name = "json-patch"
 version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2766,6 +2816,61 @@ name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
+name = "leoblack-estimators"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+ "leoblack-parser",
+ "leoblack-rework",
+]
+
+[[package]]
+name = "leoblack-ett"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "cc",
+ "jsmath",
+ "leoblack-parser",
+]
+
+[[package]]
+name = "leoblack-interlude"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+ "leoblack-parser",
+]
+
+[[package]]
+name = "leoblack-parser"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+]
+
+[[package]]
+name = "leoblack-patterns"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+ "leoblack-parser",
+]
+
+[[package]]
+name = "leoblack-rework"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "jsmath",
+ "leoblack-parser",
+]
 
 [[package]]
 name = "libappindicator"
@@ -2869,6 +2974,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 
 [[package]]
+name = "ln-skill"
+version = "0.1.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "chart-parser",
+ "dan-core",
+ "jsmath",
+ "prism",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2943,6 +3059,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "dan-calc",
  "futures-util",
  "image",
  "libloading 0.7.4",
@@ -4147,6 +4264,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
 dependencies = [
  "elliptic-curve",
+]
+
+[[package]]
+name = "prism"
+version = "0.26.0"
+source = "git+https://github.com/aleju03/mania-hub?rev=64c96457d58542f92ea50ffa8c9a95ce9fbeb717#64c96457d58542f92ea50ffa8c9a95ce9fbeb717"
+dependencies = [
+ "chart-parser",
+ "dan-core",
+ "jsmath",
 ]
 
 [[package]]

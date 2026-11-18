@@ -3,6 +3,7 @@ mod auth;
 mod autostart;
 mod beatmap;
 mod cut;
+mod dan;
 mod get_tosu;
 mod goals;
 mod judge;
@@ -327,6 +328,7 @@ pub(crate) struct State {
     pub pump: queue::PumpState,
     pub presence: presence::PresenceState,
     pub boards: leaderboard::Boards,
+    pub dans: dan::Dans,
     pub update: update::UpdateState,
     pub get_tosu: get_tosu::GetState,
     pub autostart: Option<bool>,
@@ -820,6 +822,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
             pump: queue::PumpState::default(),
             presence: presence::PresenceState::default(),
             boards: Default::default(),
+            dans: Default::default(),
             update: update::UpdateState::default(),
             get_tosu: get_tosu::GetState::default(),
             autostart: None,
@@ -976,6 +979,7 @@ pub(crate) mod tests {
             pump: Default::default(),
             presence: Default::default(),
             boards: Default::default(),
+            dans: Default::default(),
             update: Default::default(),
             get_tosu: Default::default(),
             autostart: None,

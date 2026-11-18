@@ -246,7 +246,10 @@ fn selected_map(raw: &Value) -> Option<Value> {
     }
     let md5 = bm.get("checksum").and_then(Value::as_str).filter(|c| crate::leaderboard::valid_md5(c))?.to_lowercase();
     let keys = bm.pointer("/stats/cs/original").and_then(Value::as_f64).map(f64::round);
-    let (speed, mods) = crate::leaderboard::variant(&crate::presence::mod_acronyms(raw.pointer("/play/mods").unwrap_or(&Value::Null)));
+    let raw_mods = raw.pointer("/play/mods").unwrap_or(&Value::Null);
+    let acronyms = crate::presence::mod_acronyms(raw_mods);
+    let (speed, mods) = crate::leaderboard::variant(&acronyms);
+    let has = |m: &str| acronyms.iter().any(|a| a == m);
     Some(json!({
         "md5": md5,
         "artist": bm.get("artist"),
@@ -255,6 +258,9 @@ fn selected_map(raw: &Value) -> Option<Value> {
         "keys": keys,
         "speed": speed,
         "mods": mods,
+        // for its dan, which goes by the exact rate and the judging
+        "rate": crate::presence::mod_rate(raw_mods, &acronyms),
+        "od": if has("HR") { Some("HR") } else if has("EZ") { Some("EZ") } else { None },
     }))
 }
 

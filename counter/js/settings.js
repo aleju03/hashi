@@ -202,7 +202,7 @@ function settings(c, host, reconnect) {
           el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect")),
     computer.length > 0 && [el("p", { class: "group" }, "This computer"), ...computer],
     el("p", { class: "group" }, "Look"),
-    snapshot.showDans != null && toggle("Show dans", snapshot.showDans, "show-dans", "The dan next to a play's MSD."),
+    snapshot.showDans != null && toggle("Show dans", snapshot.showDans, "show-dans", "The dan next to an MSD."),
     snapshot.analysis != null && toggle("Analysis", snapshot.analysis, "analysis",
       "Reads your replays for each play's analysis, goals and your profile."),
     snapshot.analysis && snapshot.thumb && el("div", { class: "setting sub" },

@@ -143,7 +143,7 @@ pub(crate) fn mod_acronyms(mods: &Value) -> Vec<String> {
     list.into_iter().filter(|m| !m.is_empty() && m.len() <= 8).take(32).collect()
 }
 
-fn mod_rate(mods: &Value, acronyms: &[String]) -> f64 {
+pub(crate) fn mod_rate(mods: &Value, acronyms: &[String]) -> f64 {
     let has = |l: &[&str]| acronyms.iter().any(|m| l.contains(&m.as_str()));
     let rate = match mods.get("rate").and_then(Value::as_f64).filter(|r| *r > 0.0) {
         Some(r) => r,

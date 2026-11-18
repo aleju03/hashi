@@ -167,6 +167,111 @@ function danName(d) {
   return d.ln ? `LN ${name}` : name;
 }
 
+// the site's badge for a dan, picked as its src/lib/dan-images.ts does. null where it has none
+const DAN_GREEK = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa"];
+const DAN_7K = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "gamma", "azimuth", "zenith", "stellium"];
+const DAN_6K = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "terra", "celestial", "mystery", "nihility", "finish"];
+const DAN_TIERS = { "--": "low", "-": "mid-low", "+": "mid-high", "++": "high" };
+
+function danArt(d, k) {
+  const keys = Math.round(Number(k));
+  const tier = d.label.match(/[+-]+$/)?.[0] ?? "";
+  const bare = d.label.slice(0, d.label.length - tier.length).trim().toLowerCase();
+  let file = null;
+  if (keys === 7) file = DAN_7K.includes(bare) && `7k/${d.ln ? "ln-" : ""}${bare}.svg`;
+  else if (keys === 6) file = DAN_6K.includes(bare) && `6k/${d.ln ? "ln-" : ""}${bare}.svg`;
+  else if (keys === 4 && d.ln && /^(1[0-7]|[1-9])$/.test(bare)) file = `ln/${bare}.svg`;
+  else if (keys === 4) file = /^([1-9]|10)$/.test(bare) ? `reform/${bare}.svg` : DAN_GREEK.includes(bare) && `reform/${bare}.webp`;
+  if (!file) return null;
+  if (DAN_TIERS[tier]) file = file.replace(/\.(svg|webp)$/, `-${DAN_TIERS[tier]}.$1?v=4`);
+  return `${snapshot.connection.origin}/images/dans/${file}`;
+}
+
+// every badge's drawing takes the same area, whatever share of its image it fills: a tall delta and a
+// round alpha read as the same size where equal heights wouldn't. a wide one like 10 keeps most of the
+// height, or its digits come out smaller than a 3's
+const DAN_SIZE = 24;
+
+// the badge, or the name where there's no badge or it doesn't load. off: greyed, with why in note
+function danBadge(d, keys, off = false, note = null) {
+  const src = danArt(d, keys);
+  const name = danName(d);
+  const cls = off ? " off" : "";
+  if (!src || badArt.has(src)) return el("span", { class: `dan${cls}`, title: note }, name);
+  const file = src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "").replace(/-(low|mid-low|mid-high|high)\./, ".");
+  const [l, t, r, b] = DAN_BOXES[file] ?? [0.2, 0.2, 0.8, 0.8];
+  const h = Math.max(DAN_SIZE / Math.sqrt((r - l) * (b - t)), (DAN_SIZE * 0.9) / (b - t));
+  const px = (x) => `${(x * h).toFixed(1)}px`;
+  // the margins take away the image's empty sides, so the drawing alone takes room. a tier's marks
+  // widen the image to the right, so that side stays
+  const tiered = file !== src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "");
+  const style = `height:${h.toFixed(1)}px;margin:${px(-t)} ${tiered ? "0" : px(r - 1)} ${px(b - 1)} ${px(-l)}`;
+  return el("img", { class: `dan-art${cls}`, src, alt: name, title: note ? `${name}. ${note}` : name, style, onerror: () => { badArt.add(src); render(); } });
+}
+const badArt = new Set();
+
+// so badges swap in drawn, not blank while their files load
+function drawnBadges(data) {
+  const srcs = [data.dan, data.other].filter(Boolean).map((x) => danArt(x, data.keys)).filter((s) => s && !badArt.has(s));
+  return Promise.all(srcs.map((src) => { const img = new Image(); img.src = src; return img.decode().catch(() => {}); }));
+}
+
+// the map selected in osu!, with its MSD and dan worked out here at its rate
+let picked = null;
+let pickedTimer = 0;
+const pickedKey = (m) => `${m.md5}|${m.rate ?? 1}|${m.od ?? ""}|${(m.mods ?? []).join(",")}`;
+
+async function loadPicked(key) {
+  let data = null;
+  let moved = false;
+  try {
+    const res = await fetch(`${BRIDGE}/dan/selected?md5=${picked?.md5}`);
+    if (res.ok) data = await res.json();
+    moved = res.status === 409;
+  } catch {}
+  // osu! has moved on and a new key brings its own load. any other failure shows nothing, not the last map's
+  if (picked?.key !== key || moved) return;
+  const map = snapshot.tosu.map;
+  if (!data) {
+    picked.data = { keys: map.keys };
+    render();
+    return;
+  }
+  if (pickedKey({ ...map, md5: data.md5, rate: data.rate, od: data.od }) !== key) return;
+  data.keys = map.keys;
+  await drawnBadges(data);
+  if (picked?.key !== key) return;
+  picked.data = data;
+  render();
+}
+
+function pickedMap() {
+  const map = snapshot.tosu.map;
+  if (!map) {
+    picked = null;
+    return null;
+  }
+  const key = pickedKey(map);
+  if (picked?.key !== key) {
+    picked = { key, md5: map.md5, data: null, last: picked?.data ?? picked?.last ?? null };
+    clearTimeout(pickedTimer);
+    pickedTimer = setTimeout(() => loadPicked(key), 150);
+  }
+  // until it's worked out, the last map's MSD and badge stay, faded, and swap when it's ready
+  const d = picked.data ?? picked.last;
+  const showDans = snapshot.showDans !== false;
+  const dans = d && showDans ? [d.dan, d.other].filter(Boolean) : [];
+  return el("div", { class: `picked${picked.data ? "" : " stale"}` },
+    el("div", { class: "what" },
+      el("span", { class: "title" }, map.title ?? "Unknown"),
+      el("div", { class: "facts" },
+        el("span", {}, diffName(map.keys, map.version)),
+        !d
+          ? el("span", { class: "msd" }, el("b", { class: "wait" }), " MSD")
+          : d.msd != null && el("span", { class: "msd" }, el("b", {}, d.msd.toFixed(2)), d.rate === 1 ? " MSD" : ` MSD at ${d.rate}x`))),
+    showDans && el("div", { class: "dans" }, dans.map((x) => danBadge(x, d.keys))));
+}
+
 // maps the site said it has no board for, this session
 const boardless = new Set();
 
@@ -191,10 +296,7 @@ function rating(p) {
   return el("div", { class: "rating" },
     rank,
     msd && el("span", { class: "msd" }, el("b", {}, r.msd.toFixed(2)), " MSD"),
-    dan && el("span", {
-      class: `dan${r.dan.eligible ? "" : " off"}`,
-      title: r.dan.eligible ? null : "This play doesn't count toward your dan",
-    }, danName(r.dan)));
+    dan && danBadge(r.dan, p.play.keys, !r.dan.eligible, r.dan.eligible ? null : "This play doesn't count toward your dan"));
 }
 
 // a page of plays sized to the window, so a long session doesn't turn into a long scroll. a row with

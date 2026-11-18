@@ -15,6 +15,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "tokio"
 base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+dan-calc = { git = "https://github.com/aleju03/mania-hub", rev = "64c96457d58542f92ea50ffa8c9a95ce9fbeb717", default-features = false, features = ["native"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 libloading = "0.7"

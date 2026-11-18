@@ -304,19 +304,19 @@ a.title:focus-visible,
   overflow-x: clip;
 }
 
-.rating .msd b {
+.rating .msd b, .picked .msd b {
   font-size: 13px;
   color: var(--accent);
 }
 
-.rating .dan {
+.rating .dan, .picked .dan {
   position: relative;
   padding: 1px 7px;
   font-weight: 700;
   color: var(--accent);
 }
 
-.rating .dan::before {
+.rating .dan::before, .picked .dan::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -432,4 +432,70 @@ a.title:focus-visible,
 .rank.off::before {
   background: none;
   border: 1.5px solid currentColor;
+}
+
+.picked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  margin: 10px 0 2px;
+}
+
+.picked .what {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.picked .title {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.picked .facts {
+  margin-top: 2px;
+  color: var(--osu-f1);
+}
+
+.picked .msd {
+  font-weight: 500;
+}
+
+.picked .dans {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 46px;
+}
+
+.picked.stale .msd, .picked.stale .dans {
+  opacity: 0.4;
+}
+
+.picked .msd b.wait {
+  display: inline-block;
+  width: 34px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--osu-b1);
+  vertical-align: -1px;
+}
+
+
+
+
+
+.dan-art.off {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.dan-art {
+  width: auto;
+  vertical-align: middle;
 }

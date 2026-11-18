@@ -200,6 +200,22 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
                 None => empty(404),
             };
         }
+        // the selected map's, ?md5= the one the page has up
+        if path == "/dan/selected" {
+            let md5 = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "md5").map(|(_, v)| v.into_owned()).unwrap_or_default();
+            let (status, body) = crate::dan::selected(b, &md5).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        // the rate changer's map at ?rate=
+        if let Some(md5) = path.strip_prefix("/dan/rate/") {
+            let rate = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "rate").and_then(|(_, v)| v.parse::<f64>().ok());
+            let (status, body) = crate::dan::at_rate(b, md5, rate.unwrap_or(1.0)).await;
+            let mut res = json(status, &body);
+            res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
         if path == "/profile" {
             let mut res = json(200, &crate::profile::summary(b).await);
             res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

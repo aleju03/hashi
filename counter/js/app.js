@@ -182,7 +182,7 @@ function home(c, host) {
         ? trainerView()
       : analysis
         ? analysisView()
-      : snapshot.plays.length
+      : [pickedMap(), snapshot.plays.length
         ? playList(snapshot.plays)
         : el("div", { class: "nothing" },
             el("p", { class: "say" }, snapshot.sendPlays ? "No plays yet." : "Sending plays is off."),
@@ -191,7 +191,7 @@ function home(c, host) {
               : snapshot.analysis
                 ? "The maps you finish stay off your profile, but still show up here with their analysis."
                 : "The maps you finish stay off your profile. Turn it back on in the settings."),
-            waiting(), el("i"), el("i"), el("i")));
+            waiting(), el("i"), el("i"), el("i"))]);
 }
 
 // a different view opens at its top, not wherever the last one was scrolled to
