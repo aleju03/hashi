@@ -191,6 +191,9 @@ function danArt(d, k) {
 // round alpha read as the same size where equal heights wouldn't. a wide one like 10 keeps most of the
 // height, or its digits come out smaller than a 3's
 const DAN_SIZE = 24;
+// 6K and 7K badges are a full disc or hexagon with the level small inside, which reads smaller than a
+// 4K badge's bare glyph of the same area
+const DAN_LADDER_SCALE = { "6k": 1.25, "7k": 1.25 };
 
 // the badge, or the name where there's no badge or it doesn't load. off: greyed, with why in note
 function danBadge(d, keys, off = false, note = null) {
@@ -200,7 +203,8 @@ function danBadge(d, keys, off = false, note = null) {
   if (!src || badArt.has(src)) return el("span", { class: `dan${cls}`, title: note }, name);
   const file = src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "").replace(/-(low|mid-low|mid-high|high)\./, ".");
   const [l, t, r, b] = DAN_BOXES[file] ?? [0.2, 0.2, 0.8, 0.8];
-  const h = Math.max(DAN_SIZE / Math.sqrt((r - l) * (b - t)), (DAN_SIZE * 0.9) / (b - t));
+  const size = DAN_SIZE * (DAN_LADDER_SCALE[file.split("/")[0]] ?? 1);
+  const h = Math.max(size / Math.sqrt((r - l) * (b - t)), (size * 0.9) / (b - t));
   const px = (x) => `${(x * h).toFixed(1)}px`;
   // the margins take away the image's empty sides, so the drawing alone takes room. a tier's marks
   // widen the image to the right, so that side stays
