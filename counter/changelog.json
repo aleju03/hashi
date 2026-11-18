@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.12",
+    "date": "2026-11-18",
+    "changes": [
+      { "kind": "new", "text": "Added the MSD and dan of the map selected in osu!, above your plays." },
+      { "kind": "new", "text": "Dans now show as their badges." },
+      { "kind": "new", "text": "The rate changer shows the MSD and dan at the rate you pick." }
+    ]
+  },
+  {
     "version": "0.1.11",
     "date": "2026-11-16",
     "changes": [
