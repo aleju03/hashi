@@ -193,31 +193,83 @@ function danArt(d, k) {
 const DAN_SIZE = 24;
 // 6K and 7K badges are a full disc or hexagon with the level small inside, which reads smaller than a
 // 4K badge's bare glyph of the same area
-const DAN_LADDER_SCALE = { "6k": 1.25, "7k": 1.25 };
+const DAN_LADDER_SCALE = { "6k": 1.5, "7k": 1.5 };
+
+// where a badge goes and how big: its file, its height and the margins that take away its image's
+// empty sides, so the drawing alone takes room. a tier's marks widen the image to the right, so that
+// side stays
+function danLayout(d, keys) {
+  const src = danArt(d, keys);
+  if (!src || badArt.has(src)) return null;
+  const path = src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "");
+  const file = path.replace(/-(low|mid-low|mid-high|high)\./, ".");
+  const [l, t, r, b] = DAN_BOXES[file] ?? [0.2, 0.2, 0.8, 0.8];
+  const size = DAN_SIZE * (DAN_LADDER_SCALE[file.split("/")[0]] ?? 1);
+  // whole pixels: a badge drawn at a fractional size or offset gets resampled, and comes out blurry
+  const h = Math.round(Math.max(size / Math.sqrt((r - l) * (b - t)), (size * 0.9) / (b - t)));
+  const px = (x) => `${Math.round(x * h)}px`;
+  return { src, h, margin: `${px(-t)} ${path !== file ? "0" : px(r - 1)} ${px(b - 1)} ${px(-l)}` };
+}
 
 // the badge, or the name where there's no badge or it doesn't load. off: greyed, with why in note
 function danBadge(d, keys, off = false, note = null) {
-  const src = danArt(d, keys);
   const name = danName(d);
   const cls = off ? " off" : "";
-  if (!src || badArt.has(src)) return el("span", { class: `dan${cls}`, title: note }, name);
-  const file = src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "").replace(/-(low|mid-low|mid-high|high)\./, ".");
-  const [l, t, r, b] = DAN_BOXES[file] ?? [0.2, 0.2, 0.8, 0.8];
-  const size = DAN_SIZE * (DAN_LADDER_SCALE[file.split("/")[0]] ?? 1);
-  const h = Math.max(size / Math.sqrt((r - l) * (b - t)), (size * 0.9) / (b - t));
-  const px = (x) => `${(x * h).toFixed(1)}px`;
-  // the margins take away the image's empty sides, so the drawing alone takes room. a tier's marks
-  // widen the image to the right, so that side stays
-  const tiered = file !== src.slice(src.indexOf("/images/dans/") + 13).replace(/\?.*$/, "");
-  const style = `height:${h.toFixed(1)}px;margin:${px(-t)} ${tiered ? "0" : px(r - 1)} ${px(b - 1)} ${px(-l)}`;
-  return el("img", { class: `dan-art${cls}`, src, alt: name, title: note ? `${name}. ${note}` : name, style, onerror: () => { badArt.add(src); render(); } });
+  const at = danLayout(d, keys);
+  if (!at) return el("span", { class: `dan${cls}`, title: note }, name);
+  const title = note ? `${name}. ${note}` : name;
+  const fine = fineArt(at);
+  if (fine) {
+    const c = el("canvas", { class: `dan-art${cls}`, role: "img", "aria-label": name, title, width: fine.width, height: fine.height });
+    c.style.cssText = `width:${fine.cssWidth}px;height:${at.h}px;margin:${at.margin}`;
+    c.getContext("2d").drawImage(fine, 0, 0);
+    return c;
+  }
+  return el("img", { class: `dan-art${cls}`, src: at.src, alt: name, title, style: `height:${at.h}px;margin:${at.margin}`, onerror: () => { badArt.add(at.src); render(); } });
 }
 const badArt = new Set();
 
-// so badges swap in drawn, not blank while their files load
+// the badges' fine hatching turns to a moire pattern when drawn straight at this size, so each is
+// drawn at four times its size and halved twice, smoothing it, then kept and copied where it shows
+const fineArts = new Map();
+
+function fineArt(at) {
+  const key = `${at.src}@${at.h}@${devicePixelRatio}`;
+  const got = fineArts.get(key);
+  if (got !== undefined) return got;
+  fineArts.set(key, null);
+  drawFine(at).then((c) => { fineArts.set(key, c); render(); }, () => {});
+  return null;
+}
+
+async function drawFine(at) {
+  const img = new Image();
+  img.src = at.src;
+  await img.decode();
+  const cssWidth = Math.round((at.h * img.naturalWidth) / img.naturalHeight);
+  const [w, h] = [Math.round(cssWidth * devicePixelRatio), Math.round(at.h * devicePixelRatio)];
+  let c = document.createElement("canvas");
+  [c.width, c.height] = [w * 4, h * 4];
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+  for (const [tw, th] of [[w * 2, h * 2], [w, h]]) {
+    const next = document.createElement("canvas");
+    [next.width, next.height] = [tw, th];
+    const ctx = next.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(c, 0, 0, tw, th);
+    c = next;
+  }
+  c.cssWidth = cssWidth;
+  return c;
+}
+
+// so badges swap in drawn and smoothed, not blank while their files load
 function drawnBadges(data) {
-  const srcs = [data.dan, data.other].filter(Boolean).map((x) => danArt(x, data.keys)).filter((s) => s && !badArt.has(s));
-  return Promise.all(srcs.map((src) => { const img = new Image(); img.src = src; return img.decode().catch(() => {}); }));
+  const ats = [data.dan, data.other].filter(Boolean).map((x) => danLayout(x, data.keys)).filter(Boolean);
+  return Promise.all(ats.map(async (at) => {
+    const key = `${at.src}@${at.h}@${devicePixelRatio}`;
+    if (!fineArts.get(key)) fineArts.set(key, await drawFine(at).catch(() => null));
+  }));
 }
 
 // the map selected in osu!, with its MSD and dan worked out here at its rate
