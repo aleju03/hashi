@@ -206,7 +206,7 @@ function skinView() {
   return el("div", { class: "skin-page", ondragover: (ev) => skinSideDragOver(skinPage, ev), ondrop: (ev) => skinSideDrop(skinPage, ev) },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Skin editor"),
-      el("button", { class: "link", onclick: closeSkin }, p.back ? "Back to the analysis" : "Back to plays")),
+      el("button", { class: "link back", onclick: closeSkin }, p.back ? "Back to the analysis" : "Back to plays")),
     info?.found && el("p", { class: "caption" }, info.name, info.client === "lazer" && " (lazer)"),
     info && !info.found && el("p", { class: "caption" }, SKIN_WHY[info.why] ?? SKIN_WHY.unknown),
     info?.found && info.unreadable?.length > 0 && !SKIN_FREEZE && skinUnreadable(p),

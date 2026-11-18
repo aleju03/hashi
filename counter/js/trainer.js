@@ -403,7 +403,7 @@ function trainerView() {
   return el("div", { class: "trainer" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Chord trainer"),
-      el("button", { class: "link", onclick: closeTrainer }, "Back to the analysis")),
+      el("button", { class: "link back", onclick: closeTrainer }, "Back to the analysis")),
     hands,
     prompt,
     el("div", { class: "trainer-caps" }, caps),

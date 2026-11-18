@@ -253,7 +253,7 @@ function raterView() {
   return el("div", { class: "rater" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Change the rate"),
-      el("button", { class: "link", onclick: closeRater }, "Back to plays")),
+      el("button", { class: "link back", onclick: closeRater }, "Back to plays")),
     m && el("div", { class: "map" },
       el("span", { class: "title" }, m.title ?? "Unknown"),
       m.artist && el("span", { class: "artist" }, m.artist),

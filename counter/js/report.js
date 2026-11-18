@@ -189,7 +189,7 @@ function reportView() {
   return el("div", { class: "report" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Report a problem"),
-      el("button", { class: "link", onclick: closeReport }, "Back to plays")),
+      el("button", { class: "link back", onclick: closeReport }, "Back to plays")),
     report.sentAt ? reportSent() : reportPage());
 }
 

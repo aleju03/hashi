@@ -125,7 +125,7 @@ function notesView() {
   return el("div", { class: "notes" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "What's new"),
-      el("button", { class: "link", onclick: closeNotes }, "Back to plays")),
+      el("button", { class: "link back", onclick: closeNotes }, "Back to plays")),
     latest ? letter(latest) : el("p", { class: "lead" }, "Nothing written down yet."),
     earlier.length > 0 && [el("p", { class: "group" }, "Before that"), earlier.map(pastNotes)]);
 }

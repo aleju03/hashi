@@ -177,6 +177,13 @@ document.addEventListener("pointerdown", (e) => {
   hold.timer = setTimeout(tick, 400);
 });
 
+// the mouse's back button leaves the page the way its "Back to" link does
+addEventListener("mouseup", (e) => {
+  if (e.button !== 3) return;
+  e.preventDefault();
+  app.querySelector(".head .back")?.click();
+});
+
 // dragging across a [data-drag] group sets each toggle to what the first one became
 let toggleDrag = null;
 function dragToggle(button) {

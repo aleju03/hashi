@@ -181,7 +181,7 @@ function settings(c, host, reconnect) {
   return el("div", { class: "settings" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Settings"),
-      el("button", { class: "link", onclick: toggleSettings }, "Back to plays")),
+      el("button", { class: "link back", onclick: toggleSettings }, "Back to plays")),
     unsaved && el("p", { class: "status bad" }, unsaved),
     el("p", { class: "group" }, "Mania Tracker"),
     c.username

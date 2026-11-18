@@ -630,7 +630,7 @@ function cutterView() {
   return el("div", { class: "cutter" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Cut a map"),
-      el("button", { class: "link", onclick: closeCutter }, "Back to plays")),
+      el("button", { class: "link back", onclick: closeCutter }, "Back to plays")),
     m && el("div", { class: "map" },
       el("span", { class: "title" }, m.title ?? "Unknown"),
       m.artist && el("span", { class: "artist" }, m.artist),

@@ -300,7 +300,7 @@ function boardView() {
   const players = data?.entries?.length ? `${data.total} ${data.total === 1 ? "player" : "players"}` : null;
   const head = el("div", { class: "head" },
     el("p", { class: "say" }, "Leaderboard", board.follow && el("span", { class: "following", title: "It changes with the map selected in osu!" }, "Selected in osu!")),
-    el("button", { class: "link", onclick: closeBoard }, "Back to plays"));
+    el("button", { class: "link back", onclick: closeBoard }, "Back to plays"));
   const about = el("div", { class: "map" },
     el("div", { class: "name" },
       data?.url

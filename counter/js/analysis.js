@@ -289,7 +289,7 @@ function analysisView() {
   const mods = modList(p.mods);
   const head = el("div", { class: "head" },
     el("p", { class: "say" }, "Analysis"),
-    el("button", { class: "link", onclick: closeAnalysis }, a.back ? "Back to profile" : "Back to plays"));
+    el("button", { class: "link back", onclick: closeAnalysis }, a.back ? "Back to profile" : "Back to plays"));
   const about = el("div", { class: "map" },
     a.play.url
       ? el("a", { class: "title", href: a.play.url, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, p.title ?? "Unknown")

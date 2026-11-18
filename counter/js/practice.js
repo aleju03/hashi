@@ -109,7 +109,7 @@ function makerView() {
   return el("div", { class: "maker" },
     el("div", { class: "head" },
       el("p", { class: "say" }, "Practice map"),
-      el("button", { class: "link", onclick: closeMaker }, "Back to the analysis")),
+      el("button", { class: "link back", onclick: closeMaker }, "Back to the analysis")),
     el("p", { class: "caption" }, `A new difficulty of ${m.title} with only this stretch in it, ${m.repeats === 1 ? "once" : `${m.repeats} times in a row, slower first`}. In the play it got ${pct(m.worst)}, the rest of the map ${pct(m.rest)}.`),
     field("Stretch", clockInput("from"), el("span", { class: "maker-dash" }, "to"), clockInput("to")),
     field("Repeats", segs(REPEAT_CHOICES.map((n) => [n, String(n)]), m.repeats, (n) => {

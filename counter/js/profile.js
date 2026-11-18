@@ -308,6 +308,6 @@ function profileView() {
       el("p", { class: "say" }, "Profile"),
       el("div", { class: "head-links" },
         c.username && el("a", { class: "link", href: `${c.origin}/player/${encodeURIComponent(c.username)}`, target: "_blank", rel: "noreferrer" }, "On Mania Tracker"),
-        el("button", { class: "link", onclick: closeProfile }, "Back to plays"))),
+        el("button", { class: "link back", onclick: closeProfile }, "Back to plays"))),
     body);
 }
