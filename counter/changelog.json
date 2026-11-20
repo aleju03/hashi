@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.2.0",
+    "date": "2026-11-20",
+    "changes": [
+      { "kind": "new", "text": "Added a round end for long notes and filled gaps in the skin editor." },
+      { "kind": "fixed", "text": "Rate changed maps with breaks had no notes on stable." }
+    ]
+  },
+  {
     "version": "0.1.13",
     "date": "2026-11-19",
     "changes": [
