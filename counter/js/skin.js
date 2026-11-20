@@ -586,7 +586,7 @@ function skinEdit(page) {
 
 function skinFresh() {
   return {
-    cut: null, fade: null, colors: { notes: [], heads: [], bodies: [], tails: [] },
+    cut: null, fade: null, gap: null, colors: { notes: [], heads: [], bodies: [], tails: [] },
     parts: { notes: true, heads: true, bodies: true, tails: true }, picks: [],
     swap: {}, swapPart: "note", swapCols: [],
     // skin.ini's values, null keeping the skin's
@@ -632,6 +632,7 @@ function skinEditsJson(page) {
   }
   if (e.cut) out.cut = e.cut.map((ms) => (ms == null ? null : Math.round(skinUnits(page, ms) * 100) / 100));
   if (e.fade) out.fade = { length: Math.round(skinUnits(page, e.fade.ms) * 100) / 100, from: e.fade.from, round: !!e.fade.round };
+  if (e.gap) out.gap = e.gap;
   const coloured = SKIN_PARTS.map(([p]) => p).filter((p) => e.colors[p]?.some(Boolean));
   if (coloured.length) out.colors = Object.fromEntries(coloured.map((p) => [p, Array.from({ length: keys }, (_, c) => e.colors[p][c] ?? null)]));
   const swapped = Object.entries(e.swap ?? {}).filter(([, cols]) => cols.some(Boolean));
@@ -785,6 +786,31 @@ function skinStepper(label, text, down, up, onDown, onUp) {
     el("button", { class: "seg", disabled: !up, "aria-label": `More ${label.toLowerCase()}`, onclick: onUp }, "+"));
 }
 
+const SKIN_GAP_STEP = 5;
+const SKIN_GAP_COLORS = ["#ffffff", "#b8b8c4", "#000000", ...SKIN_PALETTE.slice(2)];
+
+function skinGapFill(page, gap) {
+  const set = (patch) => skinChange(page, (x) => (x.gap = { ...x.gap, ...patch }));
+  const pct = Math.round(gap.opacity * 100);
+  const setPct = (v) => set({ opacity: Math.min(100, Math.max(1, v)) / 100 });
+  return [
+    el("div", { class: "skin-tools" },
+      el("span", { class: "skin-label" }, "Opacity"),
+      el("div", { class: "segs", title: "Gap opacity" },
+        el("button", { class: "seg", disabled: pct <= 1, "aria-label": "Less opacity", onclick: () => setPct(pct - SKIN_GAP_STEP) }, "−"),
+        skinField(page, "Gap opacity", pct, 1, 100, setPct),
+        el("span", { class: "skin-unit" }, "%"),
+        el("button", { class: "seg", disabled: pct >= 100, "aria-label": "More opacity", onclick: () => setPct(pct + SKIN_GAP_STEP) }, "+"))),
+    skinWheelNode(page, "gap", gap.color, (color) => set({ color })),
+    el("div", { class: "skin-swatches palette" }, SKIN_GAP_COLORS.map((color) => el("button", {
+      class: `skin-swatch${gap.color === color ? " on" : ""}`,
+      style: `--swatch: ${color}`,
+      title: color,
+      onclick: () => set({ color }),
+    }))),
+  ];
+}
+
 function skinLongNotes(page) {
   const e = skinEdit(page);
   const now = skinCutNow(page);
@@ -809,6 +835,10 @@ function skinLongNotes(page) {
     !same && el("p", { class: "caption" }, `Per column: ${skinCutText(cut)}. A number here sets them all.`),
     hint && el("p", { class: "caption", title: hint.detail }, hint.text, " ",
       hint.cut && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.cut = hint.cut)) }, "Use this")),
+    el("div", { class: "skin-tools" },
+      segs([["off", "Clear gap"], ["on", "Filled gap"]], e.gap ? "on" : "off",
+        (v) => skinChange(page, (x) => (x.gap = v === "on" ? { color: "#ffffff", opacity: 0.2 } : null)), "Paints the gap so the body runs on to the tail in its own color")),
+    e.gap && skinGapFill(page, e.gap),
     el("div", { class: "skin-tools" },
       segs([["off", "No fade"], ["on", "Fade"]], fade ? "on" : "off", (v) => skinChange(page, (x) => (x.fade = v === "on" ? { ms: 120, from: 0 } : null)), "Fade"),
       fade && el("div", { class: "segs", title: "Fade length" },
@@ -842,8 +872,9 @@ function hexToHsv(hex) {
 }
 
 // built once per page and kept, a redraw mid-drag would drop the pointer; the preview follows on release
-function skinWheel(page) {
-  if (page.wheel) return page.wheel;
+function skinWheel(page, key) {
+  page.wheels ??= {};
+  if (page.wheels[key]) return page.wheels[key];
   const dpr = devicePixelRatio || 1;
   const size = SKIN_WHEEL;
   const wheel = el("canvas", { class: "skin-wheel", width: size * dpr, height: size * dpr, style: `width: ${size}px; height: ${size}px` });
@@ -914,7 +945,7 @@ function skinWheel(page) {
       node.addEventListener("pointermove", onMove);
       node.addEventListener("pointerup", () => {
         node.removeEventListener("pointermove", onMove);
-        page.wheel.commit?.(color());
+        page.wheels[key].commit?.(color());
       }, { once: true });
     });
   };
@@ -938,10 +969,10 @@ function skinWheel(page) {
     Object.assign(state, hsv);
     hex.blur();
     draw();
-    page.wheel.commit?.(color());
+    page.wheels[key].commit?.(color());
   });
   const node = el("div", { class: "skin-picker" }, wheel, el("div", { class: "skin-picker-side" }, swatch, hex, bar));
-  page.wheel = {
+  page.wheels[key] = {
     node,
     hex,
     shown: null,
@@ -955,7 +986,23 @@ function skinWheel(page) {
     },
   };
   draw();
-  return page.wheel;
+  return page.wheels[key];
+}
+
+// the wheel showing `value`, setting it with `commit`
+function skinWheelNode(page, key, value, commit) {
+  const wheel = skinWheel(page, key);
+  wheel.commit = commit;
+  // a redraw moves the field, which drops its focus mid-typing
+  if (hasFocus(wheel.hex)) {
+    const [from, to] = [wheel.hex.selectionStart, wheel.hex.selectionEnd];
+    requestAnimationFrame(() => {
+      wheel.hex.focus();
+      wheel.hex.setSelectionRange(from, to);
+    });
+  }
+  wheel.show(value);
+  return wheel.node;
 }
 
 function skinColours(page) {
@@ -992,20 +1039,9 @@ function skinColours(page) {
       },
     }, c + 1))),
     (() => {
-      const wheel = skinWheel(page);
-      wheel.commit = paint;
-      // a redraw moves the field, which drops its focus mid-typing
-      if (hasFocus(wheel.hex)) {
-        const [from, to] = [wheel.hex.selectionStart, wheel.hex.selectionEnd];
-        requestAnimationFrame(() => {
-          wheel.hex.focus();
-          wheel.hex.setSelectionRange(from, to);
-        });
-      }
       const first = on[0];
       const col = e.picks[0] ?? Math.max(0, first ? e.colors[first].findIndex(Boolean) : 0);
-      wheel.show((first && (e.colors[first][col] ?? skinPartColour(page, col, first))) ?? "#ffffff");
-      return wheel.node;
+      return skinWheelNode(page, "colours", (first && (e.colors[first][col] ?? skinPartColour(page, col, first))) ?? "#ffffff", paint);
     })(),
     el("div", { class: "skin-swatches palette" },
       SKIN_PALETTE.map((color) => el("button", { class: "skin-swatch", style: `--swatch: ${color}`, title: color, onclick: () => paint(color) })),
