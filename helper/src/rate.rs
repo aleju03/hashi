@@ -205,7 +205,8 @@ fn events(text: &str, rate: f64, bg: Option<&str>) -> String {
     let mut sounds = vec![];
     for line in crate::cut::section(text, "Events") {
         let mut f: Vec<String> = line.split(',').map(|x| x.trim().to_string()).collect();
-        let at = |s: &str| s.parse::<f64>().ok().map(|t| number(t / rate));
+        // whole, stable reads these as integers and drops the map's notes at a fraction
+        let at = |s: &str| s.parse::<f64>().ok().map(|t| format!("{}", (t / rate).round() as i64));
         match f[0].as_str() {
             "2" | "Break" if f.len() >= 3 => {
                 if let (Some(a), Some(b)) = (at(&f[1]), at(&f[2])) {
@@ -411,7 +412,7 @@ mod tests {
 
     const MAP: &str = "osu file format v14\n\n[General]\nAudioFilename: song.mp3\nAudioLeadIn: 0\nPreviewTime: 30000\nMode: 3\n\n[Editor]\nBookmarks: 1000,2000\n\n\
         [Metadata]\nTitle:Song\nArtist:Someone\nVersion:Insane\nTags:fast\nBeatmapID:123\nBeatmapSetID:45\n\n[Difficulty]\nOverallDifficulty:8\n\n\
-        [Events]\n//Background and Video events\n0,0,\"bg.jpg\",0,0\nVideo,0,\"v.mp4\"\n//Break Periods\n2,6000,9000\nSprite,Background,Centre,\"x.png\",320,240\n F,0,0,1000,1\nSample,12000,0,\"kick.wav\",70\n\n\
+        [Events]\n//Background and Video events\n0,0,\"bg.jpg\",0,0\nVideo,0,\"v.mp4\"\n//Break Periods\n2,6001,9000\nSprite,Background,Centre,\"x.png\",320,240\n F,0,0,1000,1\nSample,12000,0,\"kick.wav\",70\n\n\
         [TimingPoints]\n600,500,4,1,0,60,1,0\n3000,-50,4,1,0,60,0,0\n\n[HitObjects]\n64,192,600,1,0,0:0:0:0:\n192,192,1200,128,0,1800:0:0:0:0:ln.wav\n";
 
     #[test]
@@ -421,7 +422,7 @@ mod tests {
         assert!(osu.contains("PreviewTime: 20000\n"));
         assert!(!osu.contains("Bookmarks"));
         assert!(osu.contains("Version:Insane 1.5x\nTags:fast hashi-rate\nBeatmapID:0\nBeatmapSetID:-1\n"));
-        assert!(osu.contains("0,0,\"bg.png\",0,0\n//Break Periods\n2,4000,6000\n"));
+        assert!(osu.contains("0,0,\"bg.png\",0,0\n//Break Periods\n2,4001,6000\n"));
         assert!(!osu.contains("v.mp4") && !osu.contains("x.png") && !osu.contains(" F,"));
         assert!(osu.contains("Sample,8000,0,\"kick.wav\",70\n"));
         assert!(osu.contains("400,333.3333333333333,4,1,0,60,1,0\n2000,-50,4,1,0,60,0,0\n"));
