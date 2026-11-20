@@ -352,7 +352,13 @@ function rating(p) {
   return el("div", { class: "rating" },
     rank,
     msd && el("span", { class: "msd" }, el("b", {}, r.msd.toFixed(2)), " MSD"),
-    dan && danBadge(r.dan, p.play.keys, !r.dan.eligible, r.dan.eligible ? null : "This play doesn't count toward your dan"));
+    dan && danText(r.dan));
+}
+
+// on a play the dan reads as its name and the site's number for it, "beta-- (12.34)"
+function danText(d) {
+  return el("span", { class: `dan-text${d.eligible ? "" : " off"}`, title: d.eligible ? null : "This play doesn't count toward your dan" },
+    el("b", {}, danName(d)), typeof d.raw === "number" && ` (${d.raw.toFixed(2)})`);
 }
 
 // a page of plays sized to the window, so a long session doesn't turn into a long scroll. a row with

@@ -589,7 +589,8 @@ fn rating(r: &Value) -> Value {
     let dan = x.get("dan").and_then(|d| {
         let label = d.get("label").and_then(Value::as_str).map(str::trim).filter(|l| !l.is_empty() && l.chars().count() <= 32)?;
         let ln = d.get("family").and_then(Value::as_str) == Some("ln");
-        Some(json!({ "label": label, "ln": ln, "eligible": d.get("eligible").and_then(Value::as_bool).unwrap_or(true) }))
+        let raw = d.get("raw").and_then(Value::as_f64).filter(|r| r.is_finite() && (0.0..=100.0).contains(r));
+        Some(json!({ "label": label, "ln": ln, "raw": raw, "eligible": d.get("eligible").and_then(Value::as_bool).unwrap_or(true) }))
     });
     let msd = msd(x.get("msd"));
     if msd.is_none() && dan.is_none() {
@@ -959,14 +960,14 @@ mod tests {
         let dan = json!({ "label": "8+", "family": "dan", "raw": 8.21, "eligible": false });
         assert_eq!(
             rating(json!({ "state": "accepted", "rating": { "msd": 24.31, "dan": dan } })),
-            json!({ "msd": 24.31, "dan": { "label": "8+", "ln": false, "eligible": false } })
+            json!({ "msd": 24.31, "dan": { "label": "8+", "ln": false, "raw": 8.21, "eligible": false } })
         );
         assert_eq!(rating(json!({ "state": "accepted", "rating": { "msd": 24.31, "dan": null } })), json!({ "msd": 24.31, "dan": null }));
         // unrated: the chart's msd alone isn't the play's
         assert_eq!(rating(json!({ "state": "accepted", "rating": { "analysis_state": "unsupported", "msd": null, "chart_msd": 25.02, "dan": null } })), json!(null));
         assert_eq!(
             rating(json!({ "state": "accepted", "rating": { "msd": 30.5, "dan": { "label": "12", "family": "ln", "eligible": true } } })),
-            json!({ "msd": 30.5, "dan": { "label": "12", "ln": true, "eligible": true } })
+            json!({ "msd": 30.5, "dan": { "label": "12", "ln": true, "raw": null, "eligible": true } })
         );
         assert_eq!(rating(json!({ "state": "accepted", "rating": { "msd": null, "dan": null } })), json!(null));
         assert_eq!(rating(json!({ "state": "accepted", "rating": { "msd": 1e9, "dan": { "label": " " } } })), json!(null));

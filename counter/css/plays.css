@@ -304,19 +304,19 @@ a.title:focus-visible,
   overflow-x: clip;
 }
 
-.rating .msd b, .picked .msd b {
+.rating .msd b, .rating .dan-text b, .picked .msd b {
   font-size: 13px;
   color: var(--accent);
 }
 
-.rating .dan, .picked .dan {
+.picked .dan {
   position: relative;
   padding: 1px 7px;
   font-weight: 700;
   color: var(--accent);
 }
 
-.rating .dan::before, .picked .dan::before {
+.picked .dan::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -325,7 +325,7 @@ a.title:focus-visible,
   filter: url(#ink2);
 }
 
-.rating .dan.off {
+.rating .dan-text.off b {
   color: var(--osu-f1);
 }
 
