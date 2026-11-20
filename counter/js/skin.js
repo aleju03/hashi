@@ -586,7 +586,7 @@ function skinEdit(page) {
 
 function skinFresh() {
   return {
-    cut: null, fade: null, gap: null, colors: { notes: [], heads: [], bodies: [], tails: [] },
+    cut: null, fade: null, round: null, gap: null, colors: { notes: [], heads: [], bodies: [], tails: [] },
     parts: { notes: true, heads: true, bodies: true, tails: true }, picks: [],
     swap: {}, swapPart: "note", swapCols: [],
     // skin.ini's values, null keeping the skin's
@@ -631,7 +631,8 @@ function skinEditsJson(page) {
     });
   }
   if (e.cut) out.cut = e.cut.map((ms) => (ms == null ? null : Math.round(skinUnits(page, ms) * 100) / 100));
-  if (e.fade) out.fade = { length: Math.round(skinUnits(page, e.fade.ms) * 100) / 100, from: e.fade.from, round: !!e.fade.round };
+  if (e.fade) out.fade = { length: Math.round(skinUnits(page, e.fade.ms) * 100) / 100, from: e.fade.from };
+  if (e.round ?? e.fade?.round) out.round = true;
   if (e.gap) out.gap = e.gap;
   const coloured = SKIN_PARTS.map(([p]) => p).filter((p) => e.colors[p]?.some(Boolean));
   if (coloured.length) out.colors = Object.fromEntries(coloured.map((p) => [p, Array.from({ length: keys }, (_, c) => e.colors[p][c] ?? null)]));
@@ -823,6 +824,8 @@ function skinLongNotes(page) {
   const setCut = (ms) => skinChange(page, (x) => (x.cut = now.map((v) => (v == null ? null : ms))));
   const hint = skinSuggestion(page);
   const fade = e.fade;
+  const own = page.live.scene.own;
+  const bare = cut.map((v, c) => c).filter((c) => cut[c] > 0 && page.live.scene.bareHeads?.[c] && own[c]?.note && !e.swap.head?.[c]);
   return part("skin-lns", null,
     el("p", { class: "caption" }, `Body gap: how far before the tail a long note's body stops. This skin has ${skinCutText(now)}.`),
     el("div", { class: "skin-tools" },
@@ -833,11 +836,17 @@ function skinLongNotes(page) {
         el("button", { class: "seg", "aria-label": "Bigger gap", onclick: () => step(SKIN_CUT_STEP) }, "+")),
       e.cut && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.cut = null)) }, "Keep the skin's")),
     !same && el("p", { class: "caption" }, `Per column: ${skinCutText(cut)}. A number here sets them all.`),
+    bare.length > 0 && el("p", { class: "caption" }, "This skin's long notes have no head, so a hold shorter than the gap doesn't show. ",
+      el("button", { class: "link", onclick: () => skinChange(page, (x) => {
+        x.swap.head ??= [];
+        for (const c of bare) x.swap.head[c] = own[c].note;
+      }) }, "Use its notes as heads")),
     hint && el("p", { class: "caption", title: hint.detail }, hint.text, " ",
       hint.cut && el("button", { class: "link", onclick: () => skinChange(page, (x) => (x.cut = hint.cut)) }, "Use this")),
     el("div", { class: "skin-tools" },
       segs([["off", "Clear gap"], ["on", "Filled gap"]], e.gap ? "on" : "off",
-        (v) => skinChange(page, (x) => (x.gap = v === "on" ? { color: "#ffffff", opacity: 0.2 } : null)), "Paints the gap so the body runs on to the tail in its own color")),
+        (v) => skinChange(page, (x) => (x.gap = v === "on" ? { color: "#ffffff", opacity: 0.2 } : null)), "Paints the gap so the body runs on to the tail in its own color"),
+      e.gap && segs([[false, "Skin's shape"], [true, "Rounded"]], !!e.gap.round, (v) => skinChange(page, (x) => (x.gap = { ...x.gap, round: v })), "The shape of the filled gap's end")),
     e.gap && skinGapFill(page, e.gap),
     el("div", { class: "skin-tools" },
       segs([["off", "No fade"], ["on", "Fade"]], fade ? "on" : "off", (v) => skinChange(page, (x) => (x.fade = v === "on" ? { ms: 120, from: 0 } : null)), "Fade"),
@@ -847,8 +856,9 @@ function skinLongNotes(page) {
         el("span", { class: "skin-unit" }, "ms"),
         el("button", { class: "seg", disabled: fade.ms >= 600, "aria-label": "Longer fade", onclick: () => skinChange(page, (x) => (x.fade.ms += SKIN_FADE_STEP)) }, "+")),
       fade && skinStepper("Fade start", `from ${Math.round(fade.from * 100)}%`, fade.from > 0, fade.from < 1,
-        () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from - 0.1) * 10) / 10)), () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from + 0.1) * 10) / 10))),
-      fade && segs([[false, "Flat end"], [true, "Round end"]], !!fade.round, (v) => skinChange(page, (x) => (x.fade.round = v)), "The shape of the body's end")));
+        () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from - 0.1) * 10) / 10)), () => skinChange(page, (x) => (x.fade.from = Math.round((x.fade.from + 0.1) * 10) / 10)))),
+    el("div", { class: "skin-tools" },
+      segs([[false, "The skin's end"], [true, "Round end"]], !!(e.round ?? fade?.round), (v) => skinChange(page, (x) => (x.round = v)), "The shape of the body's end, and of a filled gap's")));
 }
 
 const SKIN_WHEEL = 150;

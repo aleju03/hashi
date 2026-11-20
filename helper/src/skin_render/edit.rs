@@ -15,6 +15,8 @@ pub(crate) struct Edits {
     // skin units of transparent lead-in at the tail end of each column's body; None keeps the skin's
     pub cut: Vec<Option<f64>>,
     pub fade: Option<Fade>,
+    // the body's visible end rounded off like a cap, and the filled gap's end with it
+    pub round: bool,
     // the gap painted in instead of left clear
     pub gap: Option<Gap>,
     pub colors: Colors,
@@ -74,7 +76,7 @@ impl Edits {
         let g = self.gap.as_ref()?;
         let mut color = hex(&g.color)?;
         color[3] = (g.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-        Some(GapFill { color }).filter(|f| f.color[3] > 0)
+        Some(GapFill { color, round: g.round }).filter(|f| f.color[3] > 0)
     }
 }
 
@@ -202,7 +204,7 @@ pub(crate) struct Fade {
     pub length: f64,
     // opacity at the visible end
     pub from: f64,
-    // the visible end rounded off like a cap instead of cut straight across
+    // as Edits::round, where edits saved before that keep it
     #[serde(default)]
     pub round: bool,
 }
@@ -212,11 +214,15 @@ pub(crate) struct Fade {
 pub(crate) struct Gap {
     pub color: String,
     pub opacity: f64,
+    // its tail end rounded off whatever the body's is
+    #[serde(default)]
+    pub round: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct GapFill {
     color: Rgba,
+    round: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -446,15 +452,17 @@ pub(super) fn apply(p: &Profile, edits: &Edits, keys: usize, skin: &Skin, source
         let shape = edits.shape(c, Part::Body);
         let tint = edits.color(Part::Body, c);
         let fill = edits.gap_fill();
-        let lengthwise = cut.is_some() || edits.fade.is_some() || fill.is_some();
+        let round = edits.round || edits.fade.is_some_and(|f| f.round);
+        let lengthwise = cut.is_some() || edits.fade.is_some() || fill.is_some() || round;
         if let Some(asset) = column.body.as_ref().filter(|_| lengthwise || tint.is_some() || shape.is_some()) {
             let style = p.body_styles.get(c).copied().unwrap_or(1.0);
             let restyle = style == 0.0 && lengthwise;
-            let key = format!("body {cut:?} {:?} {fill:?} {tint:?} {} {units} {shape:?}", edits.fade.map(|f| (f.length, f.from, f.round)), restyle);
+            let hidden = tail_cover(&out, &column, p.lazer_bodies);
+            let key = format!("body {cut:?} {round} {hidden} {:?} {fill:?} {tint:?} {} {units} {shape:?}", edits.fade.map(|f| (f.length, f.from, round)), restyle);
             // shaped and coloured first, so the cut and fade take the outline with them
             let make = |src: &Raw| {
                 let pre = prep(src, tint, shape, units, false);
-                body(&pre, asset, p.lazer_bodies, units, cut, edits.fade, fill, None, full).or(Some((pre, None)))
+                body(&pre, asset, p.lazer_bodies, units, cut, edits.fade, round, hidden, fill, None, full).or(Some((pre, None)))
             };
             if let Some((new, raw)) = redraw(asset, key, &mut done, sources, full, make) {
                 if let Some(raw) = raw {
@@ -1238,17 +1246,29 @@ fn cap_keep(x: usize, k: usize, (mid, half, tall): (f64, f64, f64)) -> f64 {
     ((1.0 - (dx * dx + dy * dy).sqrt()) * half / soft + 0.5).clamp(0.0, 1.0)
 }
 
+// how far in from the body's tail end a tail that lets nothing through lies over it, in skin units:
+// the tail's whole box on stable, half of it on lazer, which runs the body half a tail past the end
+fn tail_cover(p: &Profile, column: &load::Column, lazer: bool) -> f64 {
+    let Some(tex) = column.tail.as_ref().and_then(|a| a.image.as_ref()).filter(|t| t.opaque()) else { return 0.0 };
+    let h = tex.height() * p.note_height_scale / tex.width().max(1.0);
+    if lazer { h / 2.0 } else { h }
+}
+
+// the tallest image lazer takes whole. A row of it is the least a body's end can be told from the gap
+// by there, lazer smooths from one row to the next
+const LAZER_ROWS: u32 = 8192;
+
 // A Percy body: `cut` units of nothing at the tail end, or of `fill`, then the skin's own art, fading
 // in from the visible end. Art that isn't a strip already is tiled down far enough that a hold never
 // repeats it.
 #[allow(clippy::too_many_arguments)]
-fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fade: Option<Fade>, fill: Option<GapFill>, tint: Option<Rgba>, full: bool) -> Option<(Raw, Option<f64>)> {
+fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fade: Option<Fade>, round_end: bool, hidden: f64, fill: Option<GapFill>, tint: Option<Rgba>, full: bool) -> Option<(Raw, Option<f64>)> {
     // lazer stretches the image over its whole span, so a short one has a row for hundreds of units
     // and a cut or fade shorter than that rounds away or smears over the hold. Made as tall as a
     // texture goes first, which the stretch doesn't show
     let taller_one;
-    let src = if lazer && (cut.is_some() || fade.is_some() || fill.is_some()) && src.h < load::MAX_TEXTURE {
-        taller_one = taller(src, load::MAX_TEXTURE);
+    let src = if lazer && (cut.is_some() || fade.is_some() || fill.is_some() || round_end) && src.h < LAZER_ROWS {
+        taller_one = taller(src, LAZER_ROWS);
         &taller_one
     } else {
         src
@@ -1257,7 +1277,7 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
     let row_bytes = w as usize * 4;
     let old_lead = lead_rows(&src.rgba, w)?;
     let rows = rows_per_unit(asset.scale, h as f64, lazer);
-    if cut.is_none() && fade.is_none() && fill.is_none() {
+    if cut.is_none() && fade.is_none() && fill.is_none() && !round_end {
         return tint.map(|t| tinted(src, t));
     }
     let art = h - old_lead;
@@ -1292,7 +1312,7 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
     // width but keeps its rows, so its height in rows comes from the column width in units
     let half = (right + 1 - left) as f64 / 2.0;
     let round = (left as f64 + half, half, (half / (w as f64 / width.max(1.0)) * rows).max(1.0));
-    let cap = fade.filter(|f| f.round).map(|_| round);
+    let cap = (round_end || fade.is_some_and(|f| f.round)).then_some(round);
     let mut rgba = vec![0u8; made * row_bytes];
     for i in lead..made {
         let k = i - lead;
@@ -1324,17 +1344,22 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
     // the fill runs on beside the body's cap too, its own or one made here, so the body's end sits in
     // it rather than on a notch. Beside it, not under it: under a see-through body it would show
     // through as a lighter band. How much of a pixel the body covers is its opacity against the
-    // body's own past the cap. The fill's own end is the same shape as the body's
+    // body's own past the cap. The fill's own end is the same shape as the body's unless it's asked round
     if let Some(f) = fill {
         let end = (lead + own_cap.max(cap.map_or(0, |c| c.2.ceil() as usize))).min(made);
         let [fr, fg, fb, fa] = f.color.map(f64::from);
+        let tip = cap.or(f.round.then_some(round));
+        // a round end starts where the tail stops hiding it, when the gap has room for that
+        let skip = ((hidden * rows).round() as usize).min(lead);
+        let skip = if tip.is_some_and(|c| skip as f64 + c.2 > lead as f64) { 0 } else { skip };
         for i in 0..end {
             let row = &mut rgba[i * row_bytes..(i + 1) * row_bytes];
             for x in left..=right {
                 let full = solid[x];
                 let covered_by = |a: f64| if full > 0.0 { (a / full).min(1.0) } else { f64::from(a > 0.0) };
-                let keep = match cap {
-                    Some(c) => if (i as f64) < c.2 { cap_keep(x, i, c) } else { 1.0 },
+                let keep = match tip {
+                    Some(_) if i < skip => 0.0,
+                    Some(c) => if ((i - skip) as f64) < c.2 { cap_keep(x, i - skip, c) } else { 1.0 },
                     None if i < own_cap => covered_by(alpha(old_lead + i, x)),
                     None => 1.0,
                 };
@@ -1505,7 +1530,7 @@ mod tests {
         let src = Raw::new(vec![255u8; 256 * 82 * 4], 256, 82);
         let asset = Asset { width: None, height: None, source_height: None, scale: 1.0, image: None, frames: vec![], path: None };
         let fade = Fade { length: 150.0, from: 0.0, round: false };
-        let (out, _) = body(&src, &asset, true, 100.0, None, Some(fade), None, None, true).unwrap();
+        let (out, _) = body(&src, &asset, true, 100.0, None, Some(fade), false, 0.0, None, None, true).unwrap();
         let rows = rows_per_unit(1.0, out.h as f64, true);
         let alpha = |units: f64| out.rgba[((units * rows) as usize * 256) * 4 + 3];
         assert!(alpha(0.0) < 10);
@@ -1526,8 +1551,8 @@ mod tests {
         let src = Raw::new(px, w, h);
         let asset = Asset { width: None, height: None, source_height: None, scale: 1.0, image: None, frames: vec![], path: None };
         let fade = Fade { length: 0.0, from: 1.0, round: true };
-        let fill = GapFill { color: [0, 0, 255, 128] };
-        let (out, _) = body(&src, &asset, false, 80.0, Some(100.0), Some(fade), Some(fill), None, true).unwrap();
+        let fill = GapFill { color: [0, 0, 255, 128], round: false };
+        let (out, _) = body(&src, &asset, false, 80.0, Some(100.0), Some(fade), false, 0.0, Some(fill), None, true).unwrap();
         let lead = (100.0 * rows_per_unit(1.0, 0.0, false)).round() as u32;
         let at = |x: u32, y: u32| &out.rgba[((y * w + x) * 4) as usize..][..4];
         // the gap's middle is the fill, its tip is rounded, and nothing is outside the art's width
@@ -1555,8 +1580,8 @@ mod tests {
         }
         let src = Raw::new(px, w, h);
         let asset = Asset { width: None, height: None, source_height: None, scale: 1.0, image: None, frames: vec![], path: None };
-        let fill = GapFill { color: [0, 0, 255, 128] };
-        let (out, _) = body(&src, &asset, false, 80.0, None, None, Some(fill), None, true).unwrap();
+        let fill = GapFill { color: [0, 0, 255, 128], round: false };
+        let (out, _) = body(&src, &asset, false, 80.0, None, None, false, 0.0, Some(fill), None, true).unwrap();
         let at = |x: u32, y: u32| &out.rgba[((y * w + x) * 4) as usize..][..4];
         // the fill's end is the body's round end over again
         assert_eq!(at(40, 2), &[0, 0, 255, 128]);
@@ -1581,8 +1606,8 @@ mod tests {
         }
         let src = Raw::new(px, w, h);
         let asset = Asset { width: None, height: None, source_height: None, scale: 1.0, image: None, frames: vec![], path: None };
-        let fill = GapFill { color: [0, 0, 255, 128] };
-        let (out, _) = body(&src, &asset, false, 80.0, None, None, Some(fill), None, true).unwrap();
+        let fill = GapFill { color: [0, 0, 255, 128], round: false };
+        let (out, _) = body(&src, &asset, false, 80.0, None, None, false, 0.0, Some(fill), None, true).unwrap();
         let at = |x: u32, y: u32| &out.rgba[((y * w + x) * 4) as usize..][..4];
         assert!(at(20, 23)[3] > 230, "{:?}", at(20, 23));
         assert_eq!(at(20, 24), &[255; 4]);
@@ -1606,8 +1631,8 @@ mod tests {
         }
         let src = Raw::new(px, w, h);
         let asset = Asset { width: None, height: None, source_height: None, scale: 1.0, image: None, frames: vec![], path: None };
-        let fill = GapFill { color: [0, 0, 255, 128] };
-        let (out, _) = body(&src, &asset, false, 80.0, None, None, Some(fill), None, true).unwrap();
+        let fill = GapFill { color: [0, 0, 255, 128], round: false };
+        let (out, _) = body(&src, &asset, false, 80.0, None, None, false, 0.0, Some(fill), None, true).unwrap();
         let at = |x: u32, y: u32| &out.rgba[((y * w + x) * 4) as usize..][..4];
         // the fill's end is pointed like the body's, and runs on beside the body's point
         assert!(at(40, 1)[3] > 0);

@@ -99,6 +99,7 @@ fn cached(dir: &Path, keys: usize, at: &str, edits: &str, width: f64, lazer: boo
         builder.accent = skin_accent(&base.profile);
         let mut scene = builder.scene();
         scene.cut_now = cut_now(&base.profile, keys);
+        scene.bare_heads = bare_heads(&base.profile, keys);
         scene.own_hit = 480.0 - s_position(base.profile.hit_position, base.settings.hit_position) * UNIT;
         scene.own_line = base.profile.judgement_line;
         scene.own_score = 480.0 - s_position(base.profile.score_position, base.settings.score_position) * UNIT;
@@ -251,6 +252,11 @@ fn cut_now(p: &Profile, keys: usize) -> Vec<Option<f64>> {
             Some(rows / edit::rows_per_unit(asset.scale, full, p.lazer_bodies))
         })
         .collect()
+}
+
+fn bare_heads(p: &Profile, keys: usize) -> Vec<bool> {
+    let blank = |a: &Asset| a.image.as_ref().is_some_and(|t| t.alpha_top().is_none());
+    (0..keys).map(|c| p.columns.get(c).is_some_and(|col| col.head.as_ref().is_some_and(blank))).collect()
 }
 
 // where the receptors' art ends, in HitPosition's 480ths from the top: their images sit on the
@@ -523,6 +529,7 @@ impl<'a> Builder<'a> {
             hit_y: judgment_y,
             hit_units: 480.0 - hit * UNIT,
             cut_now: vec![],
+            bare_heads: vec![],
             own_hit: 0.0,
             own_line: true,
             own_score: 0.0,

@@ -106,6 +106,8 @@ pub(super) struct Scene {
     // the judgement line in skin units from the top, what a note travels in its scroll time
     pub hit_units: f64,
     pub cut_now: Vec<Option<f64>>,
+    // columns whose long note head shows nothing, so a hold is its body alone
+    pub bare_heads: Vec<bool>,
     // the skin's own HitPosition and judgement line, before any edit
     pub own_hit: f64,
     pub own_line: bool,
@@ -354,6 +356,7 @@ impl Scene {
             "hitY": self.hit_y,
             "hitUnits": self.hit_units,
             "cutNow": self.cut_now,
+            "bareHeads": self.bare_heads,
             "ownHit": self.own_hit,
             "ownLine": self.own_line,
             "ownScore": self.own_score,

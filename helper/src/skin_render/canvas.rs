@@ -43,6 +43,11 @@ impl Texture {
         (alpha > 0).then(|| [channel(sum[0]), channel(sum[1]), channel(sum[2]), 255])
     }
 
+    // nothing under it shows through anywhere
+    pub fn opaque(&self) -> bool {
+        self.pixmap.data().chunks_exact(4).all(|p| p[3] >= 250)
+    }
+
     // the first row with a visible pixel as a fraction of the height, None for blank art
     pub fn alpha_top(&self) -> Option<f64> {
         *self.alpha_top.get_or_init(|| {
