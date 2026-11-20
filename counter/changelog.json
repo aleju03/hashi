@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.1.13",
+    "date": "2026-11-19",
+    "changes": [
+      { "kind": "new", "text": "Plays now show their dan as its name and number, like beta-- (12.34)." },
+      { "kind": "new", "text": "Added a filled gap for long notes in the skin editor, the body gap gets painted in a color and opacity you pick." }
+    ]
+  },
+  {
     "version": "0.1.12",
     "date": "2026-11-18",
     "changes": [
