@@ -305,7 +305,7 @@ function skinSideCursor(page, ev) {
   if (ev.buttons || !page.live) return;
   const [px, py, k] = skinSidePoint(page, ev);
   const hit = skinSideHit(page, px, py, SIDE_GRAB * k);
-  page.canvas.style.cursor = !hit ? "" : !hit.corner ? "move" : hit.corner[0] === hit.corner[1] ? "nwse-resize" : "nesw-resize";
+  page.canvas.style.cursor = !hit ? (skinPickHit(page, px, py) ? "pointer" : "") : !hit.corner ? "move" : hit.corner[0] === hit.corner[1] ? "nwse-resize" : "nesw-resize";
 }
 
 function skinSidePoint(page, ev) {
@@ -341,8 +341,9 @@ function skinSideDrag(page, ev) {
       skinSideUnpick(e);
       page.noPause = true;
       render();
+      return;
     }
-    return;
+    return skinPickStart(page, ev);
   }
   ev.preventDefault();
   page.noPause = true;

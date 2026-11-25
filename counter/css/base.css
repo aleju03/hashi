@@ -374,3 +374,9 @@ button.link, a.link {
 .seg:disabled {
   cursor: default;
 }
+
+/* dragging across toggles flips them, it isn't selecting text */
+[data-drag] {
+  -webkit-user-select: none;
+  user-select: none;
+}

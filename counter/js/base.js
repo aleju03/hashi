@@ -195,7 +195,15 @@ document.addEventListener("pointerdown", (e) => {
   const button = e.target.closest?.("[data-drag] button[aria-pressed]");
   if (e.button !== 0 || !button || button.disabled) return;
   toggleDrag = { group: button.closest("[data-drag]").dataset.drag, on: button.getAttribute("aria-pressed") !== "true" };
+  getSelection()?.removeAllRanges();
   button.click();
+});
+// WebKitGTK starts a text selection from a drag over toggles or the skin preview, user-select or not
+document.addEventListener("mousedown", (e) => {
+  if (e.button === 0 && e.target.closest?.("[data-drag] button[aria-pressed]")) e.preventDefault();
+});
+document.addEventListener("selectstart", (e) => {
+  if (toggleDrag || skinPage?.holdStill) e.preventDefault();
 });
 document.addEventListener("pointermove", (e) => {
   if (!toggleDrag) return;

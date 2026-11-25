@@ -71,6 +71,8 @@ function refreshSkin(page) {
     Object.assign(live, loaded);
     skinLayers(live);
     if (SKIN_FREEZE) skinFrozen(live);
+    // the panel shows colors off the new art
+    render();
   }, 120);
 }
 
@@ -170,17 +172,21 @@ function skinFrame(frames, time) {
 
 const skinMapY = (s, y) => (s.upscroll ? s.height - y : y);
 
-function skinTap(s, column, y, time, out) {
+// `hits` gets where each part was drawn, for picking it in the preview
+function skinTap(s, column, y, time, out, hits = []) {
   const c = s.columns[column];
   const anchor = skinMapY(s, y);
   const f = skinFrame(c.tap, time);
   if (f) {
     const top = s.upscroll ? anchor : anchor - f.h;
     out.push({ t: "img", s: f.s, src: [0, 0, ...s.sprites[f.s].slice(0, 2)], dst: [c.x, top, c.w, f.h], flip: s.upscroll ? top * 2 + f.h : null });
+    hits.push({ part: "note", c: column, r: [c.x, top, c.w, f.h] });
     return;
   }
   const h = Math.max(10, c.w * 0.3);
-  out.push({ t: "rrect", r: [c.x + 1, s.upscroll ? anchor : anchor - h, c.w - 2, h], rad: 4, c: c.tapColor });
+  const r = [c.x + 1, s.upscroll ? anchor : anchor - h, c.w - 2, h];
+  out.push({ t: "rrect", r, rad: 4, c: c.tapColor });
+  hits.push({ part: "note", c: column, r });
 }
 
 // whole pixels, two half-covered rows over each other show as a seam at every join. A body cut to a
@@ -208,7 +214,7 @@ function skinTiles(top, bottom, rows, scale, full = rows) {
   return tiles;
 }
 
-function skinHold(s, column, headY, tailY, time, out) {
+function skinHold(s, column, headY, tailY, time, out, hits = []) {
   const c = s.columns[column];
   const up = s.upscroll;
   const { x, w } = c;
@@ -255,14 +261,17 @@ function skinHold(s, column, headY, tailY, time, out) {
     } else {
       out.push({ t: "fill", r: [x + w * 0.16, visibleTop, w * 0.68, visibleBottom - visibleTop], c: s.bodyColor, a: 0.9 });
     }
+    hits.push({ part: "body", c: column, r: [x, visibleTop, w, visibleBottom - visibleTop] });
   }
   if (tail && tailH > 0) {
     // lazer masks the hold at the head's centre
     const clip = s.lazerBodies ? (up ? [x, headSide, w, s.height - headSide] : [x, 0, w, headSide]) : null;
     out.push({ t: "img", s: tail.s, src: [0, 0, ...s.sprites[tail.s].slice(0, 2)], dst: [x, tailTop, w, tailH], flip: up ? null : tailTop * 2 + tailH, clip });
+    hits.push({ part: "tail", c: column, r: [x, tailTop, w, tailH] });
   }
   if (head) out.push({ t: "img", s: head.s, src: [0, 0, ...s.sprites[head.s].slice(0, 2)], dst: [x, headTop, w, headH], flip: up ? headTop * 2 + headH : null });
   else out.push({ t: "rrect", r: [x + 1, headTop, w - 2, headH], rad: 4, c: c.headColor });
+  hits.push({ part: "head", c: column, r: [x, headTop, w, headH] });
 }
 
 // k is screen pixels per scene unit
@@ -278,13 +287,17 @@ function skinLayers(live) {
     return canvas;
   };
   live.layers = { base: layer(s.base), hint: layer(s.hint), line: layer(s.line), over: layer(s.over), top: layer(s.top) };
+  live.keyBoxes = s.columns.map((c) => skinOpsBox(c.keyUp));
 }
 
 function skinDraw(live, holds, taps, pressed) {
   const { scene: s, images, ctx, layers, k } = live;
   const notes = [];
-  for (const h of holds) skinHold(s, h.c, h.head, h.tail, h.t, notes);
-  for (const t of taps) skinTap(s, t.c, t.y, t.t, notes);
+  const hits = [];
+  for (const h of holds) skinHold(s, h.c, h.head, h.tail, h.t, notes, hits);
+  for (const t of taps) skinTap(s, t.c, t.y, t.t, notes, hits);
+  const keyHits = (live.keyBoxes ?? []).flatMap((r, c) => (r ? [{ part: pressed[c] ? "keyDown" : "key", c, r }] : []));
+  live.hits = s.keysUnderNotes ? [...keyHits, ...hits] : [...hits, ...keyHits];
   const keys = () => s.columns.forEach((c, i) => skinOps(ctx, pressed[i] ? c.keyDown : c.keyUp, images));
   const stack = (layer) => ctx.drawImage(layer, 0, 0, s.width, s.height);
   ctx.setTransform(k, 0, 0, k, 0, 0);
@@ -300,6 +313,7 @@ function skinDraw(live, holds, taps, pressed) {
   skinSidePictures(ctx);
   s.columns.forEach((c, i) => pressed[i] && skinOps(ctx, c.lighting, images));
   stack(layers.top);
+  skinPickMarks(ctx);
   skinSideMarks(ctx);
 }
 
@@ -537,7 +551,7 @@ function skinTick(page, live, at) {
     requestAnimationFrame((t) => skinTick(page, live, t));
     return;
   }
-  if (page.playing && live.last != null) live.now += Math.min(at - live.last, 100);
+  if (page.playing && !page.holdStill && live.last != null) live.now += Math.min(at - live.last, 100);
   live.last = at;
   live.frames = (live.frames ?? 0) + 1;
   live.fpsFrom ??= at;
@@ -592,8 +606,9 @@ function skinEdit(page) {
 function skinFresh() {
   return {
     cut: null, fade: null, round: null, gap: null, colors: { notes: [], heads: [], bodies: [], tails: [] },
-    parts: { notes: true, heads: true, bodies: true, tails: true }, picks: [],
-    swap: {}, swapPart: "note", swapCols: [],
+    // what Colors and Parts work on, see skin-pick.js
+    sel: [],
+    swap: {},
     // skin.ini's values, null keeping the skin's
     hit: null, line: null, start: null, score: null, combo: null, colWidth: null, colSpacing: null,
     // how far up the receptors' and StageBottom's art move in their images, in 480ths
@@ -710,11 +725,14 @@ const skinCutText = (cuts) => {
 function skinRestored(state) {
   const e = { ...skinFresh(), ...state };
   if (Array.isArray(e.colors)) e.colors = Object.fromEntries(SKIN_PARTS.map(([p]) => [p, e.parts?.[p] === false ? [] : [...e.colors]]));
+  // what was picked before picks were parts of columns
+  for (const k of ["picks", "parts", "swapPart", "swapCols"]) delete e[k];
+  e.sel = [];
   return e;
 }
 
 // which columns and parts are picked isn't an edit, going back leaves it as it is
-const SKIN_PICKS = ["picks", "parts", "swapPart", "swapCols", "sideWhich", "sideAt", "sideAlso"];
+const SKIN_PICKS = ["sel", "sideWhich", "sideAt", "sideAlso"];
 const SKIN_HISTORY_KEPT = 100;
 
 const skinHistory = (page) => ((page.history ??= {})[page.keys] ??= { undo: [], redo: [] });
@@ -1023,68 +1041,40 @@ function skinWheelNode(page, key, value, commit) {
 function skinColours(page) {
   const e = skinEdit(page);
   const keys = page.keys;
+  const picks = skinPicked(e).filter((p) => SKIN_COLOR_OF[p.part]);
   const layout = (c) => (keys % 2 === 1 && c === Math.floor(keys / 2) ? "S" : (c < keys / 2 ? c : keys - 1 - c) % 2 === 0 ? "1" : "2");
-  const on = SKIN_PARTS.map(([p]) => p).filter((p) => e.parts[p]);
+  // the presets go on the picked parts' rows, every part's with nothing picked
+  const rows = picks.length ? [...new Set(picks.map((p) => SKIN_COLOR_OF[p.part]))] : SKIN_PARTS.map(([p]) => p);
   const preset = (pick) => skinChange(page, (x) => {
-    for (const p of on) x.colors[p] = Array.from({ length: keys }, (_, c) => pick(c, x.colors[p]));
+    for (const p of rows) x.colors[p] = Array.from({ length: keys }, (_, c) => pick(c, x.colors[p]));
   });
   const paint = (color) => skinChange(page, (x) => {
-    for (const p of on) {
-      if (x.picks.length) for (const c of x.picks) x.colors[p][c] = color;
-      else x.colors[p] = Array(keys).fill(color);
-    }
+    for (const p of picks) x.colors[SKIN_COLOR_OF[p.part]][p.c] = color;
   });
-  // the parts on show their colors, side by side where they differ
-  const shown = (c) => {
-    const colors = on.map((p) => e.colors[p][c] ?? null);
-    if (colors.every((x) => x === colors[0])) return colors[0];
-    return `linear-gradient(90deg, ${colors.map((x, i) => `${x ?? "transparent"} ${(i / colors.length) * 100}% ${((i + 1) / colors.length) * 100}%`).join(", ")})`;
-  };
+  const first = picks[0];
+  const shown = first && (e.colors[SKIN_COLOR_OF[first.part]][first.c] ?? skinPartColour(page, first.c, SKIN_COLOR_OF[first.part]));
   return part("skin-colours", null,
-    el("p", { class: "caption" }, !on.length ? "Pick what the color goes on below."
-      : e.picks.length ? `Column ${e.picks.map((c) => c + 1).join(", ")}. Unpick them all for every column.` : "A color goes on every column, or pick columns first."),
-    el("div", { class: "skin-swatches", "data-drag": "columns" }, Array.from({ length: keys }, (_, c) => el("button", {
-      class: `skin-swatch${e.picks.includes(c) ? " on" : ""}${shown(c) ? "" : " none"}`,
-      style: shown(c) ? `--swatch: ${shown(c)}` : "",
-      title: `Column ${c + 1}`,
-      "aria-pressed": String(e.picks.includes(c)),
-      onclick: () => {
-        e.picks = e.picks.includes(c) ? e.picks.filter((x) => x !== c) : [...e.picks, c].sort((a, b) => a - b);
-        render();
-      },
-    }, c + 1))),
-    (() => {
-      const first = on[0];
-      const col = e.picks[0] ?? Math.max(0, first ? e.colors[first].findIndex(Boolean) : 0);
-      return skinWheelNode(page, "colours", (first && (e.colors[first][col] ?? skinPartColour(page, col, first))) ?? "#ffffff", paint);
-    })(),
-    el("div", { class: "skin-swatches palette" },
-      SKIN_PALETTE.map((color) => el("button", { class: "skin-swatch", style: `--swatch: ${color}`, title: color, onclick: () => paint(color) })),
-      el("button", { class: "skin-swatch none", title: "The skin's own", onclick: () => paint(null) }, "–")),
-    el("div", { class: "skin-tools" },
-      el("span", { class: "skin-label" }, "Goes on"),
-      el("div", { class: "segs", title: "What the color goes on", "data-drag": "parts" }, SKIN_PARTS.map(([key, text]) => el("button", {
-        class: `seg${e.parts[key] ? " on" : ""}`,
-        "aria-pressed": String(e.parts[key]),
-        onclick: () => {
-          e.parts[key] = !e.parts[key];
-          render();
-        },
-      }, text)))),
+    el("p", { class: "caption" }, "Click a note in the preview, or drag a box over some, to pick what to color. Shift adds more."),
+    skinPickTools(page, SKIN_NOTE_PARTS),
+    skinPickGrid(page, SKIN_NOTE_PARTS),
+    el("div", { class: `skin-paint${picks.length ? "" : " off"}` },
+      skinWheelNode(page, "colours", shown ?? "#ffffff", paint),
+      el("div", { class: "skin-swatches palette" },
+        SKIN_PALETTE.map((color) => el("button", { class: "skin-swatch", style: `--swatch: ${color}`, title: color, onclick: () => paint(color) })),
+        el("button", { class: "skin-swatch none", title: "The skin's own", onclick: () => paint(null) }, "–"))),
     el("div", { class: "skin-tools" },
       el("div", { class: "segs" },
-        el("button", { class: "seg", title: "The right half takes the left half's colors", onclick: () => preset((c, colors) => colors[c < keys / 2 ? c : keys - 1 - c] ?? null) }, "Mirror the left"),
-        el("button", { class: "seg", title: "White and blue, gold in the middle", onclick: () => preset((c) => SKIN_CLASSIC[layout(c)]) }, "Classic"),
-        el("button", { class: "seg", disabled: !on.some((p) => e.colors[p].some(Boolean)), onclick: () => preset(() => null) }, "Clear all"))));
+        el("button", { class: "seg", title: "The right half takes the left half's colors, mirrored", onclick: () => preset((c, colors) => colors[c < keys / 2 ? c : keys - 1 - c] ?? null) }, "Copy left half to right"),
+        el("button", { class: "seg", title: "osu!'s default colors, gold in the middle on odd keymodes", onclick: () => preset((c) => SKIN_CLASSIC[layout(c)]) }, "White and blue"),
+        el("button", { class: "seg", disabled: !SKIN_PARTS.some(([p]) => e.colors[p].some(Boolean)), onclick: () => skinChange(page, (x) => {
+          for (const [p] of SKIN_PARTS) x.colors[p] = [];
+        }) }, "Clear all"))));
 }
 
 // combo and score digits, which a skin.ini's fonts point at, not its notes or keys
 const SKIN_FONT = /^(?:[0-9]|comma|dot|percent|x)$/i;
 // images that suit a part besides its own: a head is often the note, a tail cap often the head
 const SKIN_NEAR_ROLES = { note: ["head"], head: ["note"], body: [], tail: ["head", "note"], key: ["keyDown"], keyDown: ["key"] };
-// in two groups, so the receptors go under the notes in a narrow window
-const SKIN_SWAP_NOTES = [["note", "Notes"], ["head", "LN Heads"], ["body", "LN Bodies"], ["tail", "LN Tails"]];
-const SKIN_SWAP_KEYS = [["key", "Receptors"], ["keyDown", "Pressed"]];
 
 async function loadSkinImages(page) {
   if (page.images?.stamp === page.stamp) return;
@@ -1102,16 +1092,18 @@ const skinSame = (a, b) => a != null && b != null && a.toLowerCase().replaceAll(
 
 function skinParts(page) {
   const e = skinEdit(page);
-  const keys = page.keys;
   const list = page.images?.list;
-  const cols = e.swapCols.length ? e.swapCols : [...Array(keys).keys()];
-  const which = e.swapPart;
+  const picks = skinPicked(e);
+  const kinds = [...new Set(picks.map((p) => p.part))];
+  const inUse = (p) => skinInUse(page, e, p.part, p.c);
   const pick = (path) => skinChange(page, (x) => {
-    x.swap[which] ??= [];
-    for (const c of cols) x.swap[which][c] = path;
+    for (const p of picks) {
+      x.swap[p.part] ??= [];
+      x.swap[p.part][p.c] = path;
+    }
   });
   const tile = (img) => el("button", {
-    class: `skin-thumb${cols.every((c) => skinSame(skinInUse(page, e, which, c), img.path)) ? " on" : ""}`,
+    class: `skin-thumb${picks.length && picks.every((p) => skinSame(inUse(p), img.path)) ? " on" : ""}`,
     title: `${img.path}${img.frames > 1 ? `, ${img.frames} frames` : ""}`,
     onclick: () => pick(img.path),
   }, el("img", {
@@ -1129,6 +1121,7 @@ function skinParts(page) {
   // blank art only means something as a tail, an invisible one, and one of it is enough
   page.blanks ??= new Set();
   let blankShown = false;
+  const used = (img) => picks.some((p) => skinSame(inUse(p), img.path));
   // a font is ten digit frames, -0 to -9, often with -x, -comma, -dot or -percent beside it
   const fonts = new Set((list ?? []).flatMap((img) => {
     const m = /^(.*)-(?:x|comma|dot|percent)$/i.exec(img.path);
@@ -1136,15 +1129,14 @@ function skinParts(page) {
   }));
   const shown = (img) => {
     const font = fonts.has(img.path.toLowerCase()) || img.frames === 10 || SKIN_FONT.test(img.path.split(/[\\/]/).pop());
-    if (font && !cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path))) return false;
+    if (font && !used(img)) return false;
     if (!page.blanks.has(img.path)) return true;
-    if (which !== "tail" || blankShown) return cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path));
+    if (!kinds.includes("tail") || blankShown) return used(img);
     return (blankShown = true);
   };
-  const near = SKIN_NEAR_ROLES[which];
-  const fits = (img) => img.roles?.some((r) => r === which || near.includes(r))
-    || cols.some((c) => skinSame(skinInUse(page, e, which, c), img.path))
-    || (which === "tail" && page.blanks.has(img.path));
+  const fits = (img) => img.roles?.some((r) => kinds.some((k) => r === k || SKIN_NEAR_ROLES[k].includes(r)))
+    || used(img)
+    || (kinds.includes("tail") && page.blanks.has(img.path));
   const visible = (list ?? []).filter(shown);
   const likely = visible.filter(fits);
   const rest = likely.length ? visible.filter((img) => !fits(img)) : [];
@@ -1156,66 +1148,56 @@ function skinParts(page) {
     }
     return folders.map((f) => [f.name && el("p", { class: "skin-folder" }, f.name), f.images.map(tile)]);
   };
-  const own = cols.every((c) => !e.swap[which]?.[c]);
+  const own = picks.every((p) => !e.swap[p.part]?.[p.c]);
   return part("skin-parts", null,
-    el("div", { class: "skin-tools skin-part-pick" },
-      [[SKIN_SWAP_NOTES, "Part"], [SKIN_SWAP_KEYS, "Receptors, and pressed"]].map(([parts, label]) =>
-        segs(parts, which, (p) => { e.swapPart = p; page.otherImages = false; render(); }, label))),
-    el("p", { class: "caption" }, e.swapCols.length ? `Column ${e.swapCols.map((c) => c + 1).join(", ")}.` : "Every column, or pick columns."),
-    el("div", { class: "skin-swatches", "data-drag": "columns" }, Array.from({ length: keys }, (_, c) => el("button", {
-      class: `skin-swatch none${e.swapCols.includes(c) ? " on" : ""}`,
-      title: `Column ${c + 1}`,
-      "aria-pressed": String(e.swapCols.includes(c)),
-      onclick: () => {
-        e.swapCols = e.swapCols.includes(c) ? e.swapCols.filter((x) => x !== c) : [...e.swapCols, c].sort((a, b) => a - b);
-        render();
-      },
-    }, c + 1))),
-    skinShape(page, which, cols),
-    !list ? el("p", { class: "caption" }, "Finding the skin's images…") : el("div", { class: "skin-thumbs", onwheel: skinListWheel },
+    el("p", { class: "caption" }, "Click a part in the preview, or drag a box over some, to pick what to change. Shift adds more."),
+    skinPickTools(page, SKIN_PICK_PARTS),
+    skinPickGrid(page, SKIN_PICK_PARTS),
+    picks.length > 0 && skinShape(page, picks),
+    picks.length > 0 && (!list ? el("p", { class: "caption" }, "Finding the skin's images…") : el("div", { class: "skin-thumbs", onwheel: skinListWheel },
       el("button", { class: `skin-thumb own${own ? " on" : ""}`, title: "The skin's own", onclick: () => pick(null) }, "The skin's own"),
       grouped(likely.length ? likely : visible),
       rest.length > 0 && el("button", { class: "link skin-others", onclick: () => { page.otherImages = !page.otherImages; render(); } },
         `${page.otherImages ? "Hide" : "Show"} other images (${rest.length})`),
-      page.otherImages && grouped(rest)));
+      page.otherImages && grouped(rest))));
 }
 
 const SKIN_WIDTH_STEP = 5;
 const SKIN_OUTLINE_COLORS = ["#ffffff", "#000000", ...SKIN_PALETTE.slice(1)];
 
-function skinShape(page, which, cols) {
+function skinShape(page, picks) {
   const e = skinEdit(page);
-  const shapes = e.shapes?.[which] ?? [];
-  const first = shapes[cols[0]] ?? {};
-  const same = cols.every((c) => JSON.stringify(shapes[c] ?? {}) === JSON.stringify(first));
+  const shapeOf = (p) => e.shapes?.[p.part]?.[p.c] ?? {};
+  const first = shapeOf(picks[0]);
+  const same = picks.every((p) => JSON.stringify(shapeOf(p)) === JSON.stringify(first));
   const set = (patch) => skinChange(page, (x) => {
     x.shapes ??= {};
-    x.shapes[which] ??= [];
-    for (const c of cols) {
-      const s = { ...(x.shapes[which][c] ?? {}), ...patch };
-      x.shapes[which][c] = s.width == null && !s.outline && !s.rim ? null : s;
+    for (const p of picks) {
+      x.shapes[p.part] ??= [];
+      const s = { ...(x.shapes[p.part][p.c] ?? {}), ...patch };
+      x.shapes[p.part][p.c] = s.width == null && !s.outline && !s.rim ? null : s;
     }
   });
   const width = first.width ?? 100;
   const setWidth = (v) => set({ width: v === 100 ? null : Math.min(200, Math.max(20, v)) });
   const outline = first.outline;
-  const rim = [...new Set(cols.map((c) => skinInUse(page, e, which, c)).filter(Boolean))]
-    .map((path) => skinRim(page, path, which === "body")?.rim).find(Boolean);
+  const rim = picks.map((p) => [skinInUse(page, e, p.part, p.c), p.part === "body"]).filter(([path]) => path)
+    .map(([path, body]) => skinRim(page, path, body)?.rim).find(Boolean);
   return [
     el("div", { class: "skin-tools skin-part-pick" },
       el("span", { class: "skin-label" }, "Width"),
       el("div", { class: "segs", title: "How wide the art sits in its column" },
         el("button", { class: "seg", disabled: width <= 20, "aria-label": "Narrower", onclick: () => setWidth(width - SKIN_WIDTH_STEP) }, "−"),
-        skinField(page, `Width ${which}`, same ? width : null, 20, 200, setWidth),
+        skinField(page, "Shape width", same ? width : null, 20, 200, setWidth),
         el("span", { class: "skin-unit" }, "%"),
         el("button", { class: "seg", disabled: width >= 200, "aria-label": "Wider", onclick: () => setWidth(width + SKIN_WIDTH_STEP) }, "+")),
-      cols.some((c) => shapes[c]?.width != null) && el("button", { class: "link", onclick: () => set({ width: null }) }, "Keep the skin's")),
+      picks.some((p) => shapeOf(p).width != null) && el("button", { class: "link", onclick: () => set({ width: null }) }, "Keep the skin's")),
     el("div", { class: "skin-tools skin-part-pick" },
       el("span", { class: "skin-label" }, "Outline"),
       segs([["off", "None"], ["on", "Outline"]], outline ? "on" : "off", (v) => set({ outline: v === "on" ? { size: 2, color: "#ffffff" } : null }), "Outline"),
       outline && el("div", { class: "segs", title: "How thick the outline is, in ColumnWidth's units" },
         el("button", { class: "seg", disabled: outline.size <= 1, "aria-label": "Thinner", onclick: () => set({ outline: { ...outline, size: outline.size - 1 } }) }, "−"),
-        skinField(page, `Outline ${which}`, same ? outline.size : null, 1, 20, (v) => set({ outline: { ...outline, size: v } })),
+        skinField(page, "Shape outline", same ? outline.size : null, 1, 20, (v) => set({ outline: { ...outline, size: v } })),
         el("button", { class: "seg", disabled: outline.size >= 20, "aria-label": "Thicker", onclick: () => set({ outline: { ...outline, size: outline.size + 1 } }) }, "+")),
       outline && segs([["in", "Inside"], ["out", "Outside"]], outline.outside ? "out" : "in",
         (v) => set({ outline: { ...outline, outside: v === "out" } }), "Inside the art's edge, or around it in the image's clear space")),

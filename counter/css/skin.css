@@ -631,3 +631,62 @@
 .skin-side-menu .cancel {
   color: var(--osu-f1);
 }
+
+/* parts by columns, see skin-pick.js */
+.skin-grid {
+  display: grid;
+  grid-template-columns: auto repeat(var(--cols), minmax(0, 30px));
+  gap: 4px;
+  align-items: center;
+  margin: 4px 0 12px;
+}
+
+.skin-grid-row,
+.skin-grid-col {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--osu-f1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.skin-grid-row {
+  padding-right: 6px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.skin-grid-row:hover,
+.skin-grid-col:hover {
+  color: var(--ink);
+}
+
+.skin-cell {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid var(--osu-b3);
+  border-radius: 7px;
+  background: var(--art, var(--swatch, var(--osu-b4)));
+  background-color: var(--swatch, #000);
+  cursor: pointer;
+}
+
+.skin-cell.none {
+  background: var(--osu-b4);
+}
+
+.skin-cell.on {
+  border-color: var(--osu-b5);
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.skin-pick-tools {
+  margin-bottom: 4px;
+}
+
+.skin-paint.off {
+  opacity: 0.4;
+  pointer-events: none;
+}
