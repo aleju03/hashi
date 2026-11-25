@@ -341,10 +341,16 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
     chart.source = Some(chart_file.to_string_lossy().into_owned());
     log!("chart {} matched", chart_file.file_name().unwrap_or_default().to_string_lossy());
 
+    // tosu's mods can be off, a lazer play's speed is only in the replay
+    let mods = osr::parse_replay(&bytes).ok().map(|r| crate::analysis::replay_mods(&r, lazer));
     update(b, id, |i| {
         i.replay = Some(replay);
         if let Some(name) = &header.player_name {
             i.play.player_name = name.clone().into();
+        }
+        if let Some((names, rate)) = mods {
+            i.play.mods = names;
+            i.play.rate = rate;
         }
         i.chart = Some(chart);
         i.phase = if i.practice {

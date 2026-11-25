@@ -23,6 +23,15 @@ fn stable_mods(bits: i64) -> Vec<String> {
     mods.into_iter().map(String::from).collect()
 }
 
+// what a replay was played with, the speed only when it's a custom one
+pub(crate) fn replay_mods(replay: &crate::osr::Replay, lazer: bool) -> (String, Option<f64>) {
+    let list = replay.lazer.as_ref().filter(|_| lazer).and_then(|l| l.get("mods")).and_then(Value::as_array);
+    let Some(list) = list else { return (stable_mods(replay.mods).concat(), None) };
+    let names: String = list.iter().map(acronym).collect();
+    let default = if names.contains("DT") || names.contains("NC") { 1.5 } else if names.contains("HT") || names.contains("DC") { 0.75 } else { 1.0 };
+    (names, lazer_rate(list).filter(|r| (r - default).abs() > 1e-9))
+}
+
 // the one speed a lazer play ran at, None when it changes during the play
 fn lazer_rate(mods: &[Value]) -> Option<f64> {
     let rate: Vec<&Value> = mods.iter().filter(|m| ["DT", "NC", "HT", "DC", "WU", "WD", "AS"].contains(&acronym(m))).collect();

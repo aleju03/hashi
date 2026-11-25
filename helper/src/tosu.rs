@@ -525,6 +525,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
                 chart_file: play.chart_file.clone(),
                 audio_file: play.audio_file.clone(),
                 mods: mods_name(&mods),
+                rate: None,
                 player_name: or(g("playerName"), play.player_name.clone()),
                 score: g("score"),
                 accuracy: g("accuracy"),

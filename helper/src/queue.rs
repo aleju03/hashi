@@ -611,6 +611,7 @@ pub(crate) fn public_item(item: &Item, origin: &str, username: Option<&str>) -> 
             "version": item.play.version,
             "keys": item.play.keys,
             "mods": item.play.mods,
+            "rate": item.play.rate,
             "score": item.play.score,
             "accuracy": item.play.accuracy,
         },

@@ -178,6 +178,9 @@ pub struct Play {
     pub audio_file: Option<String>,
     #[serde(default)]
     pub mods: String,
+    // a lazer speed mod's custom speed, from the replay
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
     #[serde(default)]
     pub player_name: Value,
     #[serde(default)]

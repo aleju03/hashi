@@ -145,7 +145,7 @@ function playRow(p) {
       p.play.artist && el("span", { class: "artist" }, p.play.artist),
       el("div", { class: "facts" },
         diff && el("span", {}, diff),
-        mods.length > 0 && el("span", { class: "mods" }, mods.map(modBadge)),
+        mods.length > 0 && el("span", { class: "mods" }, mods.map((m) => modBadge(m, { rate: p.play.rate }))),
         acc && el("span", {}, acc)),
       (status.detail || removable) && el("span", { class: "detail" }, status.detail && el("span", {}, status.detail),
         holdable && el("button", { class: "link act", disabled: slow, onclick: play(p.onHold ? "send" : "hold") }, p.onHold ? "Send" : "Hold"),
