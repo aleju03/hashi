@@ -4,7 +4,7 @@
 use std::io::{BufRead, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -14,8 +14,14 @@ use crate::background::TELL;
 
 const MAIN: &str = "main";
 const OPENING: &str = "opening";
+const OVERLAY: &str = "overlay";
 
 static HELPER_PORT: OnceLock<u16> = OnceLock::new();
+static COUNTER_URL: OnceLock<String> = OnceLock::new();
+static OVERLAY_AT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
+// the card's size in the page's pixels, which its zoom makes bigger on screen
+static OVERLAY_SIZE: Mutex<(f64, f64)> = Mutex::new((320.0, 90.0));
+static OVERLAY_ZOOM: Mutex<f64> = Mutex::new(1.0);
 // windows: the background goes first, this one has to stay until the installer is started
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
@@ -25,6 +31,8 @@ struct Args {
     place: Option<Place>,
     opening: bool,
     on_top: bool,
+    overlay: bool,
+    overlay_at: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -54,6 +62,11 @@ fn parse(args: &[String]) -> Args {
         place,
         opening: args.iter().any(|a| a == "--opening"),
         on_top: args.iter().any(|a| a == "--on-top"),
+        overlay: args.iter().any(|a| a == "--overlay"),
+        overlay_at: value("overlay-at").and_then(|p| {
+            let (x, y) = p.split_once(',')?;
+            Some((x.parse().ok()?, y.parse().ok()?))
+        }),
     }
 }
 
@@ -68,18 +81,39 @@ pub fn run(args: &[String]) {
     if let Some(port) = port_of(&args.url) {
         let _ = HELPER_PORT.set(port);
     }
+    let _ = COUNTER_URL.set(args.url.clone());
+    *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = args.overlay_at;
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let handle = app.handle().clone();
-            build(&handle, &args, !args.opening)?;
-            if args.opening {
+            build(&handle, &args, !args.opening && !args.overlay)?;
+            if args.overlay {
+                overlay(&handle, true);
+            } else if args.opening {
                 opening(&handle, &args.url);
             }
             std::thread::spawn(move || commands(handle));
             Ok(())
         })
         .on_window_event(move |w, e| {
+            if w.label() == OVERLAY {
+                match e {
+                    // alt+f4 and the like put the window back
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        overlay(w.app_handle(), false);
+                    }
+                    WindowEvent::Moved(at) if !cfg!(target_os = "linux") || std::env::var_os("WAYLAND_DISPLAY").is_none() => {
+                        let Ok(scale) = w.scale_factor() else { return };
+                        let at = at.to_logical::<f64>(scale);
+                        *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some((at.x, at.y));
+                        tell(&format!("overlay-place {},{}", at.x, at.y));
+                    }
+                    _ => {}
+                }
+                return;
+            }
             if w.label() != MAIN {
                 return;
             }
@@ -123,13 +157,7 @@ fn build(app: &AppHandle, args: &Args, visible: bool) -> tauri::Result<()> {
         .background_color(backdrop(args.theme))
         // the page takes dropped files itself, a picture onto the skin preview
         .disable_drag_drop_handler()
-        // links that would open a new window (target=_blank) go to the browser instead
-        .on_new_window(|url, _| {
-            if matches!(url.scheme(), "http" | "https") {
-                mania_bridge::open_url(url.as_str());
-            }
-            tauri::webview::NewWindowResponse::Deny
-        });
+        .on_new_window(to_browser);
     if let Some(p) = args.place {
         window = window.position(p.x, p.y).inner_size(p.width, p.height).maximized(p.maximized);
     }
@@ -137,6 +165,192 @@ fn build(app: &AppHandle, args: &Args, visible: bool) -> tauri::Result<()> {
     #[cfg(windows)]
     trim_context_menu(&_window);
     Ok(())
+}
+
+// links that would open a new window (target=_blank) go to the browser instead
+fn to_browser(url: tauri::Url, _: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
+    if matches!(url.scheme(), "http" | "https") {
+        mania_bridge::open_url(url.as_str());
+    }
+    tauri::webview::NewWindowResponse::Deny
+}
+
+// a small see-through card that stays over the game, in the main window's place while it's on
+fn overlay(app: &AppHandle, on: bool) {
+    if !on {
+        return show(app);
+    }
+    let main = app.get_webview_window(MAIN);
+    if let Some(w) = app.get_webview_window(OPENING) {
+        let _ = w.destroy();
+    }
+    if app.get_webview_window(OVERLAY).is_none() {
+        let url = format!("{}?overlay", COUNTER_URL.get().map_or("", String::as_str));
+        let Ok(url) = url.parse() else { return };
+        let (width, height) = overlay_size();
+        let mut window = WebviewWindowBuilder::new(app, OVERLAY, WebviewUrl::External(url))
+            .title("Hashi overlay")
+            .inner_size(width, height)
+            .resizable(!hyprland())
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            // it comes up over the game without taking the keyboard from it
+            .focused(false)
+            .disable_drag_drop_handler()
+            .on_new_window(to_browser);
+        let at = *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner());
+        let near = main.as_ref().and_then(|w| Some(w.outer_position().ok()?.to_logical::<f64>(w.scale_factor().ok()?)));
+        if let Some((x, y)) = at.or(near.map(|p| (p.x, p.y))) {
+            window = window.position(x, y);
+        }
+        if let Err(e) = window.build() {
+            eprintln!("no overlay window: {e}");
+            return show(app);
+        }
+        #[cfg(target_os = "linux")]
+        if hyprland() {
+            hypr::settle(app.clone(), at);
+        }
+    }
+    if let Some(w) = main {
+        let _ = w.hide();
+    }
+}
+
+// on screen, zoom and all
+fn overlay_size() -> (f64, f64) {
+    let (w, h) = *OVERLAY_SIZE.lock().unwrap_or_else(|e| e.into_inner());
+    let zoom = *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner());
+    ((w * zoom).round(), (h * zoom).round())
+}
+
+fn size_overlay(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    if hyprland() {
+        return hypr::resize();
+    }
+    if let Some(w) = app.get_webview_window(OVERLAY) {
+        let (width, height) = overlay_size();
+        let _ = w.set_size(tauri::LogicalSize::new(width, height));
+    }
+}
+
+fn hyprland() -> bool {
+    cfg!(target_os = "linux") && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|s| !s.is_empty())
+}
+
+// hyprland floats a window at half the screen whatever size it asks for, ignores where it asks to
+// be, and draws its own border around it. hyprctl does all of that instead. not pinned to every
+// workspace: dragging a pinned window crashed hyprland 0.56 in its snapping
+#[cfg(target_os = "linux")]
+mod hypr {
+    use std::process::Command;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    use tauri::{AppHandle, Manager};
+
+    use super::{overlay_size, OVERLAY, OVERLAY_ZOOM};
+
+    static ADDRESS: Mutex<Option<String>> = Mutex::new(None);
+    // blur behind it, but not behind a card with next to no background
+    static BLUR: Mutex<bool> = Mutex::new(true);
+
+    // its own corners, so the blur and the window stop where the card does
+    fn rounding(a: &str) -> String {
+        let zoom = *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner());
+        format!("dispatch setprop {a} rounding {}", (14.0 * zoom).round())
+    }
+
+    fn blur(a: &str) -> String {
+        format!("dispatch setprop {a} no_blur {}", u8::from(!*BLUR.lock().unwrap_or_else(|e| e.into_inner())))
+    }
+
+    fn hyprctl(args: &[&str]) -> Option<String> {
+        let out = Command::new("hyprctl").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    // this process's window with that title: its address and where it is
+    fn find(title: &str) -> Option<(String, (f64, f64))> {
+        let clients: serde_json::Value = serde_json::from_str(&hyprctl(&["clients", "-j"])?).ok()?;
+        clients.as_array()?.iter().find_map(|c| {
+            if c["title"] != title || c["pid"].as_u64() != Some(u64::from(std::process::id())) {
+                return None;
+            }
+            let at = (c["at"][0].as_f64()?, c["at"][1].as_f64()?);
+            Some((c["address"].as_str()?.to_string(), at))
+        })
+    }
+
+    // once it's mapped: floating, sized, and where it was left or where the window was
+    pub fn settle(app: AppHandle, at: Option<(f64, f64)>) {
+        *ADDRESS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        let near = find("Hashi").map(|(_, at)| at);
+        std::thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(3);
+            let address = loop {
+                if let Some((address, _)) = find("Hashi overlay") {
+                    break address;
+                }
+                if Instant::now() > until {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            };
+            // a window that can't be resized gets floated, and then can't be sized
+            let (done, resizable) = std::sync::mpsc::channel();
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(w) = handle.get_webview_window(OVERLAY) {
+                    let _ = w.set_resizable(true);
+                }
+                let _ = done.send(());
+            });
+            let _ = resizable.recv_timeout(Duration::from_secs(1));
+            let (width, height) = overlay_size();
+            let a = format!("address:{address}");
+            // the border first, or taking it away moves the window by its width
+            let mut batch = vec![
+                format!("dispatch setprop {a} border_size 0"),
+                format!("dispatch setprop {a} no_shadow 1"),
+                rounding(&a),
+                blur(&a),
+                format!("dispatch resizewindowpixel exact {width} {height},{a}"),
+            ];
+            if let Some((x, y)) = at.or(near) {
+                batch.push(format!("dispatch movewindowpixel exact {x} {y},{a}"));
+            }
+            *ADDRESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(address);
+            hyprctl(&["--batch", &batch.join(" ; ")]);
+        });
+    }
+
+    // it keeps a floating window's middle where it was, the card keeps its top
+    pub fn resize() {
+        if ADDRESS.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
+            return;
+        }
+        let (w, h) = overlay_size();
+        std::thread::spawn(move || {
+            let Some((address, (x, y))) = find("Hashi overlay") else { return };
+            let a = format!("address:{address}");
+            hyprctl(&["--batch", &format!("dispatch resizewindowpixel exact {w} {h},{a} ; dispatch movewindowpixel exact {x} {y},{a} ; {}", rounding(&a))]);
+        });
+    }
+
+    pub fn set_blur(on: bool) {
+        *BLUR.lock().unwrap_or_else(|e| e.into_inner()) = on;
+        let Some(address) = ADDRESS.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
+        std::thread::spawn(move || hyprctl(&["--batch", &blur(&format!("address:{address}"))]));
+    }
+
+    // its window never hears where it was moved to
+    pub fn place() -> Option<(f64, f64)> {
+        find("Hashi overlay").map(|(_, at)| at)
+    }
 }
 
 // webview2's right-click menu is a browser's, with back, refresh, save as, print and share. only
@@ -236,6 +450,14 @@ fn opened(app: &AppHandle) {
 }
 
 fn show(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(OVERLAY) {
+        #[cfg(target_os = "linux")]
+        if let Some((x, y)) = hyprland().then(hypr::place).flatten() {
+            *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some((x, y));
+            tell(&format!("overlay-place {x},{y}"));
+        }
+        let _ = w.destroy();
+    }
     if let Some(w) = app.get_webview_window(MAIN) {
         let _ = w.unminimize();
         let _ = w.show();
@@ -277,8 +499,40 @@ fn command(app: &AppHandle, line: &str) {
             }
         }
         "drag" => {
-            if let Some(w) = app.get_webview_window(MAIN) {
+            if let Some(w) = app.get_webview_window(OVERLAY).or_else(|| app.get_webview_window(MAIN)) {
                 let _ = w.start_dragging();
+            }
+        }
+        "overlay" => overlay(app, rest == "on"),
+        "resize" => {
+            if let Some(w) = app.get_webview_window(OVERLAY) {
+                let _ = w.as_ref().window().start_resize_dragging(tauri_runtime::ResizeDirection::SouthEast);
+            }
+        }
+        "overlay-size" => {
+            let Some((w, h)) = rest.split_once(' ').and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))) else { return };
+            *OVERLAY_SIZE.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
+            size_overlay(app);
+        }
+        "overlay-zoom" => {
+            let Ok(percent) = rest.parse::<f64>() else { return };
+            let zoom = percent / 100.0;
+            *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner()) = zoom;
+            if let Some(w) = app.get_webview_window(OVERLAY) {
+                let _ = w.set_zoom(zoom);
+            }
+            size_overlay(app);
+        }
+        "overlay-blur" => {
+            #[cfg(target_os = "linux")]
+            if hyprland() {
+                hypr::set_blur(rest == "on");
+            }
+        }
+        // while a map is played, clicks go to the game
+        "overlay-through" => {
+            if let Some(w) = app.get_webview_window(OVERLAY) {
+                let _ = w.set_ignore_cursor_events(rest == "on");
             }
         }
         "update" => {

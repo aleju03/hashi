@@ -198,3 +198,36 @@
 .strip:disabled {
   cursor: default;
 }
+
+.setting.stream-link {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.stream-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stream-url {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  margin-bottom: 3px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--osu-b4);
+  color: var(--osu-f1);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+  user-select: text;
+}
+
+.stream-url:focus {
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--accent);
+}

@@ -3038,6 +3038,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-updater",
+ "tauri-runtime",
  "tokio",
  "tray-icon",
  "webview2-com",

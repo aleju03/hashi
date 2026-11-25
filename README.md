@@ -79,6 +79,19 @@ the song cut to fit. It opens in osu! right away. Plays of it aren't sent.
 Closing the window quits the app. The hide to tray button keeps it running in the background using
 very little memory.
 
+The overlay button in the window's corner (or Overlay in the tray menu) turns the window into a small
+card that stays above the game, with the selected map's rating and dan. A play you just finished shows
+up big on it while it's submitted, then with its rank and dan. The podium turns it into the selected
+map's leaderboard. Drag it anywhere, and drag its corner to make it bigger or smaller. Its gear sets
+how see-through it is, whether it shows the map's background, and whether it stays, fades or hides
+while you play. Clicks go through it to the game while you play. Hovering over it shows the buttons to go
+back to the full window or hide it to the tray. The game has to run borderless or windowed for the
+card to show over it.
+
+To show the same card on stream, pick what it shows under Stream overlay in the settings and copy its
+link into OBS as a Browser Source. Its width sets how big the card is. It keeps working while Hashi
+is in the tray, and shows only what's for your viewers.
+
 The gear opens the settings, where you can choose whether to send your plays, share your live
 status on your profile, or both. You can also have Hashi open tosu, open on startup or start in
 the tray, and change the theme. Disconnect signs the app out and revokes its access.

@@ -1,6 +1,6 @@
 use tokio::runtime::Runtime;
 
-use crate::background::{hide, quit, show, toggle};
+use crate::background::{hide, overlay, quit, show, toggle};
 
 pub(crate) fn rgba(png: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     let mut decoder = png::Decoder::new(png);
@@ -59,7 +59,7 @@ mod imp {
 
         fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
             let item = |label: &str, run: fn()| ksni::menu::StandardItem { label: label.into(), activate: Box::new(move |_: &mut Self| run()), ..Default::default() }.into();
-            vec![item("Show", show), item("Hide to tray", hide), ksni::MenuItem::Separator, item("Quit", quit)]
+            vec![item("Show", show), item("Overlay", overlay), item("Hide to tray", hide), ksni::MenuItem::Separator, item("Quit", quit)]
         }
     }
 
@@ -100,6 +100,7 @@ mod imp {
         let menu = Menu::new();
         menu.append_items(&[
             &MenuItem::with_id("show", "Show", true, None),
+            &MenuItem::with_id("overlay", "Overlay", true, None),
             &MenuItem::with_id("hide", "Hide to tray", true, None),
             &PredefinedMenuItem::separator(),
             &MenuItem::with_id("quit", "Quit", true, None),
@@ -119,6 +120,7 @@ mod imp {
     pub fn start(_: &Runtime) -> bool {
         MenuEvent::set_event_handler(Some(|e: MenuEvent| match e.id.0.as_str() {
             "show" => show(),
+            "overlay" => overlay(),
             "hide" => hide(),
             "quit" => quit(),
             _ => {}

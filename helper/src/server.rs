@@ -18,7 +18,7 @@ use crate::{analysis, autostart, get_tosu, leaderboard, log, practice, presence,
 #[folder = "../counter/"]
 struct Counter;
 
-const WINDOW_ACTIONS: [&str; 7] = ["show", "hide", "minimize", "maximize", "close", "drag", "opened"];
+const WINDOW_ACTIONS: [&str; 8] = ["show", "hide", "minimize", "maximize", "close", "drag", "resize", "opened"];
 
 fn counter_type(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
@@ -151,9 +151,15 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             };
         }
         if let Some(id) = path.strip_prefix("/cover/") {
-            let item = b.st().queue.items.iter().find(|i| i.id == id).cloned();
-            let Some(item) = item else { return empty(404) };
-            let Some(file) = replays::cover_file(b, &item).await else { return empty(404) };
+            // /cover/selected?md5=: the selected map's, the md5 only keeps the browser from reusing another's
+            let file = if id == "selected" {
+                replays::selected_cover(b)
+            } else {
+                let item = b.st().queue.items.iter().find(|i| i.id == id).cloned();
+                let Some(item) = item else { return empty(404) };
+                replays::cover_file(b, &item).await
+            };
+            let Some(file) = file else { return empty(404) };
             let Ok(bytes) = crate::read_capped(&file, crate::MAX_IMAGE_BYTES).await else { return empty(404) };
             let Some(kind) = replays::image_type(&file).or_else(|| replays::sniff_image(&bytes)) else { return empty(404) };
             return Response::builder()
@@ -379,6 +385,22 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         if path == "/skin/live" {
             let state = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).find(|(k, _)| k == "state").map(|(_, v)| v.into_owned());
             return empty(if state.is_some_and(|s| crate::skin::set_live(b, &s)) { 204 } else { 400 });
+        }
+        // overlay/on|off, overlay-through/on|off (clicks go to the game), overlay-blur/on|off,
+        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>
+        if let Some((what, value)) = path.strip_prefix("/window/").and_then(|p| p.split_once('/')).filter(|(w, _)| w.starts_with("overlay")) {
+            let px = |n: &str, max: u16| n.parse::<u16>().ok().filter(|n| (1..=max).contains(n));
+            let ok = match what {
+                "overlay" | "overlay-through" | "overlay-blur" => matches!(value, "on" | "off"),
+                "overlay-size" => value.split_once('x').is_some_and(|(w, h)| px(w, 4000).is_some() && px(h, 4000).is_some()),
+                "overlay-zoom" => px(value, 400).is_some_and(|z| z >= 50),
+                _ => false,
+            };
+            if !ok {
+                return empty(400);
+            }
+            b.window_action(&format!("{what} {}", value.replace('x', " ")));
+            return empty(204);
         }
         if let Some(name) = path.strip_prefix("/window/") {
             if !WINDOW_ACTIONS.contains(&name) {

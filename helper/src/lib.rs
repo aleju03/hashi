@@ -275,7 +275,8 @@ fn regex_local(origin: &str) -> bool {
     (host == "localhost" || host == "127.0.0.1") && port_ok && !rest.contains('/')
 }
 
-// what the window wants from the helper: hide | minimize | close | drag | on-top on|off
+// what the window wants from the helper: hide | minimize | close | drag | resize | on-top on|off |
+// overlay on|off | overlay-through on|off | overlay-blur on|off | overlay-size <w> <h> | overlay-zoom <percent>
 pub type WindowHandler = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Default)]

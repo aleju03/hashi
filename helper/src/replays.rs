@@ -7,7 +7,7 @@ use md5::{Digest as _, Md5};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-use crate::types::{Blob, Item, ItemError};
+use crate::types::{Blob, Cover, Item, ItemError};
 use crate::{iso_from_ms, log, now_ms, osr, queue, Bridge, AUTOMATED_MODS, REPLAY_TICK_TOLERANCE_MS, REPLAY_WAIT_MS};
 
 // lazer saves the replay under its hash with no name, so look at what got written since the play
@@ -541,11 +541,25 @@ fn no_dots(rel: &str) -> bool {
     !rel.replace('\\', "/").split('/').any(|p| p == "..")
 }
 
+// the map selected in osu!'s background
+pub(crate) fn selected_cover(b: &Arc<Bridge>) -> Option<PathBuf> {
+    let cover = b.st().tosu.map_cover.clone()?;
+    if cover.lazer == Some(true) {
+        return lazer_cover(b, &cover);
+    }
+    let songs = &b.songs_dir();
+    found_image(songs, songs.join(cover.folder?.replace('\\', "/")).join(&cover.file))
+}
+
+fn lazer_cover(b: &Arc<Bridge>, cover: &Cover) -> Option<PathBuf> {
+    let root = b.st().tosu.lazer_files_dir.clone();
+    let file = root.join(&cover.file);
+    (no_dots(&cover.file) && inside(&root, &file)).then_some(file)
+}
+
 pub(crate) async fn cover_file(b: &Arc<Bridge>, item: &Item) -> Option<PathBuf> {
     if let Some(cover) = item.play.cover.as_ref().filter(|c| c.lazer == Some(true)) {
-        let root = b.st().tosu.lazer_files_dir.clone();
-        let file = root.join(&cover.file);
-        return (no_dots(&cover.file) && inside(&root, &file)).then_some(file);
+        return lazer_cover(b, cover);
     }
     let songs = &b.songs_dir();
     let mut tries: Vec<PathBuf> = vec![];
@@ -562,28 +576,22 @@ pub(crate) async fn cover_file(b: &Arc<Bridge>, item: &Item) -> Option<PathBuf> 
             }
         }
     }
-    for want in tries {
-        if !no_dots(&want.to_string_lossy()) || image_type(&want).is_none() {
-            continue;
-        }
-        if want.exists() {
-            if inside(songs, &want) {
-                return Some(want);
-            }
-            continue;
-        }
-        // .osu files written on windows don't care about case
-        let (Some(dir), Some(name)) = (want.parent(), want.file_name()) else { continue };
-        let lower = name.to_string_lossy().to_lowercase();
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for e in entries.flatten() {
-                if e.file_name().to_string_lossy().to_lowercase() == lower && inside(songs, &e.path()) {
-                    return Some(e.path());
-                }
-            }
-        }
+    tries.into_iter().find_map(|want| found_image(songs, want))
+}
+
+fn found_image(songs: &Path, want: PathBuf) -> Option<PathBuf> {
+    if !no_dots(&want.to_string_lossy()) || image_type(&want).is_none() {
+        return None;
     }
-    None
+    if want.exists() {
+        return inside(songs, &want).then_some(want);
+    }
+    // .osu files written on windows don't care about case
+    let (dir, name) = (want.parent()?, want.file_name()?);
+    let lower = name.to_string_lossy().to_lowercase();
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| {
+        p.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == lower) && inside(songs, p)
+    })
 }
 
 // 0,0,"bg.jpg" under [Events]

@@ -216,6 +216,7 @@ function settings(c, host, reconnect) {
         onclick: () => snapshot.thumb !== side && action(`thumb/${side}`),
       }, side === "left" ? "Left" : "Right")))),
     snapshot.theme && themeSetting(),
+    streamSection(),
     el("p", { class: "about" }, `Hashi ${snapshot.version}`,
       shownNotes().length > 0 && [" · ", el("button", { class: "link", onclick: openNotes }, "What's new")],
       snapshot.reports !== false && [" · ", el("button", { class: "link", onclick: openReport }, "Report a problem")],

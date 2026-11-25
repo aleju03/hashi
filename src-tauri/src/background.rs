@@ -19,12 +19,13 @@ pub const TELL: &str = "mania-bridge:";
 static BRIDGE: OnceLock<Arc<Bridge>> = OnceLock::new();
 static RUNTIME: OnceLock<Handle> = OnceLock::new();
 static SKIN_WINDOW: Mutex<Option<std::process::Child>> = Mutex::new(None);
-static WINDOW_PROCESS: Mutex<Window> = Mutex::new(Window { stdin: None, generation: 0, place: None, update: None });
+static WINDOW_PROCESS: Mutex<Window> = Mutex::new(Window { stdin: None, generation: 0, place: None, overlay_at: None, update: None });
 
 struct Window {
     stdin: Option<ChildStdin>,
     generation: u64,
     place: Option<String>,
+    overlay_at: Option<String>,
     update: Option<PendingUpdate>,
 }
 
@@ -84,7 +85,7 @@ pub fn run(args: &[String]) {
         log!("no tray on this system");
     }
     if !in_tray {
-        open(true);
+        open(true, false);
     }
 
     // ctrl+c, logout, pkill: quit the normal way so the helper still cleans up
@@ -201,7 +202,13 @@ fn skin_window(size: &str) {
 }
 
 pub fn show() {
-    open(false);
+    open(false, false);
+}
+
+pub fn overlay() {
+    if !tell_window("overlay on") {
+        open(false, true);
+    }
 }
 
 pub fn hide() {
@@ -228,8 +235,8 @@ fn tell_window(line: &str) -> bool {
     false
 }
 
-fn open(opening: bool) {
-    if tell_window("show") {
+fn open(opening: bool, overlay: bool) {
+    if !overlay && tell_window("show") {
         return;
     }
     let Some(bridge) = BRIDGE.get() else { return };
@@ -247,6 +254,12 @@ fn open(opening: bool) {
         .stdout(Stdio::piped());
     if opening {
         cmd.arg("--opening");
+    }
+    if overlay {
+        cmd.arg("--overlay");
+    }
+    if let Some(at) = &w.overlay_at {
+        cmd.arg(format!("--overlay-at={at}"));
     }
     if bridge.on_top() {
         cmd.arg("--on-top");
@@ -280,6 +293,7 @@ fn listen(out: ChildStdout) {
         let (what, rest) = line.split_once(' ').unwrap_or((line, ""));
         match what {
             "place" => window().place = Some(rest.to_string()),
+            "overlay-place" => window().overlay_at = Some(rest.to_string()),
             "quit" => quit(),
             "progress" => {
                 let mut parts = rest.split(' ');

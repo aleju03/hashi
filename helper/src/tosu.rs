@@ -67,6 +67,8 @@ pub(crate) struct TosuState {
     pub player: Option<String>,
     // the mania map selected or being played, for its leaderboard
     pub map: Option<Value>,
+    // its background, for the overlay
+    pub map_cover: Option<Cover>,
     pub launch: Option<&'static str>,
     pub blocked: Option<String>,
     pub found: Option<bool>,
@@ -114,6 +116,7 @@ impl TosuState {
             state: None,
             player: None,
             map: None,
+            map_cover: None,
             launch: None,
             blocked: None,
             found: None,
@@ -160,6 +163,7 @@ impl TosuState {
         self.state = None;
         self.player = None;
         self.map = None;
+        self.map_cover = None;
     }
 }
 
@@ -267,6 +271,15 @@ fn selected_map(raw: &Value) -> Option<Value> {
     }))
 }
 
+fn map_cover(raw: &Value, client: &str) -> Option<Cover> {
+    let file = str_of(raw.pointer("/files/background")).filter(|x| !x.is_empty())?;
+    if client == "lazer" {
+        return Some(Cover { lazer: Some(true), folder: None, file });
+    }
+    let folder = str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty())?;
+    Some(Cover { lazer: None, folder: Some(folder), file })
+}
+
 fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
     let mut finished = None;
     {
@@ -319,6 +332,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             t.map = map;
             b.broadcast();
         }
+        t.map_cover = t.map.as_ref().and_then(|_| map_cover(&raw, client));
 
         if t.prev_state.as_deref() == Some("resultScreen") && state != "resultScreen" {
             t.results_left_at = now_ms();

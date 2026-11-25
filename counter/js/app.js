@@ -214,6 +214,10 @@ function draw() {
     renderWaiting = true;
     return;
   }
+  if (OVERLAY) {
+    if (snapshot) paintTheme();
+    return drawOverlay();
+  }
   app.replaceChildren();
   if (helperDown && !snapshot) {
     app.append(el("div", { class: "connect full" }, el("p", { class: "note" }, "Hashi's helper is not running.")));
@@ -227,9 +231,7 @@ function draw() {
 
   const c = snapshot.connection;
   const host = c.origin === OFFICIAL_ORIGIN ? null : c.origin.replace(/^https?:\/\//, "");
-  if (snapshot.theme) applyTheme(snapshot.theme);
-  const ownTheme = snapshot.theme && !isDefaultTheme(snapshot.theme);
-  document.documentElement.style.setProperty("--accent", (!ownTheme && c.accent) || "var(--osu-pink)");
+  paintTheme();
   const hasAccount = c.username && !["disconnected", "connecting"].includes(c.status);
   if (c.status === "connected" && hasAccount && wasConnecting && !STILL.matches) {
     crossAt = Date.now();
@@ -257,6 +259,7 @@ function draw() {
 
   if (!snapshot.titlebar && location.origin === BRIDGE) {
     app.append(el("div", { class: "corner" },
+      snapshot.onTop != null && overlayButton(),
       snapshot.tray && el("button", { title: "Hide to tray", onclick: () => windowAction("hide") }, icon(TRAY)),
       el("button", { title: "Maximize", onclick: () => windowAction("maximize") }, icon(MAXIMIZE)),
       el("button", { class: "close", title: "Quit", onclick: () => windowAction("close") }, icon(`<path d="m.5.5 9 9m0-9-9 9"/>`))));
@@ -315,11 +318,17 @@ function draw() {
   if (snapshot.plays.length) app.append(playList(snapshot.plays));
 }
 
+function paintTheme() {
+  if (snapshot.theme) applyTheme(snapshot.theme);
+  const own = snapshot.theme && !isDefaultTheme(snapshot.theme);
+  document.documentElement.style.setProperty("--accent", (!own && snapshot.connection.accent) || "var(--osu-pink)");
+}
+
 // windows: no system frame, so draw a title bar
 let titlebar = null;
 let pin = null;
 function showTitlebar() {
-  if (titlebar || !snapshot?.titlebar || location.origin !== BRIDGE) return;
+  if (OVERLAY || titlebar || !snapshot?.titlebar || location.origin !== BRIDGE) return;
   pin = snapshot.onTop != null && el("button", { class: "pin", title: "Always on top", onclick: () => action(`on-top/${snapshot.onTop ? "off" : "on"}`) }, icon(PIN));
   titlebar = el("header", {
     class: "titlebar",
@@ -329,6 +338,7 @@ function showTitlebar() {
     el("img", { src: "images/app.svg", alt: "", width: 16, height: 16 }),
     el("span", { class: "name" }, "Hashi"),
     pin,
+    overlayButton(),
     el("button", { title: "Hide to tray", onclick: () => windowAction("hide") }, icon(TRAY)),
     el("button", { title: "Minimize", onclick: () => windowAction("minimize") }, icon(`<path d="M0 5.5h10"/>`)),
     el("button", { title: "Maximize", onclick: () => windowAction("maximize") }, icon(MAXIMIZE)),
