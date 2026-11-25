@@ -455,7 +455,13 @@ impl<'a> Builder<'a> {
                 Some(Body { sprite: self.sprite(tex), sw: tex.width(), sh: tex.height(), full, style, row })
             });
             let tap_color = p.tap_colors.get(col).copied().flatten().unwrap_or(p.tap_color);
-            let note_color = a.tap.as_ref().and_then(|t| t.image.as_ref()?.average()).unwrap_or(tap_color);
+            let paint = |asset: Option<&Asset>| image(asset).and_then(|t| t.paint_color());
+            let paint_colors = [
+                paint(a.tap.as_ref()).or(Some(tap_color)),
+                paint(a.head.as_ref()),
+                paint(a.body.as_ref()),
+                paint(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref())),
+            ];
             columns.push(Column {
                 x,
                 w,
@@ -464,7 +470,7 @@ impl<'a> Builder<'a> {
                 tail: self.frames(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref()), true),
                 body,
                 tap_color,
-                note_color,
+                paint_colors,
                 head_color: p.head_colors.get(col).copied().flatten().unwrap_or(p.head_color),
                 light,
                 key_up,

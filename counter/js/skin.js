@@ -102,13 +102,10 @@ function skinArtColour(img) {
   return out;
 }
 
+// the color that paints the part back as it is, so copying it to another column matches
 function skinPartColour(page, col, part) {
-  const live = page.live;
-  const c = live?.scene.columns[col];
-  if (!c) return null;
-  if (part === "notes") return c.noteColor ? skinHex(c.noteColor) : null;
-  const sprite = part === "bodies" ? c.body?.s : (part === "heads" ? c.head : c.tail)?.[0]?.s;
-  return sprite == null ? null : skinArtColour(live.images[sprite]);
+  const c = page.live?.scene.columns[col]?.paintColors?.[part];
+  return c ? skinHex(c) : null;
 }
 
 function skinOps(ctx, ops, images) {

@@ -1146,37 +1146,50 @@ fn redraw(
     Some((new, kept))
 }
 
-fn luma(p: &[u8]) -> f64 {
+pub(super) fn luma(p: &[u8]) -> f64 {
     0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64
 }
 
-// The colour times each pixel's lightness against the art's brightest: white art takes the colour
-// exactly, the way the game tints a sprite, and coloured art is recoloured with its shading kept
-fn tint(rgba: &mut [u8], color: Rgba, max: f64) {
+// Recoloured with its shading kept: the art's usual lightness takes the colour exactly, so a note
+// looks the colour picked. Darker pixels are as much darker, lighter ones (a white rim, a shine)
+// as much nearer white
+fn tint(rgba: &mut [u8], color: Rgba, mid: f64) {
     for p in rgba.chunks_exact_mut(4) {
-        let l = if max > 0.0 { (luma(p) / max).min(1.0) } else { 1.0 };
+        let l = luma(p);
         for i in 0..3 {
-            p[i] = (color[i] as f64 * l).round() as u8;
+            let c = f64::from(color[i]);
+            p[i] = if mid <= 0.0 {
+                c
+            } else if l <= mid {
+                c * l / mid
+            } else {
+                c + (255.0 - c) * ((l - mid) / (255.0 - mid).max(1.0)).min(1.0)
+            }
+            .round() as u8;
         }
     }
 }
 
-fn brightest(rgba: &[u8]) -> f64 {
-    rgba.chunks_exact(4).filter(|p| p[3] >= 25).map(luma).fold(0.0, f64::max)
+// the art's usual lightness, the middle of what shows
+pub(super) fn tone(lumas: impl Iterator<Item = f64>) -> f64 {
+    let mut all: Vec<f64> = lumas.collect();
+    if all.is_empty() {
+        return 0.0;
+    }
+    all.sort_by(f64::total_cmp);
+    all[all.len() / 2]
 }
 
-// Coloured with the built-in outline left as it is: only the inside counts toward the brightest,
-// so it takes the colour exactly, and the outline's pixels keep theirs by their share of it
+fn shown_tone(rgba: &[u8]) -> f64 {
+    tone(rgba.chunks_exact(4).filter(|p| p[3] >= 25).map(luma))
+}
+
+// Coloured with the built-in outline left as it is: only the inside counts toward its tone, so it
+// takes the colour exactly, and the outline's pixels keep theirs by their share of it
 fn tinted_keeping(src: &Raw, color: Rgba, rim: &Rim) -> Raw {
-    let max = src
-        .rgba
-        .chunks_exact(4)
-        .zip(&rim.weight)
-        .filter(|(p, w)| p[3] >= 25 && **w < 0.5)
-        .map(|(p, _)| luma(p))
-        .fold(0.0, f64::max);
+    let mid = tone(src.rgba.chunks_exact(4).zip(&rim.weight).filter(|(p, w)| p[3] >= 25 && **w < 0.5).map(|(p, _)| luma(p)));
     let mut rgba = src.rgba.clone();
-    tint(&mut rgba, color, max);
+    tint(&mut rgba, color, mid);
     for ((p, o), &w) in rgba.chunks_exact_mut(4).zip(src.rgba.chunks_exact(4)).zip(&rim.weight) {
         if w > 0.0 {
             let t = f64::from(w);
@@ -1190,8 +1203,8 @@ fn tinted_keeping(src: &Raw, color: Rgba, rim: &Rim) -> Raw {
 
 fn tinted(src: &Raw, color: Rgba) -> (Raw, Option<f64>) {
     let mut rgba = src.rgba.clone();
-    let max = brightest(&rgba);
-    tint(&mut rgba, color, max);
+    let mid = shown_tone(&rgba);
+    tint(&mut rgba, color, mid);
     (Raw::new(rgba, src.w, src.h), None)
 }
 
@@ -1293,7 +1306,7 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
     let lead = lead.min(total.saturating_sub(1));
     // what the loader would keep of the file, unless all of it is wanted
     let made = if full || !load::is_strip(w, total as u32) { total } else { total.min(load::MAX_TEXTURE as usize) };
-    let max = tint.map(|_| brightest(&src.rgba[old_lead * row_bytes..])).unwrap_or(0.0);
+    let mid = tint.map(|_| shown_tone(&src.rgba[old_lead * row_bytes..])).unwrap_or(0.0);
     // the widest the art gets near its end: a skin's own cap narrows its first rows
     let extent = |y: usize| {
         let row = &src.rgba[y * row_bytes..(y + 1) * row_bytes];
@@ -1326,7 +1339,7 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
         let row = &mut rgba[i * row_bytes..(i + 1) * row_bytes];
         row.copy_from_slice(&src.rgba[from * row_bytes..(from + 1) * row_bytes]);
         if let Some(t) = tint {
-            self::tint(row, t, max);
+            self::tint(row, t, mid);
         }
         if let Some(f) = fade.filter(|f| f.length > 0.0) {
             let at = (k as f64 / rows / f.length).clamp(0.0, 1.0);
@@ -1665,5 +1678,36 @@ mod tests {
                 save(&gone, "removed");
             }
         }
+    }
+
+    // the colour the picker starts on paints the art back as it is, so pasting it elsewhere matches,
+    // and a colour picked goes on the note's fill: its shade stays darker, its white rim white
+    #[test]
+    fn paint_color_gives_the_art_back() {
+        let (w, h) = (40u32, 40u32);
+        let fill = [200.0, 90.0, 160.0];
+        let mut px = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let p = ((y * w + x) * 4) as usize;
+                let c = match x {
+                    0..=5 => [255.0; 3],
+                    6..=13 => fill.map(|v| v * 0.6),
+                    _ => fill,
+                };
+                px[p..p + 4].copy_from_slice(&[c[0] as u8, c[1] as u8, c[2] as u8, 255]);
+            }
+        }
+        let raw = Raw::new(px.clone(), w, h);
+        let (tex, ..) = load::texture(Raw::new(px.clone(), w, h)).unwrap();
+        let color = tex.paint_color().unwrap();
+        assert_eq!(color, [200, 90, 160, 255]);
+        let (out, _) = tinted(&raw, color);
+        let off = out.rgba.iter().zip(&px).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+        assert!(off <= 2, "{color:?} is {off} off");
+        // a light purple picked: the fill is that purple, the rim stays white
+        let (out, _) = tinted(&raw, [220, 173, 255, 255]);
+        assert_eq!(&out.rgba[(20 * 4) as usize..][..3], &[220, 173, 255]);
+        assert_eq!(&out.rgba[..3], &[255, 255, 255]);
     }
 }

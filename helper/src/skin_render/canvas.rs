@@ -14,11 +14,12 @@ pub(super) struct Texture {
     // what Chrome's decode cache hands the canvas for a downscaled draw, from level 1
     levels: Mutex<Vec<Arc<Pixmap>>>,
     alpha_top: OnceLock<Option<f64>>,
+    paint_color: OnceLock<Option<Rgba>>,
 }
 
 impl Texture {
     pub fn new(pixmap: Pixmap) -> Self {
-        Texture { pixmap, id: NEXT_ID.fetch_add(1, Ordering::Relaxed), levels: Mutex::default(), alpha_top: OnceLock::new() }
+        Texture { pixmap, id: NEXT_ID.fetch_add(1, Ordering::Relaxed), levels: Mutex::default(), alpha_top: OnceLock::new(), paint_color: OnceLock::new() }
     }
 
     pub fn width(&self) -> f64 {
@@ -29,18 +30,34 @@ impl Texture {
         self.pixmap.height() as f64
     }
 
-    // the art's colour: its pixels averaged by how much each shows, None for blank art
-    pub fn average(&self) -> Option<Rgba> {
-        let (mut sum, mut alpha) = ([0u64; 3], 0u64);
-        for p in self.pixmap.pixels() {
-            // premultiplied, so the sums are already weighted
-            sum[0] += u64::from(p.red());
-            sum[1] += u64::from(p.green());
-            sum[2] += u64::from(p.blue());
-            alpha += u64::from(p.alpha());
+    // The colour that, painted on, gives the art back: painting puts the colour on the art's usual
+    // lightness (edit::tint), so it's the colour of the pixels at that lightness. None for blank art
+    pub fn paint_color(&self) -> Option<Rgba> {
+        *self.paint_color.get_or_init(|| self.fit_paint_color())
+    }
+
+    // a tall body has millions of pixels, a spread of them is plenty
+    fn fit_paint_color(&self) -> Option<Rgba> {
+        let all = self.pixmap.pixels();
+        let px: Vec<[u8; 3]> = all
+            .iter()
+            .step_by((all.len() / 65_536).max(1))
+            .map(|p| p.demultiply())
+            .filter(|p| p.alpha() >= 25)
+            .map(|p| [p.red(), p.green(), p.blue()])
+            .collect();
+        let mid = super::edit::tone(px.iter().map(|c| super::edit::luma(c)));
+        let (mut sum, mut n) = ([0.0; 3], 0.0);
+        for c in px.iter().filter(|c| (super::edit::luma(*c) - mid).abs() <= 4.0) {
+            for i in 0..3 {
+                sum[i] += f64::from(c[i]);
+            }
+            n += 1.0;
         }
-        let channel = |s: u64| ((s * 255 + alpha / 2) / alpha).min(255) as u8;
-        (alpha > 0).then(|| [channel(sum[0]), channel(sum[1]), channel(sum[2]), 255])
+        (n > 0.0).then(|| {
+            let [r, g, b] = sum.map(|v| (v / n).round() as u8);
+            [r, g, b, 255]
+        })
     }
 
     // nothing under it shows through anywhere

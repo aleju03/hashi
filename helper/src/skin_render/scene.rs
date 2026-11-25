@@ -87,8 +87,8 @@ pub(super) struct Column {
     pub body: Option<Body>,
     pub tap_color: Rgba,
     pub head_color: Rgba,
-    // what the colour picker starts on for the column
-    pub note_color: Rgba,
+    // what the colour picker starts on for the column's notes, heads, bodies and tails
+    pub paint_colors: [Option<Rgba>; 4],
     pub light: Vec<Op>,
     pub key_up: Vec<Op>,
     pub key_down: Vec<Op>,
@@ -338,7 +338,7 @@ impl Scene {
                     "body": c.body.as_ref().map(|b| json!({ "s": b.sprite, "sw": b.sw, "sh": b.sh, "full": b.full, "style": b.style, "row": b.row })),
                     "tapColor": c.tap_color,
                     "headColor": c.head_color,
-                    "noteColor": c.note_color,
+                    "paintColors": { "notes": c.paint_colors[0], "heads": c.paint_colors[1], "bodies": c.paint_colors[2], "tails": c.paint_colors[3] },
                     "light": ops_json(&c.light),
                     "keyUp": ops_json(&c.key_up),
                     "keyDown": ops_json(&c.key_down),
