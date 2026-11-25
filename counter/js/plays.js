@@ -6,6 +6,8 @@ function playStatus(p) {
   if (p.phase === "kept") return { kind: "off", label: "Not sent", detail: "Sending plays was off. Kept here." };
   if (p.onHold) return { kind: "wait", label: "On hold", detail: "Not sent until you send it." };
   if (!snapshot.sendPlays && p.phase === "send") return { kind: "wait", label: "Not sending", detail: "Sending plays is off." };
+  // stable writes the replay only once its results screen is left
+  if (p.phase === "waiting_replay" && p.play.client === "stable") return { kind: "wait", label: "Waiting for replay", detail: "osu! saves it when you leave the results screen." };
   if (p.phase === "waiting_replay") return { kind: "spin", label: "Waiting for replay" };
   if (p.phase === "unbound") return { kind: "off", label: "Not sent", detail: "Wasn't connected when you played" };
   if (p.phase === "held") return { kind: "wait", label: "On hold", detail: p.error?.message };
