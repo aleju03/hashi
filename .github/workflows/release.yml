@@ -50,6 +50,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # reads osu!'s memory, a program of its own shipped next to the app
+      - name: reader
+        shell: bash
+        run: |
+          cargo build --release -p osu-reader
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=$([ "$RUNNER_OS" = Windows ] && echo .exe || true)
+          mkdir -p src-tauri/binaries
+          cp "target/release/hashi-reader$ext" "src-tauri/binaries/hashi-reader-$triple$ext"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           HASHI_LAZER_WRITER: required
@@ -59,7 +69,7 @@ jobs:
         with:
           # pinned: src-tauri/windows/installer.nsi is this version's template with changes
           tauriScript: npx --yes @tauri-apps/cli@2.12.1
-          args: --bundles ${{ matrix.bundles }}
+          args: --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
           assetNamePattern: ${{ matrix.assets }}
           tagName: v__VERSION__
           releaseName: Hashi v__VERSION__

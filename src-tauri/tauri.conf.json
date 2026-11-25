@@ -25,10 +25,12 @@
     "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
-        "depends": ["gstreamer1.0-plugins-good"]
+        "depends": ["gstreamer1.0-plugins-good", "libcap2-bin"],
+        "postInstallScript": "linux/postinst.sh"
       },
       "rpm": {
-        "depends": ["gstreamer1-plugins-good"]
+        "depends": ["gstreamer1-plugins-good"],
+        "postInstallScript": "linux/postinst.sh"
       }
     },
     "windows": {

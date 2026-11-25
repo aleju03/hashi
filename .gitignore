@@ -1,3 +1,4 @@
 target/
 lazer-writer/bin/
 lazer-writer/obj/
+src-tauri/binaries/
