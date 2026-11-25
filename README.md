@@ -24,8 +24,6 @@ reached, plays wait on your computer until it's back.
 ## What you need
 
 - Windows 10/11 or Linux (x86_64).
-- [tosu](https://github.com/tosuapp/tosu) running while you play. If you don't have it, the app
-  can download it and start it for you. On Linux, osu!lazer needs tosu's Linux build.
 - To be logged in to Mania Tracker in your browser.
 
 ## Install
@@ -93,8 +91,8 @@ link into OBS as a Browser Source. Its width sets how big the card is. It keeps 
 is in the tray, and shows only what's for your viewers.
 
 The gear opens the settings, where you can choose whether to send your plays, share your live
-status on your profile, or both. You can also have Hashi open tosu, open on startup or start in
-the tray, and change the theme. Disconnect signs the app out and revokes its access.
+status on your profile, or both. You can also have Hashi open on startup or start in the tray,
+and change the theme. Disconnect signs the app out and revokes its access.
 
 New versions show a note at the top of the app and install from there. Updates are signed, and the
 app only installs files signed with Hashi's release key.
@@ -103,17 +101,18 @@ app only installs files signed with Hashi's release key.
 
 For each play: the replay osu! saved, the chart file if Mania Tracker doesn't have that version,
 the app's version and whether it was stable or lazer. With the live status on, also what you're
-doing in osu! and the current map, mods and speed. Apart from Mania Tracker, the app only talks to
-tosu on your computer, osu!'s servers for your avatar, and GitHub for updates and tosu downloads.
+doing in osu! and the current map, mods and speed. To know what you're playing, the app reads osu!'s
+memory on your computer, and only what's listed here leaves it. Apart from Mania Tracker, the app
+only talks to osu!'s servers for your avatar and GitHub for updates.
 
 ## Troubleshooting
 
-If the app says Linux blocks tosu from reading the game, run the command it shows once (it looks
-like `sudo setcap cap_sys_ptrace=eip /path/to/tosu`) and restart tosu. You'll need it again after
-updating tosu.
+If the app says Linux won't let it read osu!, run the command it shows once (it looks like
+`sudo setcap cap_sys_ptrace=eip /path/to/hashi-reader`). The .deb and .rpm do this when they install;
+with the AppImage it's needed once, and again after updating Hashi.
 
-If a play doesn't show up, check that the line under your name doesn't say tosu isn't running. Only
-finished plays count. If a play says "Not submitted", the reason is written under the stamp.
+If a play doesn't show up, check that the line under your name shows osu! and what you're doing in
+it. Only finished plays count. If a play says "Not submitted", the reason is written under the stamp.
 
 If you route apps through a VPN or a firewall, add `%LOCALAPPDATA%\Hashi\Hashi.exe`, not the setup
 file.
@@ -130,3 +129,5 @@ Uninstall it the usual way; on Windows the uninstaller asks whether to delete yo
 ## License
 
 MIT, see [LICENSE](LICENSE). Tracker Round in `counter/fonts`, built on Outfit, is under the SIL Open Font License.
+Reading osu!'s memory is built on [LeoBlack's osu!mania map analyser](https://github.com/LeoBlackMT/osumania_map_analyser),
+MIT, see [reader/LICENSE-LEOBLACK](reader/LICENSE-LEOBLACK).

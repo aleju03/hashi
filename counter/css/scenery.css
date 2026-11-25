@@ -498,13 +498,6 @@
   text-overflow: ellipsis;
 }
 
-.tag.at-tosu {
-  left: 32.5%;
-  bottom: 62.5%;
-  align-items: center;
-  transform: translateX(-50%);
-}
-
 .tag.at-site {
   right: 12px;
   bottom: 59%;

@@ -56,8 +56,6 @@ pub struct Jwk {
 pub struct Settings {
     #[serde(default)]
     pub presence: bool,
-    #[serde(default, rename = "tosuAutostart")]
-    pub tosu_autostart: bool,
     #[serde(default, rename = "startInTray")]
     pub start_in_tray: bool,
     // only the live status, finished plays aren't sent

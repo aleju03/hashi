@@ -12,8 +12,6 @@ const OSU_STATES = {
   onlineSelection: "osu!direct",
 };
 
-const TOSU_HINT = "Start tosu to submit plays. Anything you play without it isn't sent.";
-
 function gameName(tosu) {
   return tosu.client === "lazer" ? "osu!lazer" : "osu!";
 }
@@ -22,47 +20,18 @@ function osuLabel(tosu) {
   return OSU_STATES[tosu.state] ?? String(tosu.state ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
-function tosuDetail(tosu) {
-  return { starting: "Starting", failed: "Couldn't start", missing: "Not found", "with-osu": "Opens with osu!" }[tosu.launch] ?? "Not running";
-}
-
 function blockedHint() {
   const { blocked } = snapshot.tosu;
   return blocked && el("div", { class: "blocked" },
-    el("p", {}, "Linux blocks tosu from reading the game. Run this once, then restart Hashi:"),
+    el("p", {}, "Linux won't let Hashi read osu! yet. Run this once:"),
     el("code", { title: "Click to copy", onclick: (e) => {
       navigator.clipboard?.writeText(blocked.fix);
       e.currentTarget.classList.add("copied");
     } }, blocked.fix));
 }
 
-function getTosu() {
-  const g = snapshot.getTosu;
-  if (!g) return null;
-  const get = () => action("get-tosu");
-  if (g.step === "downloading" || g.step === "unpacking") {
-    return el("div", { class: "pinned" },
-      el("p", {}, g.step === "unpacking"
-        ? "Unpacking tosu…"
-        : ["Downloading tosu", g.percent != null ? ` · ${g.percent}%` : "", "…"]),
-      el("i", { class: "spinner", style: `animation-delay: -${Date.now() % SPIN_MS}ms` }));
-  }
-  if (g.step === "failed") {
-    return el("div", { class: "pinned failed" },
-      el("p", {}, "Couldn't get tosu. ", el("span", { class: "why" }, g.error)),
-      el("button", { class: "key go", disabled: slow, onclick: get }, "Try again"));
-  }
-  return el("div", { class: "pinned" },
-    el("p", {}, "Couldn't find tosu on this computer."),
-    el("button", { class: "key go", disabled: slow, onclick: get }, "Get tosu"));
-}
-
-function tosuHint() {
-  const { tosu } = snapshot;
-  if (tosu.blocked) return blockedHint();
-  if (snapshot.getTosu) return getTosu();
-  if (tosu.connected || tosu.launch === "starting" || tosu.launch === "with-osu") return null;
-  return el("p", { class: "status warn" }, snapshot.connection.username ? TOSU_HINT : "Start tosu so your plays show up here.");
+function readHint() {
+  return snapshot.tosu.blocked ? blockedHint() : null;
 }
 
 function statusLine(c) {
@@ -79,10 +48,9 @@ function statusLine(c) {
 function now() {
   const { tosu } = snapshot;
   const line = (state, name, ...rest) => el("div", { class: `now ${state}` }, el("i"), el("b", {}, name), rest);
-  if (!tosu.connected) return line(tosu.launch === "with-osu" ? "off" : "missing", "tosu", tosuDetail(tosu));
-  if (tosu.blocked) return line("missing", "osu!", "tosu can't read it");
+  if (!tosu.connected || tosu.blocked) return line("missing", "osu!", "Can't be read");
   if (!tosu.osu) return line("off", "osu!", "Not open");
-  return line("on", gameName(tosu), el("span", {}, osuLabel(tosu), " as ", el("b", {}, tosu.player || "Guest")));
+  return line("on", gameName(tosu), el("span", {}, osuLabel(tosu), tosu.player && [" as ", el("b", {}, tosu.player)]));
 }
 
 // reuse the same <img>, a new one is blank until it decodes
@@ -152,7 +120,7 @@ function home(c, host) {
       }, icon(STAGE)),
       el("button", { class: `gear${settingsOpen ? " on" : ""}`, title: "Settings", "aria-pressed": String(settingsOpen), onclick: toggleSettings }, icon(GEAR))),
     update(),
-    tosuHint(),
+    readHint(),
     statusLine(c),
     !account && c.status === "disconnected" && c.message && el("p", { class: "status warn" }, c.message),
     reconnect && !settingsOpen
@@ -289,8 +257,6 @@ function draw() {
     el("p", { class: "lead" }, connecting
       ? "Finish connecting on the page that opened in your browser."
       : "Nothing you play gets across. Connect and every mania play you finish goes to your profile on its own."),
-    !snapshot.tosu.connected && !["starting", "with-osu"].includes(snapshot.tosu.launch)
-      && el("p", { class: "field-hint" }, "Plays are only sent while tosu is open."),
     blockedHint(),
     el("div", { class: "cross" },
       connecting
@@ -307,7 +273,6 @@ function draw() {
             el("button", { class: "link", disabled: slow, onclick: () => action("skip-connect/on") }, "Continue without connecting")),
         ],
     update(),
-    getTosu(),
   ];
   app.append(el("div", { class: `connect${full ? " full" : ""}` },
     intro(crossAt ? "flat" : connecting ? "down" : "up"),
@@ -375,7 +340,6 @@ function donePage(ok) {
   app.append(el("div", { class: "connect full" },
     bridge({
       osu: { state: "ok", name: "osu!" },
-      tosu: { state: "ok", name: "tosu" },
       site: ok
         ? { state: "ok", name: "Mania Tracker", detail: "Connected" }
         : { state: "idle", name: "Mania Tracker", detail: "Not connected" },

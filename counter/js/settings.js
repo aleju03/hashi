@@ -6,17 +6,6 @@ const PRESENCE_NOTES = {
   paused: "Shown on your profile once osu! is open.",
 };
 
-function tosuAutostartNote(on, launch) {
-  if (launch === "with-osu") return "tosu opens with osu! here.";
-  if (snapshot.getTosu && !snapshot.getTosu.step) {
-    return ["Couldn't find tosu on this computer. ", el("button", { class: "link", disabled: slow, onclick: () => action("get-tosu") }, "Get tosu")];
-  }
-  if (!on) return null;
-  if (launch === "missing") return "Couldn't find tosu on this computer.";
-  if (launch === "failed") return "tosu didn't start.";
-  return null;
-}
-
 // cached so the page opens in the right color before the helper answers
 const DEFAULT_THEME = { hue: 333, sat: 100 };
 const THEME_KEY = "mania-bridge-theme";
@@ -166,14 +155,7 @@ function sharing() {
 }
 
 function settings(c, host, reconnect) {
-  const t = snapshot.tosuAutostart;
-  const { launch } = snapshot.tosu;
-  const tosuNote = tosuAutostartNote(t, launch);
   const computer = [
-    t != null && toggle("Open tosu with Hashi", t, "tosu-autostart", tosuNote,
-      t && ["missing", "failed"].includes(launch) ? " is-error" : ""),
-    t && snapshot.tosuDashboard != null && toggle("Open its dashboard too", snapshot.tosuDashboard, "tosu-dashboard",
-      "In your browser, each time tosu starts.", " sub"),
     snapshot.autostart != null && toggle("Open Hashi on startup", snapshot.autostart, "autostart"),
     snapshot.startInTray != null && toggle("Start in the tray", snapshot.startInTray, "start-in-tray"),
     snapshot.onTop != null && toggle("Always on top", snapshot.onTop, "on-top", "The window stays above other windows."),

@@ -227,7 +227,7 @@ function profileBody(d) {
   root.append(idCard(c, d, days, tip));
   const modes = d.modes;
   if (!modes.length) {
-    root.append(el("p", { class: "lead" }, "Finish a mania map with tosu open and its replay is read here."));
+    root.append(el("p", { class: "lead" }, "Finish a mania map and its replay is read here."));
     return root;
   }
   const m = modes.find((x) => x.keys === profilePage.keys) ?? modes.reduce((a, b) => (b.plays > a.plays ? b : a));

@@ -4,7 +4,6 @@ mod autostart;
 mod beatmap;
 mod cut;
 mod dan;
-mod get_tosu;
 mod goals;
 mod judge;
 pub mod lazer;
@@ -16,6 +15,7 @@ mod presence;
 mod profile;
 mod queue;
 mod rate;
+mod reader;
 mod realm;
 mod replays;
 mod report;
@@ -151,14 +151,13 @@ fn home() -> PathBuf {
 
 pub struct Env {
     pub origin: String,
-    pub tosu_host: String,
     // only used for the avatar accent (dev backend is on 7227)
     pub live_backend_url: String,
     pub port: u16,
     pub osu_dir: PathBuf,
     pub replay_dir: PathBuf,
     pub songs_dir: PathBuf,
-    // lazer keeps everything in files/<a>/<ab>/<sha256>, tosu tells us the real folder once it sees lazer
+    // lazer keeps everything in files/<a>/<ab>/<sha256>, the reader tells us the real folder once it sees lazer
     pub lazer_dir: PathBuf,
     pub data_dir: PathBuf,
     // where it lived before Hashi, newest first, moved over on first run
@@ -168,9 +167,6 @@ pub struct Env {
     pub chart_index_file: PathBuf,
     pub blob_dir: PathBuf,
     pub counter_origins: HashSet<String>,
-    // only a local tosu can be started, TOSU_AUTOSTART=0 takes the setting away
-    pub tosu_can_start: bool,
-    pub tosu_path: Option<PathBuf>,
     // asks mania tracker now and then whether there's a newer release, UPDATE_CHECK=0 doesn't
     pub update_check: bool,
 }
@@ -178,7 +174,6 @@ pub struct Env {
 impl Env {
     pub fn from_env() -> Self {
         let origin = var("TRACKER_ORIGIN").unwrap_or(DEFAULT_ORIGIN.into()).trim_end_matches('/').to_string();
-        let tosu_host = var("TOSU_URL").unwrap_or("127.0.0.1:24050".into());
         let local = regex_local(&origin);
         let live_backend_url = var("LIVE_BACKEND_URL")
             .unwrap_or_else(|| if local { "http://127.0.0.1:7227".into() } else { String::new() })
@@ -227,7 +222,6 @@ impl Env {
             format!("http://127.0.0.1:{port}"),
             format!("http://localhost:{port}"),
         ]);
-        let tosu_local = tosu_host.starts_with("127.0.0.1") || tosu_host.starts_with("localhost");
         Env {
             replay_dir: osu_dir.join("Data").join("r"),
             songs_dir: var("OSU_SONGS_DIR").map(PathBuf::from).unwrap_or(osu_dir.join("Songs")),
@@ -240,12 +234,9 @@ impl Env {
             data_dir: PathBuf::new(),
             old_data_dirs,
             origin,
-            tosu_host,
             live_backend_url,
             port,
             counter_origins,
-            tosu_can_start: var("TOSU_AUTOSTART").as_deref() != Some("0") && tosu_local,
-            tosu_path: var("TOSU_PATH").map(PathBuf::from),
             update_check: var("UPDATE_CHECK").as_deref() != Some("0"),
         }
         .with_data_dir(data_dir)
@@ -331,7 +322,6 @@ pub(crate) struct State {
     pub boards: leaderboard::Boards,
     pub dans: dan::Dans,
     pub update: update::UpdateState,
-    pub get_tosu: get_tosu::GetState,
     pub autostart: Option<bool>,
 }
 
@@ -426,13 +416,10 @@ impl Bridge {
             },
             "theme": { "hue": theme.0, "sat": theme.1 },
             "update": s.update.public(update::can_install(self)),
-            "getTosu": get_tosu::public(self, &s),
             "autostart": autostart,
-            "tosuAutostart": self.env.tosu_can_start.then(|| s.config.settings.as_ref().is_some_and(|x| x.tosu_autostart)),
             "startInTray": self.opts.tray.then(|| s.config.settings.as_ref().is_some_and(|x| x.start_in_tray)),
             "onTop": self.opts.on_window.is_some().then(|| s.config.settings.as_ref().is_some_and(|x| x.on_top)),
             "sendPlays": !s.sends_no_plays(),
-            "tosuDashboard": self.env.tosu_can_start.then_some(s.tosu.dashboard).flatten(),
             "showDans": !s.config.settings.as_ref().is_some_and(|x| x.hide_dans),
             "analysis": s.analyzes(),
             "skipConnect": s.config.settings.as_ref().is_some_and(|x| x.skip_connect),
@@ -620,7 +607,6 @@ impl Bridge {
     }
 
     pub async fn shutdown(self: &Arc<Self>) {
-        tosu::stop_tosu(self).await;
         if self.st().presence.sent.is_some() {
             let _ = tokio::time::timeout(Duration::from_millis(1500), presence::clear_presence(self)).await;
         }
@@ -825,7 +811,6 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
             boards: Default::default(),
             dans: Default::default(),
             update: update::UpdateState::default(),
-            get_tosu: get_tosu::GetState::default(),
             autostart: None,
         }),
         http,
@@ -853,8 +838,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
     );
     server::serve(&bridge, listener);
     replays::watch_replay_dir(&bridge);
-    tosu::connect_tosu(&bridge);
-    tosu::check_tosu_launch(&bridge);
+    reader::start(&bridge);
     tosu::watch_osu_frames(&bridge);
     server::watch_counter(&bridge);
     update::watch_updates(&bridge);
@@ -909,8 +893,6 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
                     } else if status == "connected" {
                         queue::wake_queue(&b, 0);
                     }
-                    tosu::recheck_found(&b);
-                    tosu::refresh_dashboard(&b);
                 }
                 _ = five.tick() => {
                     let b = b.clone();
@@ -982,7 +964,6 @@ pub(crate) mod tests {
             boards: Default::default(),
             dans: Default::default(),
             update: Default::default(),
-            get_tosu: Default::default(),
             autostart: None,
         }
     }

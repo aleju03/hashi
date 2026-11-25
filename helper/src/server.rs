@@ -11,7 +11,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, oneshot};
 
 use crate::auth::{self, Attempt};
-use crate::{analysis, autostart, get_tosu, leaderboard, log, practice, presence, queue, replays, tosu, update, Bridge, COUNTER_PATH, DEFAULT_PORT};
+use crate::{analysis, autostart, leaderboard, log, practice, presence, queue, replays, update, Bridge, COUNTER_PATH, DEFAULT_PORT};
 
 // built in for releases, read from disk in debug builds so edits show up right away
 #[derive(rust_embed::Embed)]
@@ -387,19 +387,20 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             return empty(if state.is_some_and(|s| crate::skin::set_live(b, &s)) { 204 } else { 400 });
         }
         // overlay/on|off, overlay-through/on|off (clicks go to the game), overlay-blur/on|off,
-        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>
+        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>, overlay-move/<dx>,<dy> for a layer
         if let Some((what, value)) = path.strip_prefix("/window/").and_then(|p| p.split_once('/')).filter(|(w, _)| w.starts_with("overlay")) {
             let px = |n: &str, max: u16| n.parse::<u16>().ok().filter(|n| (1..=max).contains(n));
             let ok = match what {
                 "overlay" | "overlay-through" | "overlay-blur" => matches!(value, "on" | "off"),
                 "overlay-size" => value.split_once('x').is_some_and(|(w, h)| px(w, 4000).is_some() && px(h, 4000).is_some()),
                 "overlay-zoom" => px(value, 400).is_some_and(|z| z >= 50),
+                "overlay-move" => value.split_once(',').is_some_and(|(x, y)| [x, y].iter().all(|n| n.parse::<i32>().is_ok_and(|n| n.abs() <= 4000))),
                 _ => false,
             };
             if !ok {
                 return empty(400);
             }
-            b.window_action(&format!("{what} {}", value.replace('x', " ")));
+            b.window_action(&format!("{what} {}", value.replace(['x', ','], " ")));
             return empty(204);
         }
         if let Some(name) = path.strip_prefix("/window/") {
@@ -420,10 +421,6 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let ok = b.set_theme(hue, sat).await;
             return saved(b, ok);
         }
-        if path == "/tosu-autostart/on" || path == "/tosu-autostart/off" {
-            let ok = tosu::set_tosu_autostart(b, path == "/tosu-autostart/on").await;
-            return saved(b, ok);
-        }
         // /sharing/both, /sharing/plays, /sharing/live, /sharing/none
         if let Some(choice) = path.strip_prefix("/sharing/") {
             let Some((plays, live)) = (match choice {
@@ -438,12 +435,6 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let plays_saved = b.set_send_plays(plays).await;
             let live_saved = presence::set_presence_setting(b, live).await;
             return saved(b, plays_saved && live_saved);
-        }
-        if path == "/tosu-dashboard/on" || path == "/tosu-dashboard/off" {
-            return match tosu::set_dashboard(b, path == "/tosu-dashboard/on").await {
-                Ok(()) => json(200, &b.snapshot()),
-                Err(e) => json(500, &serde_json::json!({ "error": e })),
-            };
         }
         // the image file itself as the body
         if path == "/skin/upload" {
@@ -637,10 +628,6 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
         // /plays/<id>/remove
         if let Some(id) = path.strip_prefix("/plays/").and_then(|r| r.strip_suffix("/remove")) {
             return if queue::remove(b, id) { json(200, &b.snapshot()) } else { empty(404) };
-        }
-        if path == "/get-tosu" {
-            get_tosu::start(b);
-            return json(200, &b.snapshot());
         }
         if path == "/update/install" {
             update::install(b);

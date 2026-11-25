@@ -73,7 +73,7 @@ const MOD_COLORS = {
 const COLOR = { red: "#ff6666", lime: "#b2ff66", purple: "#8c66ff", blue: "#66ccff", pink: "#ff66ab", yellow: "#ffcc22" };
 const modColor = (mod) => COLOR[Object.keys(MOD_COLORS).find((c) => MOD_COLORS[c].includes(mod))] ?? COLOR.red;
 
-// tosu gives "HDNC", "4KMR" etc
+// mods come as "HDNC", "4KMR" etc
 function modList(name) {
   const mods = name?.match(/10K|[1-9]K|SV2|[A-Z]{2}/g) ?? [];
   return mods.filter((m) => !(m === "DT" && mods.includes("NC")) && !(m === "SD" && mods.includes("PF")));

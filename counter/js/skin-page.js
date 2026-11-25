@@ -6,7 +6,7 @@ const SKIN_WHY = {
   lazer: "Couldn't read lazer's skin. In lazer, open the skin editor, then File, Edit externally, and it shows here while that's open.",
   builtin: "Lazer's built-in skins aren't shown here, only ones you've imported.",
   missing: "Can't find this skin's folder in osu!'s Skins.",
-  unknown: "Open osu! with tosu running to see your skin here.",
+  unknown: "Open osu! to see your skin here.",
 };
 
 // from: a play to watch (id), where in its map to start (map ms), and the analysis to go back to

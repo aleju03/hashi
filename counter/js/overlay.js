@@ -266,7 +266,7 @@ function overlayCard() {
   const parts = [
     art && el("div", { class: "ov-art" }),
     // on stream it's for the viewers: none of the controls or the notes meant for the player
-    !STREAM && [ovBar(), tosuHint(), statusLine(snapshot.connection)],
+    !STREAM && [ovBar(), readHint(), statusLine(snapshot.connection)],
     view === "settings" ? ovSettings() : view === "board" ? ovBoard(map) : ovNow(map),
     !STREAM && el("button", {
       class: "grip",

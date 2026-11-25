@@ -84,7 +84,7 @@ function bridge(rows, pose) {
     <rect class="solid" x="232" y="200" width="122" height="7" rx="2"/>
     <path class="solid" d="M229 200v-25l11-10 11 10v25z"/>
     <path class="line" d="M240 181v8"/>
-    <g class="light is-${rows.tosu.state}">
+    <g class="light is-${rows.osu.state}">
       <path class="line" d="M130 200v-31"/>
       <rect class="solid" x="121" y="134" width="18" height="36" rx="8"/>
       <circle class="lamp stop" cx="130" cy="145" r="4.5" style="${loop(1000)}"/>
@@ -180,13 +180,10 @@ function rows(site) {
   const osuOpen = tosu.connected && tosu.osu;
   return {
     osu: osuOpen
-      ? { state: "ok", name: gameName(tosu), detail: osuLabel(tosu), sub: tosu.player || "Guest" }
+      ? { state: "ok", name: gameName(tosu), detail: osuLabel(tosu), sub: tosu.player }
       : tosu.blocked
         ? { state: "warn", name: "osu!", detail: "Can't be read" }
         : { state: "idle", name: "osu!", detail: "Not open" },
-    tosu: tosu.connected
-      ? { state: "ok", name: "tosu", detail: "Running" }
-      : { state: { starting: "spin", "with-osu": "idle" }[tosu.launch] ?? "warn", name: "tosu", detail: tosuDetail(tosu) },
     site,
   };
 }
