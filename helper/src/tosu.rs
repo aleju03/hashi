@@ -90,8 +90,9 @@ pub(crate) struct TosuState {
     pub replay: bool,
     // the play is in torii, whose tosu-torii reports its results as play
     torii: bool,
-    // the attempt's song time was seen before its first note. song select's preview starts partway
-    // in, and tosu-torii reports it as play too
+    // the attempt's song time was seen before its first note. lazer always starts play before it,
+    // so play that doesn't is something else: torii's song select preview, a moment of play on
+    // lazer's results
     saw_start: bool,
     results_left_at: i64,
     play_started_at: i64,
@@ -385,7 +386,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 completed: at("lastObject") > 0.0
                     && at("live") >= at("lastObject")
                     && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true)
-                    && (t.saw_start || !t.torii),
+                    && (t.saw_start || client != "lazer"),
                 from_results: t.replay,
                 started_at: t.play_started_at,
             };
@@ -420,7 +421,7 @@ fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
         if state == "resultScreen" && t.prev_state.as_deref() != Some("resultScreen") {
             let finished = t.prev_state.as_deref() == Some("play");
             t.own_results = finished && t.last_play.as_ref().is_some_and(|p| p.whose == "playing");
-            if let Some(play) = t.last_play.clone().filter(|_| finished) {
+            if let Some(play) = t.last_play.clone().filter(|p| finished && (p.completed || p.client != "lazer")) {
                 t.pending_finish = Some(PendingFinish { since: now_ms(), play, viewed: t.viewed_result.clone(), stale: t.last_result_shown.clone() });
             }
         }
@@ -1127,7 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn room_plays_are_captured_when_finished() {
         let lazer = |state, live| frame("lazer", state, live);
-        assert_eq!(captured(&[lazer("lobby", 0.0), lazer("play", 30_000.0), lazer("play", 91_000.0), lazer("lobby", 91_500.0)]), 1);
+        assert_eq!(captured(&[lazer("lobby", 0.0), lazer("play", 0.0), lazer("play", 30_000.0), lazer("play", 91_000.0), lazer("lobby", 91_500.0)]), 1);
         let stable = |state, live| frame("stable", state, live);
         assert_eq!(captured(&[stable("matchSetup", 0.0), stable("play", 91_000.0), stable("rankingVs", 91_500.0)]), 1);
     }
@@ -1175,6 +1176,26 @@ mod tests {
         };
         assert_eq!(captured(&[lazer("selectPlay", 0.0), lazer("play", 91_000.0), lazer("play", 12_000.0), lazer("selectPlay", 12_100.0)]), 0);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    // a lazer play counted twice, NM then NC, the second time with no replay left for it
+    #[tokio::test]
+    async fn lazer_results_are_one_play() {
+        let lazer = |state, live| frame("lazer", state, live);
+        let play = [lazer("selectPlay", 0.0), lazer("play", 0.0), lazer("play", 91_000.0), lazer("resultScreen", 91_000.0)];
+        assert_eq!(captured(&[&play[..], &[lazer("selectPlay", 0.0)]].concat()), 1);
+        // play again for a moment, still at the end
+        let mut frames = play.to_vec();
+        frames.extend([lazer("play", 91_000.0), lazer("resultScreen", 91_000.0), lazer("selectPlay", 0.0)]);
+        assert_eq!(captured(&frames), 1);
+        // the replay from the results, left a few seconds in
+        let mut frames = play.to_vec();
+        frames.extend([lazer("play", 0.0), lazer("play", 4_000.0), lazer("resultScreen", 4_000.0), lazer("selectPlay", 0.0)]);
+        assert_eq!(captured(&frames), 1);
+        // a retry played through is another
+        let mut frames = play.to_vec();
+        frames.extend([lazer("play", 0.0), lazer("play", 91_000.0), lazer("resultScreen", 91_000.0), lazer("selectPlay", 0.0)]);
+        assert_eq!(captured(&frames), 2);
     }
 
     #[tokio::test]
