@@ -1,0 +1,27 @@
+[package]
+name = "osu-reader"
+description = "reads osu!stable and osu!lazer's memory for what's selected and played"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+
+[lib]
+name = "osu_reader"
+
+[dependencies]
+ed25519-compact = "2"
+lzma-rs = "0.3"
+md-5 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "hashi-reader"
+path = "src/main.rs"

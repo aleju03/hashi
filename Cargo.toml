@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["helper", "src-tauri"]
+members = ["helper", "reader", "src-tauri"]
 
 [workspace.package]
 version = "0.2.0"

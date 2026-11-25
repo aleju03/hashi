@@ -1,0 +1,706 @@
+use std::collections::BTreeMap;
+use super::lookup::{canonical_type, FieldLookup, LookupError, MAX_FIELD_OFFSET, MIN_FIELD_OFFSET};
+use super::validation::validate_lazer_schema;
+
+pub const DEFAULT_LAZER_TABLE_JSON: &str = include_str!("../../../offsets/lazer/2026.1005.0.0__10.0.12__x64.json");
+
+/// lazer 锚点与多跳拓扑段（可选，未配置时使用既有静态默认值）
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct LazerAnchorsSection {
+    #[serde(default = "default_lazer_marker_pattern")]
+    pub marker_pattern: String,
+    #[serde(default = "default_lazer_site_deltas")]
+    pub site_deltas: Vec<i64>,
+    #[serde(default = "default_lazer_game_base_hops")]
+    pub game_base_hops: Vec<(String, u64)>,
+}
+
+fn default_lazer_marker_pattern() -> String {
+    "01 01 00 00 00 00 80 44 00 00 40 44".to_string()
+}
+
+fn default_lazer_site_deltas() -> Vec<i64> {
+    vec![0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34]
+}
+
+fn default_lazer_game_base_hops() -> Vec<(String, u64)> {
+    vec![
+        ("external_link_opener".to_string(), 0x0),
+        ("api_access".to_string(), 0x218),
+        ("game".to_string(), 0x310),
+    ]
+}
+
+/// 一张偏移表（一个 `(lazer 版本, runtime 版本, 架构)` 组合一份）。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct OffsetTable {
+    pub lazer_version: String,
+    pub runtime_version: String,
+    pub arch: String,
+    pub game_base_vtable: Option<u64>,
+    #[serde(default)]
+    pub anchors: Option<LazerAnchorsSection>,
+    #[serde(default)]
+    pub screen_states: Option<BTreeMap<String, String>>,
+    pub types: BTreeMap<String, BTreeMap<String, i64>>,
+    #[serde(default)]
+    pub runtime: Option<RuntimeSection>,
+    /// 结算屏 → `ScoreInfo` 的字段位移（读侧只在 `state.name == resultScreen` 用）。
+    #[serde(default)]
+    pub results: Option<ResultsSection>,
+    /// `SelectedMods` 的 mod 对象 → 模组自定义设置（倍速 / DA 的 OD、HP）。
+    #[serde(default)]
+    pub mods: Option<ModsSection>,
+    /// 局内逐判定事件（LaneAcc / ScoreV1 转换）的读取布局。
+    #[serde(default)]
+    pub score: Option<ScoreSection>,
+    pub verified_build: String,
+    pub evidence: String,
+}
+
+/// 结算屏判定数链路的两个（可选第三个）字段位移。
+///
+/// 为什么不塞进 `types`：`types` 按"类型名 + 字段名"查表，而这两个位移挂的是
+/// **当前屏幕对象**（运行时才知道是哪个派生类，2026.1005 上是 `SoloResultsScreen`）
+/// 与 `ScoreInfo` 对象本身。读侧只在结算屏读它们，别处一律不发。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ResultsSection {
+    /// 结算屏对象上指向 `osu.Game.Scoring.ScoreInfo` 的字段位移（`ResultsScreen.Score`）。
+    pub score_offset: i64,
+    /// `ScoreInfo` 对象上指向 `<StatisticsJson>k__BackingField`（`System.String`）的位移。
+    ///
+    /// 可选：它只在**入库过**的成绩上有非空内容；`live` 在结算屏定位它靠"两段相邻的判定
+    /// JSON"，拿不到就不写这一项（读侧只用下面的字典）。
+    #[serde(default)]
+    pub statistics_offset: Option<i64>,
+    /// 结算屏对象上指向 `Player`/`ReplayPlayer` 的位移（回放判定；缺失则跳过该判定）。
+    #[serde(default)]
+    pub player_offset: Option<i64>,
+    /// `ScoreInfo` 对象上 `statistics`（`Dictionary<HitResult,int>`）的字段位移。
+    ///
+    /// 为什么需要它：`<StatisticsJson>` 只在**入库过**的成绩上非空（回放/历史成绩）；
+    /// 刚打完、还在结算屏上的分数，JSON 是空串，判定数只在 `statistics` 字典里。
+    #[serde(default)]
+    pub statistics_dict_offset: Option<i64>,
+    /// `Dictionary` 对象里 `_entries` 字段的位移（容器内部布局；`live` 在活体上测出）。
+    #[serde(default)]
+    pub dict_entries_offset: Option<i64>,
+    /// `ScoreInfo` 对象上 `<Hash>`（回放文件的 64-hex store key）的位移。
+    ///
+    /// 2026.1005 实测 `+0x40`。注意：`ScoreInfo.BeatmapHash` 在本构建里也是 64-hex
+    /// （`.osu` 的 SHA-256），生成器用 store 目录里的文件头（`.osu` 文本 vs `.osr` 二进制）
+    /// 区分两者；读侧只做 64-hex 校验，不做猜测。
+    #[serde(default)]
+    pub score_hash: Option<i64>,
+    /// `HitResult` 枚举序号 → 载荷键（`{"miss":1,"meh":2,"ok":3,"good":4,"great":5,"perfect":6}`）。
+    ///
+    /// 来自 IL 的枚举成员声明顺序（隐式值 = 声明序号）；读字典时按它把整型键换成判定。
+    #[serde(default)]
+    pub hit_result_values: BTreeMap<String, u32>,
+    /// 活体验证见证（结算屏类型 + 解析出的判定摘要）。
+    #[serde(default)]
+    pub witness: String,
+}
+
+impl ResultsSection {
+    /// 位移都在合理域里、且 8 字节对齐才算可用（坏值 = 读侧按"没有 results 段"降级）。
+    pub fn usable(&self) -> bool {
+        let in_range = |offset: i64| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(&offset)
+                && offset % 8 == 0
+        };
+        let has_hits_source = self.statistics_offset.is_some()
+            || (self.statistics_dict_offset.is_some() && self.dict_entries_offset.is_some());
+        in_range(self.score_offset)
+            && has_hits_source
+            && self.player_offset.map_or(true, in_range)
+            && self.statistics_offset.map_or(true, in_range)
+            && self.statistics_dict_offset.map_or(true, in_range)
+            && self.dict_entries_offset.map_or(true, in_range)
+    }
+
+    /// `<Hash>` 的位移：只接受域内且 8 字节对齐的值；缺省/坏值返回 `None`。
+    pub fn score_hash_offset(&self) -> Option<i64> {
+        self.score_hash.filter(|offset| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(offset)
+                && offset % 8 == 0
+        })
+    }
+}
+
+/// `SelectedMods` 的 mod 对象 → 模组自定义设置。
+///
+/// 读侧只处理表中列出的 acronym：字段名决定解码方式（见 `frame::read_mod_settings`）。
+/// 结构来自 2026-10-20 的活体探测（Lazer 2026.1005.0.0）：
+/// - DT `+0x10` → `BindableDouble`，`f64 @ +0x40` = 1.2；
+/// - DA `+0x10`（DrainRate）/ `+0x28`（Mania OverallDifficulty）→ `DifficultyBindable`，
+///   其 `+0x60` 是内部 `BindableFloat`，`f32 @ +0x40` = 5.5 / 15.0；
+/// - DA `+0x20` → `BindableBool`（ExtendedLimits），`u8 @ +0x40` = 1。
+///
+/// 这些是**列布局**，随 Lazer 构建变化；表里没有 `mods` 段时读侧回落到旧的
+/// 倍速启发式，并且不会猜 DA 的 OD。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ModsSection {
+    /// 普通 `Bindable<T>` 上 `Value` 的位移（本构建 `0x40`）。
+    pub bindable_value: i64,
+    /// `DifficultyBindable` 上内部 `BindableFloat CurrentNumber` 的位移（本构建 `0x60`）。
+    pub difficulty_current: i64,
+    /// acronym（大写）→ 设置名 → mod 对象上的字段位移。
+    pub settings: BTreeMap<String, BTreeMap<String, i64>>,
+}
+
+impl ModsSection {
+    /// 读侧认识的设置名；表里出现别的名字视为表损坏（避免"表里有、读侧悄悄忽略"）。
+    pub const KNOWN_SETTINGS: &[&str] = &[
+        "speed_change",
+        "adjust_pitch",
+        "drain_rate",
+        "overall_difficulty",
+        "extended_limits",
+    ];
+
+    /// 三个位移都在合理域且 8 字节对齐；至少要有一组设置。
+    pub fn usable(&self) -> bool {
+        let in_range = |offset: i64| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(&offset)
+                && offset % 8 == 0
+        };
+        in_range(self.bindable_value)
+            && in_range(self.difficulty_current)
+            && !self.settings.is_empty()
+    }
+
+    pub fn settings_for(&self, acronym: &str) -> Option<&BTreeMap<String, i64>> {
+        self.settings.get(acronym)
+    }
+}
+
+/// 局内逐判定事件（`ScoreProcessor.hitEvents`）的读取布局。
+///
+/// 这是 **LaneAcc / ScoreV1 转换**的核心段：`Player.<ScoreProcessor>` →
+/// `ScoreProcessor.hitEvents`（`List<HitEvent>`）→ 元素内的 `TimeOffset` /
+/// `Result` / `HitObject`，再从 `HitObject + column` 取 mania 轨道号。
+///
+/// 结构布局来自 **live 实测**（2026.1005.0.0，
+/// `temp/laneacc-evidence/CONCLUSION.md`）：`HitEvent` 是 64 字节顺序值类型，
+/// `TimeOffset@0x10`、`Result@0x18`、`HitObject@0x00`；`Marshal.OffsetOf` 是 unmanaged 布局，
+/// 不能当 managed 字段偏移用。`Player.<ScoreProcessor>` 与 `ScoreProcessor.hitEvents`
+/// 是**字段偏移**，由生成器 `live` 复核后写入。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ScoreSection {
+    /// `Player` 对象上 `<ScoreProcessor>k__BackingField` 的字段位移。
+    pub player_score_processor: i64,
+    /// `ScoreProcessor` 对象上 `hitEvents`（`List<HitEvent>`）的字段位移。
+    pub hit_events: i64,
+    /// `HitEvent` 元素内 `HitObject` 指针的位移。
+    pub hit_object: i64,
+    /// `HitEvent` 元素内 `TimeOffset`（f64）的位移。
+    pub time_offset: i64,
+    /// `HitEvent` 元素内 `Result`（i32）的位移。
+    pub result: i64,
+    /// `HitObject` 对象内 `Column`（i32）的位移（mania 轨道号）。
+    pub column: i64,
+    /// `HitEvent` 的数组步长（本构建 0x40）。
+    pub stride: i64,
+    /// `Player` 对象上 `Score` 字段的位移（`LegacyDatabasedScore`，2026.1005 实测 0x480）。
+    #[serde(default)]
+    pub player_score: i64,
+    /// `Score` 对象上 `Replay` 字段的位移（实测 0x10）。
+    #[serde(default)]
+    pub score_replay: i64,
+    /// `Replay` 对象上 `Frames`（`List<ReplayFrame>`）的位移（实测 0x08）。
+    #[serde(default)]
+    pub replay_frames: i64,
+    /// `ManiaReplayFrame` 对象上 `Time`（f64）的位移（实测 0x10）。
+    #[serde(default)]
+    pub replay_time: i64,
+    /// `ManiaReplayFrame` 对象上 `Actions`（`List<ManiaAction>`）的位移（实测 0x18）。
+    #[serde(default)]
+    pub replay_actions: i64,
+    /// `Actions` 列表的 `_items` 位移（实测 0x08）。
+    #[serde(default)]
+    pub actions_items: i64,
+    /// `Actions` 列表的 `_size` 位移（实测 0x10）。
+    #[serde(default)]
+    pub actions_size: i64,
+    /// `ScoreProcessor` 对象上 `ScoreResultCounts`（`Dictionary<HitResult, int>`）的字段位移。
+    #[serde(default)]
+    pub score_result_counts: Option<i64>,
+    /// `Score` 对象上 `<ScoreInfo>` 的字段位移（回放哈希链：`Score → ScoreInfo → Hash`）。
+    #[serde(default)]
+    pub score_info: Option<i64>,
+    /// `ScoreInfo` 对象上 `<Hash>` 的位移（同 `ResultsSection.score_hash`）。
+    #[serde(default)]
+    pub score_hash: Option<i64>,
+    #[serde(default)]
+    pub witness: String,
+}
+
+impl ScoreSection {
+    /// 字段偏移在合理域、元素内偏移落在 stride 内、stride 8 字节对齐。
+    pub fn usable(&self) -> bool {
+        let field = |offset: i64| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(&offset)
+                && offset % 8 == 0
+        };
+        let event = |offset: i64, align: i64| {
+            offset >= 0 && offset + align <= self.stride && offset % align == 0
+        };
+        field(self.player_score_processor)
+            && field(self.hit_events)
+            && self.score_result_counts.map_or(true, field)
+            && (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET)
+                .contains(&self.column)
+            && self.column % 4 == 0
+            && (0x20..=0x200).contains(&self.stride)
+            && self.stride % 8 == 0
+            && event(self.hit_object, 8)
+            && event(self.time_offset, 8)
+            && event(self.result, 4)
+    }
+
+    /// 原始 ReplayFrame 读取是否可用（旧表没有这段 ⇒ 只走 hitEvents）。
+    pub fn replay_usable(&self) -> bool {
+        let field = |offset: i64| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(&offset)
+                && offset % 8 == 0
+        };
+        field(self.player_score)
+            && field(self.score_replay)
+            && field(self.replay_frames)
+            && field(self.replay_time)
+            && field(self.replay_actions)
+            && field(self.actions_items)
+            && field(self.actions_size)
+    }
+
+    /// 回放哈希链（`Score → ScoreInfo → Hash`）是否可用（旧表没有这两项 ⇒ 没有 `replayHash`）。
+    pub fn score_hash_usable(&self) -> bool {
+        self.score_info_offset().is_some() && self.score_hash_offset().is_some()
+    }
+
+    pub fn score_info_offset(&self) -> Option<i64> {
+        self.score_info.filter(|offset| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(offset)
+                && offset % 8 == 0
+        })
+    }
+
+    pub fn score_hash_offset(&self) -> Option<i64> {
+        self.score_hash.filter(|offset| {
+            (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET).contains(offset)
+                && offset % 8 == 0
+        })
+    }
+}
+
+/// `runtime` 段里的一个位移。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct RuntimeEntry {
+    pub offset: i64,
+    #[serde(default)]
+    pub shift: u32,
+    #[serde(default)]
+    pub stride: i64,
+    #[serde(default)]
+    pub witness: String,
+}
+
+impl RuntimeEntry {
+    pub fn usable(&self) -> bool {
+        self.offset >= 0 && self.offset <= MAX_FIELD_OFFSET
+    }
+}
+
+/// 运行时结构段。每一组都是 `名字 → 位移`。
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct RuntimeSection {
+    #[serde(default)]
+    pub eetype: BTreeMap<String, RuntimeEntry>,
+    #[serde(default)]
+    pub module: BTreeMap<String, RuntimeEntry>,
+    #[serde(default)]
+    pub screen_array: BTreeMap<String, RuntimeEntry>,
+    #[serde(default)]
+    pub typedefs: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub observed: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub witness: String,
+}
+
+impl RuntimeSection {
+    pub fn entry(&self, group: &str, name: &str) -> Option<&RuntimeEntry> {
+        let map = match group {
+            "eetype" => &self.eetype,
+            "module" => &self.module,
+            "screen_array" => &self.screen_array,
+            _ => return None,
+        };
+        map.get(name).filter(|entry| entry.usable())
+    }
+
+    pub fn type_name(&self, module: &str, rid: u32) -> Option<&str> {
+        self.typedefs
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(module))
+            .and_then(|(_, map)| map.get(&format!("{rid:X}")))
+            .map(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+    }
+
+    pub fn modules(&self) -> Vec<&str> {
+        self.typedefs.keys().map(|key| key.as_str()).collect()
+    }
+}
+
+pub const TABLE_KEYS: &[&str] = &[
+    "lazer_version",
+    "runtime_version",
+    "arch",
+    "game_base_vtable",
+    "types",
+    "runtime",
+    "results",
+    "score",
+    "verified_build",
+    "evidence",
+];
+
+/// 表的加载错误：字面量。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoadError {
+    Json(String),
+    EmptyField(&'static str),
+    Validation(String),
+}
+
+impl std::fmt::Display for LoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadError::Json(message) => write!(f, "offsets-load: {message}"),
+            LoadError::EmptyField(field) => write!(f, "offsets-load: empty {field}"),
+            LoadError::Validation(message) => write!(f, "offsets-load: {message}"),
+        }
+    }
+}
+
+impl OffsetTable {
+    pub fn load(bytes: &[u8]) -> Result<OffsetTable, LoadError> {
+        let table: OffsetTable =
+            serde_json::from_slice(bytes).map_err(|e| LoadError::Json(e.to_string()))?;
+        for (field, value) in [
+            ("lazer_version", &table.lazer_version),
+            ("runtime_version", &table.runtime_version),
+            ("arch", &table.arch),
+            ("verified_build", &table.verified_build),
+            ("evidence", &table.evidence),
+        ] {
+            if value.trim().is_empty() {
+                return Err(LoadError::EmptyField(field));
+            }
+        }
+        validate_lazer_schema(&table).map_err(|e| LoadError::Validation(e.to_string()))?;
+        Ok(table)
+    }
+
+    pub fn marker_pattern(&self) -> &str {
+        self.anchors
+            .as_ref()
+            .map(|a| a.marker_pattern.as_str())
+            .unwrap_or("01 01 00 00 00 00 80 44 00 00 40 44")
+    }
+
+    pub fn site_deltas(&self) -> &[i64] {
+        self.anchors
+            .as_ref()
+            .map(|a| a.site_deltas.as_slice())
+            .unwrap_or(&[0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34])
+    }
+
+    pub fn game_base_hops(&self) -> Vec<(&str, u64)> {
+        if let Some(anchors) = &self.anchors {
+            anchors
+                .game_base_hops
+                .iter()
+                .map(|(label, offset)| (label.as_str(), *offset))
+                .collect()
+        } else {
+            vec![
+                ("external_link_opener", 0x0),
+                ("api_access", 0x218),
+                ("game", 0x310),
+            ]
+        }
+    }
+
+    pub fn screen_state_for(&self, type_name: &str) -> Option<&str> {
+        if let Some(states) = &self.screen_states {
+            if let Some(name) = states.get(type_name) {
+                return Some(name.as_str());
+            }
+        }
+        None
+    }
+
+    pub fn key(&self) -> String {
+        format!(
+            "{}/{}/{}",
+            self.lazer_version, self.runtime_version, self.arch
+        )
+    }
+
+    pub fn offset(&self, type_name: &str, field: &str) -> Option<i64> {
+        self.types.get(type_name)?.get(field).copied()
+    }
+
+    pub fn runtime(&self) -> Option<&RuntimeSection> {
+        self.runtime.as_ref()
+    }
+
+    /// `results` 段（位移越界/未对齐 ⇒ `None`，读侧按"表里没有结算段"降级）。
+    pub fn results(&self) -> Option<&ResultsSection> {
+        self.results.as_ref().filter(|section| section.usable())
+    }
+
+    /// `mods` 段（位移越界/未对齐 ⇒ `None`，读侧回落到旧倍速启发式）。
+    pub fn mods(&self) -> Option<&ModsSection> {
+        self.mods.as_ref().filter(|section| section.usable())
+    }
+
+    /// `score` 段（坏值 ⇒ `None`，读侧整段降级，不猜）。
+    pub fn score(&self) -> Option<&ScoreSection> {
+        self.score.as_ref().filter(|section| section.usable())
+    }
+
+    pub fn runtime_entry(&self, group: &str, name: &str) -> Option<&RuntimeEntry> {
+        self.runtime.as_ref()?.entry(group, name)
+    }
+
+    pub fn runtime_type_name(&self, module: &str, rid: u32) -> Option<&str> {
+        self.runtime.as_ref()?.type_name(module, rid)
+    }
+
+    pub fn offset_for(&self, lookup: &FieldLookup) -> Result<i64, LookupError> {
+        let all: Vec<String> = lookup
+            .type_all
+            .iter()
+            .map(|text| canonical_type(text))
+            .collect();
+        let any: Vec<String> = lookup
+            .type_any
+            .iter()
+            .map(|text| canonical_type(text))
+            .collect();
+        let mut matches: Vec<(String, i64)> = Vec::new();
+        for (key, fields) in &self.types {
+            let canonical = canonical_type(key);
+            let all_hit = all.iter().all(|needle| canonical.contains(needle.as_str()));
+            let any_hit = any.is_empty() || any.iter().any(|needle| canonical.contains(needle.as_str()));
+            if !(all_hit && any_hit) {
+                continue;
+            }
+            if let Some(offset) = fields.get(lookup.field).copied() {
+                matches.push((canonical, offset));
+            } else {
+                matches.push((canonical, i64::MIN));
+            }
+        }
+        match matches.len() {
+            0 => Err(LookupError::NoType(lookup.label())),
+            1 => {
+                let (key, offset) = matches.remove(0);
+                if offset == i64::MIN {
+                    return Err(LookupError::NoField(key, lookup.field.to_string()));
+                }
+                if !(MIN_FIELD_OFFSET..=MAX_FIELD_OFFSET).contains(&offset) {
+                    return Err(LookupError::OutOfRange(lookup.label(), offset));
+                }
+                Ok(offset)
+            }
+            _ => {
+                let keys: Vec<String> = matches.into_iter().map(|(key, _)| key).collect();
+                Err(LookupError::Ambiguous(lookup.label(), keys))
+            }
+        }
+    }
+
+    pub fn mismatch(&self, lazer_version: &str, runtime_version: &str, arch: &str) -> Option<String> {
+        if !versions_match(&self.lazer_version, lazer_version) {
+            return Some(format!("version:{}", self.lazer_version));
+        }
+        if !versions_match(&self.runtime_version, runtime_version) {
+            return Some(format!("runtime:{}", self.runtime_version));
+        }
+        if !self.arch.eq_ignore_ascii_case(arch) {
+            return Some(format!("arch:{}", self.arch));
+        }
+        None
+    }
+
+    pub fn target(lazer_version: &str, runtime_version: &str, arch: &str) -> Target {
+        Target {
+            lazer_version: lazer_version.to_string(),
+            runtime_version: runtime_version.to_string(),
+            arch: arch.to_string(),
+        }
+    }
+
+    pub fn nearest_table<'a>(
+        tables: &'a [OffsetTable],
+        target: &Target,
+        max_distance: u32,
+        policy: &ValidationPolicy<'_>,
+    ) -> Result<&'a OffsetTable, NearestError> {
+        if tables.is_empty() {
+            return Err(NearestError::NoCandidates);
+        }
+        let mut ranked: Vec<(u32, &OffsetTable)> = tables
+            .iter()
+            .filter_map(|table| version_distance(table, target).map(|d| (d, table)))
+            .collect();
+        if ranked.is_empty() {
+            return Err(NearestError::NoCandidates);
+        }
+        ranked.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.lazer_version.cmp(&b.1.lazer_version))
+                .then_with(|| a.1.runtime_version.cmp(&b.1.runtime_version))
+        });
+        let (distance, nearest) = ranked[0];
+        if distance > max_distance {
+            return Err(NearestError::TooFar {
+                distance,
+                max_distance,
+            });
+        }
+        match policy.validate(nearest) {
+            true => Ok(nearest),
+            false => Err(NearestError::Refused(nearest.key())),
+        }
+    }
+
+    pub fn field_labels(&self) -> Vec<String> {
+        let mut labels: Vec<String> = Vec::new();
+        for (key, fields) in &self.types {
+            for field in fields.keys() {
+                labels.push(format!("{key}.{field}"));
+            }
+        }
+        labels
+    }
+}
+
+/// 目标环境（就回落要匹配的键）。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub lazer_version: String,
+    pub runtime_version: String,
+    pub arch: String,
+}
+
+/// 回落被拒的原因。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NearestError {
+    NoCandidates,
+    TooFar { distance: u32, max_distance: u32 },
+    Refused(String),
+}
+
+impl std::fmt::Display for NearestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NearestError::NoCandidates => write!(f, "nearest: no candidate"),
+            NearestError::TooFar {
+                distance,
+                max_distance,
+            } => write!(f, "nearest: distance {distance} > {max_distance}"),
+            NearestError::Refused(key) => write!(f, "nearest: refused by policy ({key})"),
+        }
+    }
+}
+
+/// 校验钩子。默认实现恒拒。
+pub struct ValidationPolicy<'a> {
+    validate: &'a dyn Fn(&OffsetTable) -> bool,
+}
+
+impl Default for ValidationPolicy<'static> {
+    fn default() -> Self {
+        Self::refuse()
+    }
+}
+
+impl<'a> ValidationPolicy<'a> {
+    pub fn new(validate: &'a dyn Fn(&OffsetTable) -> bool) -> Self {
+        ValidationPolicy { validate }
+    }
+
+    pub fn refuse() -> Self {
+        ValidationPolicy {
+            validate: &|_table: &OffsetTable| false,
+        }
+    }
+
+    pub fn validate(&self, table: &OffsetTable) -> bool {
+        (self.validate)(table)
+    }
+}
+
+pub fn normalize_version(v: &str) -> String {
+    let clean = v.split('-').next().unwrap_or(v).trim();
+    let parts: Vec<u32> = clean
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0))
+        .collect();
+    if parts.is_empty() {
+        return clean.to_string();
+    }
+    let mut end = parts.len();
+    while end > 3 && parts[end - 1] == 0 {
+        end -= 1;
+    }
+    parts[..end]
+        .iter()
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+pub fn versions_match(a: &str, b: &str) -> bool {
+    if a.eq_ignore_ascii_case(b) {
+        return true;
+    }
+    normalize_version(a) == normalize_version(b)
+}
+
+fn version_distance(table: &OffsetTable, target: &Target) -> Option<u32> {
+    if !table.arch.eq_ignore_ascii_case(&target.arch) {
+        return None;
+    }
+    Some(component_distance(&table.lazer_version, &target.lazer_version).saturating_add(
+        component_distance(&table.runtime_version, &target.runtime_version),
+    ))
+}
+
+fn component_distance(left: &str, right: &str) -> u32 {
+    let left: Vec<u32> = left.split('.').map(parse_component).collect();
+    let right: Vec<u32> = right.split('.').map(parse_component).collect();
+    let len = left.len().max(right.len());
+    let mut total = 0u32;
+    for index in 0..len {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        total = total.saturating_add(a.abs_diff(b));
+    }
+    total
+}
+
+fn parse_component(text: &str) -> u32 {
+    text.trim().parse::<u32>().unwrap_or(0)
+}
+
+pub fn default_lazer_table() -> OffsetTable {
+    OffsetTable::load(DEFAULT_LAZER_TABLE_JSON.as_bytes())
+        .expect("compiled-in lazer table must be valid")
+}

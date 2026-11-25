@@ -1,0 +1,470 @@
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use crate::osu::model::Reason;
+use super::lazer_table::LoadError;
+use super::validation::validate_stable_schema;
+
+pub const DEFAULT_STABLE_TABLE_JSON: &str = include_str!("../../../offsets/stable/stable__x86.json");
+pub const DEFAULT_PPYSB_TABLE_JSON: &str = include_str!("../../../offsets/stable/ppysb__x86.json");
+
+/// stable 锚点定义
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableAnchorDef {
+    pub pattern: String,
+    pub offset: i32,
+    #[serde(default)]
+    pub derivation: String,
+    #[serde(default)]
+    pub evidence: String,
+}
+
+/// `Score + 0x34` 的 `List<ReplayFrame>` 段（可选；缺段 = Stable LaneAcc 占位）。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableReplaySection {
+    /// `Score + score_frames` → `List<ReplayFrame>`。
+    pub score_frames: u32,
+    /// `List._items`。
+    pub list_items: u32,
+    /// `List._size`。
+    pub list_size: u32,
+    /// `List._version`（可选；用于检测 clear + refill）。
+    #[serde(default)]
+    pub list_version: Option<u32>,
+    /// 数组对象内 element[0] 的偏移。
+    pub array_data: u32,
+    /// `ReplayFrame.time`（int32）。
+    pub frame_time: u32,
+    /// `ReplayFrame.x`（float，mania 列位掩码）。
+    pub frame_keys: u32,
+    /// `ReplayFrame.y`（float，mania 列宽常量）。
+    pub frame_y: u32,
+    /// `ReplayFrame.pButtonState`（int32）。
+    pub frame_buttons: u32,
+    #[serde(default)]
+    pub witness: String,
+}
+
+/// `gameplay + note_list_from_gameplay` 的 `List<Note>` 段（可选；per-note 判定直读）。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableNotesSection {
+    /// `gameplay + note_list_from_gameplay` → `List<Note>`。
+    pub note_list_from_gameplay: u32,
+    /// `List._items`。
+    pub list_items: u32,
+    /// `List._size`。
+    pub list_size: u32,
+    /// 数组对象内 element[0] 的偏移。
+    pub array_data: u32,
+    /// `Note.time`（int32，谱面时间）。
+    pub note_time: u32,
+    /// `Note.end`（int32；tap 与 time 相同）。
+    pub note_end: u32,
+    /// `Note.press_time`（int32；实际按下时刻，V2 LN 头档用）。
+    #[serde(default)]
+    pub note_press: Option<u32>,
+    /// `Note.release_time`（int32；实际释放时刻，tap=0）。
+    #[serde(default)]
+    pub note_release: Option<u32>,
+    /// `Note.is_hold`（int32；1=LN，0=tap）。
+    #[serde(default)]
+    pub note_is_hold: Option<u32>,
+    /// `Note.column`（int32，0..=17）。
+    #[serde(default)]
+    pub note_column: Option<u32>,
+    /// `Note.judgement`（int32；stable 判定枚举）。
+    pub note_judgement: u32,
+    #[serde(default)]
+    pub witness: String,
+}
+
+/// stable 多跳链路与偏移拓扑
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableTopology {
+    #[serde(default = "default_play_time_from_anchor")]
+    pub play_time_from_anchor: u32,
+    #[serde(default = "default_beatmap_from_base")]
+    pub beatmap_from_base: u32,
+    #[serde(default = "default_info_from_base")]
+    pub info_from_base: u32,
+    #[serde(default = "default_retries_offset")]
+    pub retries_offset: u32,
+    #[serde(default = "default_plays_offset")]
+    pub plays_offset: u32,
+    #[serde(default = "default_ruleset_from_anchor")]
+    pub ruleset_from_anchor: u32,
+    #[serde(default = "default_ruleset_list_offset")]
+    pub ruleset_list_offset: u32,
+    #[serde(default = "default_gameplay_from_ruleset")]
+    pub gameplay_from_ruleset: u32,
+    #[serde(default = "default_result_from_ruleset")]
+    pub result_from_ruleset: u32,
+    #[serde(default = "default_score_from_gameplay")]
+    pub score_from_gameplay: u32,
+    #[serde(default = "default_mods_container")]
+    pub mods_container: u32,
+    #[serde(default = "default_mods_xor_high")]
+    pub mods_xor_high: u32,
+    #[serde(default = "default_mods_xor_low")]
+    pub mods_xor_low: u32,
+    #[serde(default = "default_score_processor_from_score")]
+    pub score_processor_from_score: u32,
+    /// `Score.Seed`（int32）。play/result 的 `Score` 对象上；旧表缺段 ⇒ None。
+    #[serde(default)]
+    pub score_seed: Option<u32>,
+    #[serde(default = "default_scorev2_bit")]
+    pub scorev2_bit: u32,
+    #[serde(default = "default_result_score_offset")]
+    pub result_score_offset: u32,
+    #[serde(default = "default_result_max_combo_offset")]
+    pub result_max_combo_offset: u32,
+    #[serde(default = "default_result_player_name_offset")]
+    pub result_player_name_offset: u32,
+    #[serde(default = "default_result_online_id_offset")]
+    pub result_online_id_offset: u32,
+    #[serde(default = "default_mp3_length_from_anchor")]
+    pub mp3_length_from_anchor: u32,
+    #[serde(default = "default_mp3_length_field")]
+    pub mp3_length_field: u32,
+    #[serde(default = "default_hits_candidate_offsets")]
+    pub hits_candidate_offsets: Vec<u32>,
+    #[serde(default = "default_hits_slot_mapping")]
+    pub hits_slot_mapping: Vec<(usize, String)>,
+    /// `Score+0x34` 原始 ReplayFrame 段；旧表缺段 = 占位。
+    #[serde(default)]
+    pub replay: Option<StableReplaySection>,
+    /// per-note judgement 直读段；旧表缺段 = 回退 V1 状态机/占位。
+    #[serde(default)]
+    pub notes: Option<StableNotesSection>,
+    #[serde(default = "default_beatmap_md5")]
+    pub beatmap_md5: u32,
+    #[serde(default = "default_beatmap_filename")]
+    pub beatmap_filename: u32,
+    #[serde(default = "default_beatmap_folder")]
+    pub beatmap_folder: u32,
+    #[serde(default = "default_beatmap_version")]
+    pub beatmap_version: u32,
+    #[serde(default = "default_beatmap_artist")]
+    pub beatmap_artist: u32,
+    #[serde(default = "default_beatmap_title")]
+    pub beatmap_title: u32,
+    #[serde(default = "default_beatmap_mapper")]
+    pub beatmap_mapper: u32,
+    #[serde(default = "default_beatmap_id")]
+    pub beatmap_id: u32,
+    #[serde(default = "default_beatmap_set_id")]
+    pub beatmap_set_id: u32,
+}
+
+fn default_play_time_from_anchor() -> u32 { 0x5 }
+fn default_beatmap_from_base() -> u32 { 0xC }
+fn default_info_from_base() -> u32 { 0x33 }
+fn default_retries_offset() -> u32 { 0x8 }
+fn default_plays_offset() -> u32 { 0xC }
+fn default_ruleset_from_anchor() -> u32 { 0xB }
+fn default_ruleset_list_offset() -> u32 { 0x4 }
+fn default_gameplay_from_ruleset() -> u32 { 0x64 }
+fn default_result_from_ruleset() -> u32 { 0x38 }
+fn default_score_from_gameplay() -> u32 { 0x38 }
+fn default_mods_container() -> u32 { 0x1C }
+fn default_mods_xor_high() -> u32 { 0xC }
+fn default_mods_xor_low() -> u32 { 0x8 }
+fn default_score_processor_from_score() -> u32 { 0x54 }
+fn default_scorev2_bit() -> u32 { 0x2000_0000 }
+fn default_result_score_offset() -> u32 { 0x78 }
+fn default_result_max_combo_offset() -> u32 { 0x68 }
+fn default_result_player_name_offset() -> u32 { 0x28 }
+fn default_result_online_id_offset() -> u32 { 0x4 }
+fn default_mp3_length_from_anchor() -> u32 { 0x7 }
+fn default_mp3_length_field() -> u32 { 0x4 }
+fn default_beatmap_md5() -> u32 { 0x6C }
+fn default_beatmap_filename() -> u32 { 0x90 }
+fn default_beatmap_folder() -> u32 { 0x78 }
+fn default_beatmap_version() -> u32 { 0xAC }
+fn default_beatmap_artist() -> u32 { 0x18 }
+fn default_beatmap_title() -> u32 { 0x24 }
+fn default_beatmap_mapper() -> u32 { 0x7C }
+fn default_beatmap_id() -> u32 { 0xC8 }
+fn default_beatmap_set_id() -> u32 { 0xCC }
+fn default_hits_candidate_offsets() -> Vec<u32> {
+    vec![0x88, 0x8A, 0x8C, 0x8E, 0x90, 0x92, 0x94, 0x68]
+}
+fn default_hits_slot_mapping() -> Vec<(usize, String)> {
+    vec![
+        (0, "100".to_string()),
+        (1, "300".to_string()),
+        (2, "50".to_string()),
+        (3, "geki".to_string()),
+        (4, "katu".to_string()),
+        (5, "miss".to_string()),
+    ]
+}
+
+impl Default for StableTopology {
+    fn default() -> Self {
+        StableTopology {
+            play_time_from_anchor: default_play_time_from_anchor(),
+            beatmap_from_base: default_beatmap_from_base(),
+            info_from_base: default_info_from_base(),
+            retries_offset: default_retries_offset(),
+            plays_offset: default_plays_offset(),
+            ruleset_from_anchor: default_ruleset_from_anchor(),
+            ruleset_list_offset: default_ruleset_list_offset(),
+            gameplay_from_ruleset: default_gameplay_from_ruleset(),
+            result_from_ruleset: default_result_from_ruleset(),
+            score_from_gameplay: default_score_from_gameplay(),
+            mods_container: default_mods_container(),
+            mods_xor_high: default_mods_xor_high(),
+            mods_xor_low: default_mods_xor_low(),
+            score_processor_from_score: default_score_processor_from_score(),
+            score_seed: None,
+            scorev2_bit: default_scorev2_bit(),
+            result_score_offset: default_result_score_offset(),
+            result_max_combo_offset: default_result_max_combo_offset(),
+            result_player_name_offset: default_result_player_name_offset(),
+            result_online_id_offset: default_result_online_id_offset(),
+            mp3_length_from_anchor: default_mp3_length_from_anchor(),
+            mp3_length_field: default_mp3_length_field(),
+            hits_candidate_offsets: default_hits_candidate_offsets(),
+            hits_slot_mapping: default_hits_slot_mapping(),
+            replay: None,
+            notes: None,
+            beatmap_md5: default_beatmap_md5(),
+            beatmap_filename: default_beatmap_filename(),
+            beatmap_folder: default_beatmap_folder(),
+            beatmap_version: default_beatmap_version(),
+            beatmap_artist: default_beatmap_artist(),
+            beatmap_title: default_beatmap_title(),
+            beatmap_mapper: default_beatmap_mapper(),
+            beatmap_id: default_beatmap_id(),
+            beatmap_set_id: default_beatmap_set_id(),
+        }
+    }
+}
+
+/// stable 映射段（状态名枚举、mods 映射等）
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableMappings {
+    #[serde(default = "default_stable_states")]
+    pub states: BTreeMap<String, String>,
+}
+
+fn default_stable_states() -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    map.insert("0".to_string(), "menu".to_string());
+    map.insert("1".to_string(), "edit".to_string());
+    map.insert("2".to_string(), "play".to_string());
+    map.insert("4".to_string(), "selectEdit".to_string());
+    map.insert("5".to_string(), "selectPlay".to_string());
+    map.insert("7".to_string(), "resultScreen".to_string());
+    map
+}
+
+impl Default for StableMappings {
+    fn default() -> Self {
+        StableMappings {
+            states: default_stable_states(),
+        }
+    }
+}
+
+/// stable 偏移表（纯数据模型，对应 stable__x86.json）
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableTable {
+    #[serde(default = "default_stable_client")]
+    pub client: String,
+    pub version: String,
+    pub arch: String,
+    pub anchors: BTreeMap<String, StableAnchorDef>,
+    #[serde(default)]
+    pub topology: StableTopology,
+    #[serde(default)]
+    pub mappings: StableMappings,
+    pub verified_build: String,
+    pub evidence: String,
+}
+
+fn default_stable_client() -> String {
+    "stable".to_string()
+}
+
+impl StableTable {
+    pub fn load(bytes: &[u8]) -> Result<StableTable, LoadError> {
+        let table: StableTable =
+            serde_json::from_slice(bytes).map_err(|e| LoadError::Json(e.to_string()))?;
+        for (field, value) in [
+            ("client", &table.client),
+            ("version", &table.version),
+            ("arch", &table.arch),
+            ("verified_build", &table.verified_build),
+            ("evidence", &table.evidence),
+        ] {
+            if value.trim().is_empty() {
+                return Err(LoadError::EmptyField(field));
+            }
+        }
+        validate_stable_schema(&table).map_err(|e| LoadError::Validation(e.to_string()))?;
+        Ok(table)
+    }
+
+    pub fn anchor(&self, key: &str) -> Option<&StableAnchorDef> {
+        self.anchors.get(key)
+    }
+
+    pub fn state_name(&self, index: i32) -> Option<&str> {
+        self.mappings.states.get(&index.to_string()).map(|s| s.as_str())
+    }
+}
+
+pub fn default_stable_table() -> StableTable {
+    StableTable::load(DEFAULT_STABLE_TABLE_JSON.as_bytes())
+        .expect("compiled-in stable table must be valid")
+}
+
+pub fn default_ppysb_table() -> StableTable {
+    StableTable::load(DEFAULT_PPYSB_TABLE_JSON.as_bytes())
+        .expect("compiled-in ppysb table must be valid")
+}
+
+/// 磁盘表可能是旧版本（例如 APPDATA 里 2026-11-06 的 stable 表，尚无
+/// `score_seed`）。同一 verified_build 下，用内置表补齐新增的可选段；
+/// 不同构建绝不借用偏移。
+fn fill_embedded_optional_sections(mut table: StableTable, variant: &str) -> StableTable {
+    let embedded = if variant.eq_ignore_ascii_case("ppysb") {
+        default_ppysb_table()
+    } else {
+        default_stable_table()
+    };
+    if table.verified_build.eq_ignore_ascii_case(&embedded.verified_build) {
+        if table.topology.score_seed.is_none() {
+            table.topology.score_seed = embedded.topology.score_seed;
+        }
+    }
+    table
+}
+
+/// stable / ppysb 表发现梯子
+pub fn find_stable_table_variant(dir_hint: Option<&Path>, variant: &str) -> Result<StableTable, Reason> {
+    let filename = if variant.eq_ignore_ascii_case("ppysb") {
+        "ppysb__x86.json"
+    } else {
+        "stable__x86.json"
+    };
+
+    // 1. 显式环境变量 $MMA_PPYSB_OFFSETS / $MMA_STABLE_OFFSETS
+    let env_var = if variant.eq_ignore_ascii_case("ppysb") {
+        std::env::var("MMA_PPYSB_OFFSETS").or_else(|_| std::env::var("MMA_STABLE_OFFSETS"))
+    } else {
+        std::env::var("MMA_STABLE_OFFSETS")
+    };
+    if let Ok(env_file) = env_var {
+        let p = PathBuf::from(env_file);
+        if p.exists() {
+            if let Ok(bytes) = std::fs::read(&p) {
+                if let Ok(table) = StableTable::load(&bytes) {
+                    return Ok(fill_embedded_optional_sections(table, variant));
+                }
+            }
+        }
+    }
+
+    // 2. 统一偏移目录环境变量 $MMA_OFFSETS_DIR
+    if let Ok(offsets_dir) = std::env::var("MMA_OFFSETS_DIR") {
+        for sub in &["stable", "ppysb"] {
+            let p = PathBuf::from(&offsets_dir).join(sub).join(filename);
+            if p.exists() {
+                if let Ok(bytes) = std::fs::read(&p) {
+                    if let Ok(table) = StableTable::load(&bytes) {
+                        return Ok(fill_embedded_optional_sections(table, variant));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. APPDATA 缓存目录
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        for sub in &["stable", "ppysb"] {
+            let p = PathBuf::from(&appdata)
+                .join("ManiaMapAnalyser")
+                .join("offsets")
+                .join(sub)
+                .join(filename);
+            if p.exists() {
+                if let Ok(bytes) = std::fs::read(&p) {
+                    if let Ok(table) = StableTable::load(&bytes) {
+                        return Ok(fill_embedded_optional_sections(table, variant));
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. dir_hint 目录（如 exe 同级目录）
+    if let Some(hint) = dir_hint {
+        let candidates = [
+            hint.join("offsets").join("stable").join(filename),
+            hint.join("offsets").join("ppysb").join(filename),
+            hint.join("offset").join("stable").join(filename),
+            hint.join("offset").join("ppysb").join(filename),
+        ];
+        for p in &candidates {
+            if p.exists() {
+                if let Ok(bytes) = std::fs::read(p) {
+                    if let Ok(table) = StableTable::load(&bytes) {
+                        return Ok(fill_embedded_optional_sections(table, variant));
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. 当前可执行文件同级目录
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            for sub in &["stable", "ppysb"] {
+                let p = exe_dir.join("offsets").join(sub).join(filename);
+                if p.exists() {
+                    if let Ok(bytes) = std::fs::read(&p) {
+                        if let Ok(table) = StableTable::load(&bytes) {
+                            return Ok(fill_embedded_optional_sections(table, variant));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. 内置编译期兜底（Zero IO 永不失败）
+    if variant.eq_ignore_ascii_case("ppysb") {
+        Ok(default_ppysb_table())
+    } else {
+        Ok(default_stable_table())
+    }
+}
+
+pub fn find_stable_table(dir_hint: Option<&Path>) -> Result<StableTable, Reason> {
+    find_stable_table_variant(dir_hint, "stable")
+}
+
+
+#[cfg(test)]
+mod optional_sections_tests {
+    use super::*;
+
+    #[test]
+    fn same_build_disk_table_gets_embedded_score_seed() {
+        let mut disk = default_stable_table();
+        disk.topology.score_seed = None;
+        let merged = fill_embedded_optional_sections(disk, "stable");
+        assert_eq!(merged.topology.score_seed, Some(0x80));
+    }
+
+    #[test]
+    fn different_build_disk_table_keeps_missing_score_seed() {
+        let mut disk = default_stable_table();
+        disk.topology.score_seed = None;
+        disk.verified_build = "00000000000000000000000000000000".to_string();
+        let merged = fill_embedded_optional_sections(disk, "stable");
+        assert_eq!(merged.topology.score_seed, None);
+    }
+}

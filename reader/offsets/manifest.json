@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "updated_at": "2026-10-08T12:00:00Z",
+  "tables": [
+    {
+      "filename": "stable__x86.json",
+      "client": "stable",
+      "game_version": "2026-latest",
+      "runtime_version": "CLRv4",
+      "arch": "x86",
+      "sha256": "b8ab73ed90001152d66d345b4df28f790ca94b9da1a8e818e01a74c62a03e132",
+      "signature": "24d58a004dd0a4a7f9a77fa366e2301fb03e2754ec47dae0507252e3dee4d4c5c84baa1d1d14c70fda76b741cb52b2760638d0c877d12815a1c5a64512f68301"
+    },
+    {
+      "filename": "2026.1005.0.0__10.0.12__x64.json",
+      "client": "lazer",
+      "game_version": "2026.1005.0.0",
+      "runtime_version": "10.0.12",
+      "arch": "x64",
+      "sha256": "950330fba5bff63edfb8be0630c6d0e7a043a7add49d56d07c81b2b7a3836e66",
+      "signature": "1c0073368e4fd3a493513ae1561d19697559c231ea784217f8f6d952bafa87c48a4db17c32316f2363b952c42078ccfe86db812804211982eed15567d71fff05"
+    }
+  ]
+}

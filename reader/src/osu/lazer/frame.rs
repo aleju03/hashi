@@ -1,0 +1,1495 @@
+use crate::osu::model::{Client, LazerMod, Reason, Snapshot};
+use crate::osu::offsets::{LookupError, ModsSection, OffsetTable};
+use super::fields::*;
+use super::resolve::*;
+#[allow(unused_imports)]
+use super::screen::{read_eetype, read_screen_state, runtime_probe, ScreenOutcome};
+#[allow(unused_imports)]
+use super::table::*;
+use super::source::*;
+use super::types::*;
+use super::results;
+use std::path::PathBuf;
+
+/// 降级标记：`<载荷字段>:<原因>`。
+pub fn gap(field: &str, why: &str) -> String {
+    format!("{field}:{why}")
+}
+
+/// 查表失败的降级标记。
+pub fn offsets_gap(field: &str, error: &LookupError) -> String {
+    gap(field, &format!("offsets-{error}"))
+}
+
+/// 每帧的 L1 结构证明：(b) `[gameBase]` 对齐且可读 → (c) 会话内 MT 稳定。
+pub fn prove_object(
+    source: &dyn Source,
+    table: &OffsetTable,
+    game_base: u64,
+    anchors: &[u64],
+    modules: &[(u64, String)],
+    proof: &mut SessionProof,
+) -> Result<(u64, u64, Option<VtableChange>), Reason> {
+    let observed = read_u64(source, game_base);
+    if let Some(method_table) = observed.filter(|value| method_table_plausible(source, *value)) {
+        match proof.observe(method_table) {
+            ProofStep::First | ProofStep::Stable => return Ok((game_base, method_table, None)),
+            ProofStep::Changed { previous } => eprintln!(
+                "[osu] lazer: L1 object re-identified — MethodTable at gameBase=0x{game_base:016X} \
+                 changed 0x{previous:016X} -> 0x{method_table:016X}; re-resolving GameBase from {} \
+                 anchor(s)",
+                anchors.len()
+            ),
+        }
+    } else {
+        eprintln!(
+            "[osu] lazer: L1 object re-identified — `[gameBase]` at 0x{game_base:016X} is {}; \
+             re-resolving GameBase from {} anchor(s)",
+            observed
+                .map(|value| format!("0x{value:016X} (not an aligned+readable MethodTable)"))
+                .unwrap_or_else(|| "unreadable".to_string()),
+            anchors.len()
+        );
+    }
+
+    let previous = proof.session_vtable();
+    let resolution = resolve_game_base(source, modules, anchors, SITE_DELTAS);
+    log_resolution(&resolution);
+    let Some(candidate) = resolution.accepted() else {
+        eprintln!(
+            "[osu] lazer: L1 re-identification failed — no GameBase candidate for {} anchor(s) \
+             (signature-miss:{ANCHOR_KEY})",
+            anchors.len()
+        );
+        return Err(Reason::SignatureMiss(ANCHOR_KEY));
+    };
+    let (new_base, new_vtable) = (
+        candidate.game_base.unwrap_or(0),
+        candidate.method_table.unwrap_or(0),
+    );
+    proof.adopt(new_vtable);
+    eprintln!(
+        "[osu] lazer: L1 re-identified object — gameBase=0x{new_base:016X} delta={:#x} \
+         [gameBase]=0x{new_vtable:016X} (table={})",
+        candidate.delta,
+        table.key()
+    );
+    Ok((
+        new_base,
+        new_vtable,
+        Some(VtableChange { previous, observed }),
+    ))
+}
+
+/// 单次采样：(a)+(b)+(c) 的 L1 结构证明 → 解引用链 → §3.3 的 lazer 侧字段。
+pub fn read_frame(input: FrameInput<'_>) -> Result<LazerFrame, Reason> {
+    let FrameInput {
+        table,
+        source,
+        pid,
+        game_base,
+        anchors,
+        proof,
+        songs_folder,
+        game_folder,
+        modules,
+    } = input;
+    let resolved = Resolved::from_table(table);
+    let mut gaps: Vec<String> = Vec::new();
+    let mut snapshot = Snapshot {
+        client: Some(Client::Lazer),
+        pid,
+        ..Default::default()
+    };
+
+    // ① L1 结构证明
+    let (game_base, vtable, reidentified) = prove_object(source, table, game_base, anchors, modules, proof)?;
+    let mut chain = ChainAddrs {
+        game_base,
+        vtable,
+        ..Default::default()
+    };
+
+    // ② 字符串布局
+    let layout = match resolved.string_layout() {
+        Ok(layout) => Some(layout),
+        Err(error) => {
+            gaps.push(gap("strings", &format!("offsets-{error}")));
+            None
+        }
+    };
+
+    // ③ 存储链
+    if let Ok(offset) = resolved.storage {
+        if let Some(storage) = read_ptr_field(source, game_base, offset) {
+            chain.storage = Some(storage);
+            if let Ok(base_path_offset) = resolved.base_path {
+                chain.base_path = read_ptr_field(source, storage, base_path_offset);
+            }
+        }
+    }
+    let memory_songs = chain
+        .base_path
+        .and_then(|pointer| layout.and_then(|layout| read_string(source, pointer, layout)))
+        .map(|root| format!("{root}\\{}", FILES_DIR));
+    snapshot.folder = Some(FOLDER_DOT.to_string());
+    snapshot.songs_folder = match (&songs_folder, &memory_songs) {
+        (Some(ini), Some(memory)) if ini != memory => {
+            eprintln!(
+                "[osu] lazer: folders.songs mismatch — storage.ini says '{ini}', memory <BasePath> says '{memory}' (using storage.ini per P7)"
+            );
+            Some(ini.clone())
+        }
+        (Some(ini), _) => Some(ini.clone()),
+        (None, Some(memory)) => Some(memory.clone()),
+        (None, None) => {
+            gaps.push(gap("folders.songs", "offsets-missing-BasePath"));
+            None
+        }
+    };
+    snapshot.game_folder = game_folder;
+
+    // ④ 谱面链
+    let mut beatmap_info = None;
+    match (
+        resolved.beatmap.clone(),
+        resolved.bindable_value.clone(),
+        resolved.working_beatmap_info.clone(),
+    ) {
+        (Ok(beatmap), Ok(value), Ok(info)) => {
+            chain.beatmap_bindable = read_ptr_field(source, game_base, beatmap);
+            chain.working_beatmap = chain
+                .beatmap_bindable
+                .and_then(|bindable| read_ptr_field(source, bindable, value));
+            chain.beatmap_info = chain
+                .working_beatmap
+                .and_then(|working| read_ptr_field(source, working, info));
+            beatmap_info = chain.beatmap_info;
+            if beatmap_info.is_none() {
+                gaps.push(GAP_NO_BEATMAP.to_string());
+            }
+        }
+        (beatmap, value, info) => {
+            for (offset, field) in [
+                (beatmap, "beatmap.object"),
+                (value, "beatmap.bindable.value"),
+                (info, "beatmap.working"),
+            ] {
+                if let Err(error) = offset {
+                    gaps.push(offsets_gap(field, &error));
+                }
+            }
+        }
+    }
+
+    // ⑤ identity / 元数据
+    if let Some(info) = beatmap_info {
+        if let Some(md5) = read_text_field(source, info, &resolved.beatmap_md5, "beatmap.md5", layout, &mut gaps) {
+            if is_md5_hex(&md5) {
+                snapshot.checksum = Some(md5);
+            } else {
+                gaps.push(gap("beatmap.md5", "shape"));
+            }
+        }
+        if let Some(hash) = read_text_field(source, info, &resolved.beatmap_hash, "files.beatmap", layout, &mut gaps) {
+            match to_lazer_path(&hash) {
+                Some(path) => snapshot.filename = Some(path),
+                None => gaps.push(gap("files.beatmap", "shape")),
+            }
+        }
+        snapshot.map_id = field_i32(source, info, &resolved.beatmap_online_id, "beatmap.id", &mut gaps);
+        snapshot.version = read_text_field(
+            source,
+            info,
+            &resolved.beatmap_difficulty_name,
+            "beatmap.version",
+            layout,
+            &mut gaps,
+        );
+        chain.metadata = resolved
+            .beatmap_metadata
+            .as_ref()
+            .ok()
+            .and_then(|offset| read_ptr_field(source, info, *offset));
+        chain.beatmap_set = resolved
+            .beatmap_set
+            .as_ref()
+            .ok()
+            .and_then(|offset| read_ptr_field(source, info, *offset));
+        if let Some(set) = chain.beatmap_set {
+            snapshot.set_id = field_i32(source, set, &resolved.set_online_id, "beatmap.set", &mut gaps);
+            if let Some(layout) = layout {
+                snapshot.lazer_files = read_beatmap_set_files(source, set, layout);
+            }
+        } else if let Err(error) = &resolved.beatmap_set {
+            gaps.push(offsets_gap("beatmap.set", error));
+        } else {
+            gaps.push(gap("beatmap.set", "read"));
+        }
+        let mut bg_name_from_meta = None;
+        if let Some(metadata) = chain.metadata {
+            snapshot.title = read_text_field(source, metadata, &resolved.metadata_title, "beatmap.title", layout, &mut gaps);
+            snapshot.artist =
+                read_text_field(source, metadata, &resolved.metadata_artist, "beatmap.artist", layout, &mut gaps);
+            if let Some(layout) = layout {
+                bg_name_from_meta = read_ptr_field(source, metadata, 96)
+                    .and_then(|ptr| read_string(source, ptr, layout));
+            }
+            chain.realm_user = resolved
+                .metadata_author
+                .as_ref()
+                .ok()
+                .and_then(|offset| read_ptr_field(source, metadata, *offset));
+            if let Some(user) = chain.realm_user {
+                snapshot.mapper =
+                    read_text_field(source, user, &resolved.realm_username, "beatmap.mapper", layout, &mut gaps);
+            } else if let Err(error) = &resolved.metadata_author {
+                gaps.push(offsets_gap("beatmap.mapper", error));
+            } else {
+                gaps.push(gap("beatmap.mapper", "read"));
+            }
+        } else if let Err(error) = &resolved.beatmap_metadata {
+            gaps.push(offsets_gap("beatmap.title", error));
+            gaps.push(offsets_gap("beatmap.artist", error));
+            gaps.push(offsets_gap("beatmap.mapper", error));
+        } else {
+            gaps.push(gap("beatmap.title", "read"));
+            gaps.push(gap("beatmap.artist", "read"));
+            gaps.push(gap("beatmap.mapper", "read"));
+        }
+        if !snapshot.lazer_files.is_empty() {
+            if let Some(bg_path) = find_background_file(&snapshot.lazer_files, bg_name_from_meta.as_deref()) {
+                snapshot.background = Some(bg_path);
+            }
+        }
+    }
+
+    // ⑥ 屏幕栈
+    match read_screen_state(source, table, game_base, &resolved, &mut chain, modules) {
+        ScreenOutcome::Mapped(state) => {
+            snapshot.state_number = Some(state.number);
+            snapshot.state_name = Some(state.name.clone());
+            // 回放：当前屏幕是 ReplayPlayer（状态名同为 play，只能靠类型名区分）。
+            snapshot.replay = state.type_name.contains("ReplayPlayer");
+        }
+        ScreenOutcome::Unmapped(type_name) => {
+            snapshot.state_name = Some(String::new());
+            gaps.push(gap(
+                "state.name",
+                &format!("{type_name}-{UNMAPPED_SCREEN_SUFFIX}"),
+            ));
+            gaps.push(gap("state.number", "screen-type-unmapped"));
+        }
+        ScreenOutcome::Unresolved(reason) => {
+            gaps.push(gap("state.name", &reason));
+            gaps.push(gap("state.number", &reason));
+        }
+    }
+
+    // ⑥b 结算屏判定数：`ResultsScreen.Score` → `ScoreInfo.<StatisticsJson>`。
+    //     lazer 没有 stable 那种"候选槽"，判定数只能从表里的 `results` 段读
+    //     （`live` 生成器在结算屏上活体验证后写入）。读不到 ⇒ 不发布（gap 逐字记录），
+    //     绝不 0 占位、也绝不沿用上一帧。
+    //     回放判定：结算屏的 `<player>` 是 `ReplayPlayer` ⇒ 这一局来自回放（从回放进入的
+    //     结算屏，栈顶是 ResultsScreen，光看屏幕类型识别不出来），不能收作真实游玩。
+    if snapshot.is_result_state() {
+        let read = results::read_results(
+            source,
+            table,
+            chain.screen_top.unwrap_or(0),
+            layout,
+            modules,
+        );
+        if read.replay {
+            snapshot.replay = true;
+        }
+        if let Some(hits) = read.hits {
+            snapshot.result_hits = Some(hits);
+        }
+        snapshot.replay_hash = read.hash;
+        gaps.extend(read.gaps);
+    }
+
+    // ⑥b' 回放哈希（play/回放）：`Player.Score → ScoreInfo.<Hash>`。
+    //     只服务"回放暂停"数据面；读不到不降级任何其它字段。
+    if snapshot.state_name.as_deref() == Some("play") {
+        if let (Some(player), Some(layout)) = (chain.screen_top, layout) {
+            snapshot.replay_hash = super::score::read_replay_hash(source, table, player, layout);
+        }
+    }
+
+    // ⑥c 预研探针：`MMA_LAZER_MODS_PROBE=1` 时从 Player 扫 `Score.ScoreInfo.ModsJson`。
+    //     只写壳日志，不参与载荷；读取链路固化前不动现有 `SelectedMods` 读取。
+    let mut mods_json_mods = None;
+    // 结算屏的 mods 是否来自该成绩自己的 `ScoreInfo.ModsJson`（含空数组）：
+    // 是 ⇒ `read_tick` 不允许再用上一局 play 帧的 mods 覆盖（历史成绩可能属于别的 mod）。
+    let mut mods_from_score = false;
+    if snapshot.state_name.as_deref() == Some("play") {
+        if let Some(screen_top) = chain.screen_top {
+            super::mods::probe_once(source, table, screen_top, layout, modules);
+            // ModsJson 是 RD seed / 自定义设置最稳的来源；读不到时回退 SelectedMods。
+            mods_json_mods = super::mods::read_play_mods(source, table, screen_top, layout, modules);
+        }
+    }
+
+    match resolved.selected_mods.clone() {
+        Ok(offset) => {
+            chain.selected_mods = read_ptr_field(source, game_base, offset);
+            if let Some(selected_mods) = chain.selected_mods {
+                let read = read_lazer_mods(source, table, selected_mods, &resolved, modules);
+                match read {
+                    Some((mods, complete)) => {
+                        snapshot.lazer_mods = Some(mods);
+                        snapshot.lazer_mods_complete = complete;
+                    }
+                    None => {
+                        snapshot.lazer_mods = None;
+                        snapshot.lazer_mods_complete = false;
+                        for field in ["play.mods", "menu.mods", "resultsScreen.mods"] {
+                            gaps.push(gap(field, "offsets-missing-ScoreInfo.ModsJson"));
+                        }
+                    }
+                }
+            } else {
+                snapshot.lazer_mods = None;
+                snapshot.lazer_mods_complete = false;
+                gaps.push(gap("play.mods", "read"));
+                gaps.push(gap("menu.mods", "read"));
+                gaps.push(gap("resultsScreen.mods", "read"));
+            }
+        }
+        Err(error) => {
+            snapshot.lazer_mods = None;
+            snapshot.lazer_mods_complete = false;
+            gaps.push(offsets_gap("play.mods", &error));
+            gaps.push(offsets_gap("menu.mods", &error));
+            gaps.push(offsets_gap("resultsScreen.mods", &error));
+        }
+    }
+    if let Some(mods) = mods_json_mods {
+        snapshot.lazer_mods = Some(mods);
+        snapshot.lazer_mods_complete = true;
+    }
+    // 结算屏再从 ResultsScreen.Score -> ScoreInfo.ModsJson 读一次：回放播放的
+    // `Player.Score` 是 `LegacyDatabasedScore` 子类，play 路径可能扫不到。
+    if snapshot.state_name.as_deref() == Some("resultScreen") {
+        if let Some(screen_top) = chain.screen_top {
+            if let Some(mods) = super::mods::read_results_mods(source, table, screen_top, layout) {
+                // 只有**非空**的 ScoreInfo.ModsJson 才视为"该成绩自己的 mods"。
+                // 刚打完的活成绩在入库前可能是 `[]`（默认值），此时仍需沿用 play 帧，
+                // 否则会把 DT 签成 NM；历史成绩的 NM 记录则由“离开 play 即清缓存”兜底。
+                mods_from_score = !mods.is_empty();
+                snapshot.lazer_mods = Some(mods);
+                snapshot.lazer_mods_complete = true;
+            }
+        }
+    }
+
+    // ⑥d 局内游玩判定数：`Player.ScoreProcessor.ScoreResultCounts` 字典。
+    //     游玩进行中，`ScoreProcessor` 实时累加命中判定到 `ScoreResultCounts`；
+    //     若读取成功则发布 `snapshot.play_hits = Some(hits)`，
+    //     允许全零（开局刚进图未打击）。失败或非 play 态不发布。
+    if snapshot.is_play_state() {
+        let mut play_hits_read = None;
+        if let Some(player) = chain.screen_top {
+            if let Some(score_sec) = table.score() {
+                if let Some(counts_offset) = score_sec.score_result_counts {
+                    if let Some(score_proc) = read_ptr_field(source, player, score_sec.player_score_processor) {
+                        if let Some(dict) = read_ptr_field(source, score_proc, counts_offset) {
+                            if let Some(results_sec) = table.results() {
+                                let entries_offset = results_sec.dict_entries_offset.unwrap_or(0x10);
+                                play_hits_read = results::read_dictionary_hits(
+                                    source,
+                                    dict,
+                                    entries_offset,
+                                    &results_sec.hit_result_values,
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(hits) = play_hits_read {
+            snapshot.play_hits = Some(hits);
+        } else {
+            gaps.push(GAP_PLAY_HITS.to_string());
+        }
+    } else {
+        gaps.push(GAP_PLAY_HITS.to_string());
+    }
+
+    // ⑦ 播放时钟
+    snapshot.play_time = read_live_time(source, game_base, &resolved, &mut chain, &mut gaps);
+    // 结算态由 ⑥b 负责：读到了就不该再报"offsets-missing"；读不到时它已经写了逐字的 gap。
+    if !snapshot.is_result_state() {
+        gaps.push(GAP_RESULTS_HITS.to_string());
+    }
+    gaps.push(GAP_BACKGROUND.to_string());
+    gaps.push(GAP_AUDIO.to_string());
+
+    snapshot.lazer_chain = Some(chain);
+    gaps.sort();
+    gaps.dedup();
+    snapshot.degraded_fields = gaps.clone();
+    Ok(LazerFrame {
+        snapshot,
+        chain,
+        gaps,
+        reidentified,
+        mods_from_score,
+    })
+}
+
+fn read_text_field(
+    source: &dyn Source,
+    base: u64,
+    offset: &Result<i64, LookupError>,
+    field: &str,
+    layout: Option<StringLayout>,
+    gaps: &mut Vec<String>,
+) -> Option<String> {
+    let layout = layout?;
+    let offset = match offset {
+        Ok(offset) => *offset,
+        Err(error) => {
+            gaps.push(offsets_gap(field, error));
+            return None;
+        }
+    };
+    let Some(pointer) = read_ptr_field(source, base, offset) else {
+        gaps.push(gap(field, "read"));
+        return None;
+    };
+    match read_string(source, pointer, layout) {
+        Some(text) => Some(text),
+        None => {
+            gaps.push(gap(field, "string-layout"));
+            None
+        }
+    }
+}
+
+fn read_live_time(
+    source: &dyn Source,
+    game_base: u64,
+    resolved: &Resolved,
+    chain: &mut ChainAddrs,
+    gaps: &mut Vec<String>,
+) -> Option<i32> {
+    const FIELD: &str = "beatmap.time.live";
+    let mut offsets = [0i64; 3];
+    for (index, lookup) in [
+        resolved.beatmap_clock.clone(),
+        resolved.beatmap_track_clock.clone(),
+        resolved.beatmap_clock_time.clone(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        match lookup {
+            Ok(offset) => offsets[index] = offset,
+            Err(error) => {
+                gaps.push(offsets_gap(FIELD, &error));
+                return None;
+            }
+        }
+    }
+    let (clock_offset, track_offset, time_offset) = (offsets[0], offsets[1], offsets[2]);
+    chain.beatmap_clock = read_ptr_field(source, game_base, clock_offset);
+    let Some(clock) = chain.beatmap_clock else {
+        gaps.push(gap(FIELD, "read-beatmapClock"));
+        return None;
+    };
+    chain.beatmap_track_clock = read_ptr_field(source, clock, track_offset);
+    let Some(track) = chain.beatmap_track_clock else {
+        gaps.push(gap(FIELD, "read-interpolatedTrack"));
+        return None;
+    };
+    let Some(address) = field_addr(track, time_offset) else {
+        gaps.push(gap(FIELD, "read"));
+        return None;
+    };
+    match read_f64(source, address) {
+        Some(value) if value.is_finite() && value.abs() <= LIVE_TIME_MAX_MS => {
+            Some(value.round() as i32)
+        }
+        _ => {
+            gaps.push(gap(FIELD, "domain"));
+            None
+        }
+    }
+}
+
+fn field_i32(
+    source: &dyn Source,
+    base: u64,
+    offset: &Result<i64, LookupError>,
+    field: &str,
+    gaps: &mut Vec<String>,
+) -> Option<i32> {
+    let offset = match offset {
+        Ok(offset) => *offset,
+        Err(error) => {
+            gaps.push(offsets_gap(field, error));
+            return None;
+        }
+    };
+    match field_addr(base, offset).and_then(|addr| read_i32(source, addr)) {
+        Some(value) => Some(value),
+        None => {
+            gaps.push(gap(field, "read"));
+            None
+        }
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub fn scan_markers(
+    target: &crate::osu::win::Target,
+    regions: &mut crate::osu::scan::RegionCache,
+    limit: usize,
+) -> Result<(Vec<u64>, u128), Reason> {
+    use crate::osu::scan;
+    let pattern = scan::Pattern::parse(MARKER_PATTERN).map_err(|_| Reason::SignatureMiss(ANCHOR_KEY))?;
+    let started = std::time::Instant::now();
+    let mut stats = scan::ScanStats::default();
+    for mask in crate::osu::FILTER_READY {
+        let list = target.regions_cached(regions, *mask, crate::osu::REGION_LIMIT);
+        let hits = scan::find_in_regions64(target.handle(), &list, &pattern, 0, limit, &mut stats);
+        if !hits.is_empty() {
+            eprintln!(
+                "[osu] lazer scan: filter#{} regions={} bytes={} hits={} elapsed={}ms",
+                mask,
+                list.len(),
+                stats.bytes_read,
+                hits.len(),
+                started.elapsed().as_millis()
+            );
+            return Ok((hits, started.elapsed().as_millis()));
+        }
+    }
+    Err(Reason::SignatureMiss(ANCHOR_KEY))
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn live_template() -> Option<OffsetTable> {
+    OffsetTable::load(crate::osu::offsets::DEFAULT_LAZER_TABLE_JSON.as_bytes()).ok()
+}
+
+// the table read from the game, with how many of its fields aren't there yet
+fn live_layout(source: &dyn Source, modules: &[(u64, String)], game_base: u64, info: &TargetInfo) -> Option<(OffsetTable, usize)> {
+    super::layout::forget();
+    let template = live_template()?;
+    let version = (info.lazer_version.as_str(), info.runtime_version.as_str(), info.arch.as_str());
+    let line = match super::layout::live_table(source, modules, game_base, &template, version) {
+        Ok(live) => {
+            let mut line = format!("[osu] lazer offsets read from the game: {} type(s)", live.table.types.len());
+            if !live.missing.is_empty() {
+                line += &format!(", missing {}", live.missing.join(", "));
+            }
+            // a bundled table for this same build should agree to the byte
+            let build = |v: &str| v.split(['.', '-']).take(2).collect::<Vec<_>>().join(".");
+            if build(&template.lazer_version) == build(&info.lazer_version) {
+                let differ = super::layout::differences(&live.table, &template);
+                line += &format!("; against the bundled {}: {}", template.lazer_version, if differ.is_empty() { "same".to_string() } else { differ.join(", ") });
+            }
+            crate::server::log::log_at("info", &line);
+            eprintln!("{line}");
+            if let Some(path) = std::env::var_os("OSU_READER_TABLE_OUT") {
+                let _ = std::fs::write(path, serde_json::to_vec_pretty(&live.table).unwrap_or_default());
+            }
+            return Some((live.table, live.missing.len()));
+        }
+        Err(why) => format!("[osu] lazer offsets can't be read from the game: {why}"),
+    };
+    crate::server::log::log_at("warn", &line);
+    eprintln!("{line}");
+    None
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub fn attach(
+    target: &crate::osu::win::Target,
+    regions: &mut crate::osu::scan::RegionCache,
+    env_path: Option<PathBuf>,
+    storage_root_override: Option<PathBuf>,
+) -> Result<Attach, Reason> {
+    let env = TargetEnv {
+        exe_dir: target
+            .image_path
+            .parent()
+            .map(|dir| dir.to_path_buf())
+            .unwrap_or_default(),
+        storage_ini: storage_ini_path(),
+        arch: arch_for_bitness(target.bitness).to_string(),
+    };
+    let files = RealFiles;
+    let info = target_from_files(&files, &env)
+        .with_storage_root_override(storage_root_override.as_deref());
+    let table_dir = shell_exe_dir();
+    let target_line = format!(
+        "[osu] lazer target: version={:?} runtime={:?} arch={} storage_root={:?} songs_folder={:?} table_dir={}",
+        info.lazer_version,
+        info.runtime_version,
+        info.arch,
+        info.storage_root,
+        info.effective_songs_folder(),
+        table_dir.display()
+    );
+    eprintln!("{target_line}");
+    crate::server::log::log_at("info", &target_line);
+    let source: &dyn Source = target;
+    let (anchors, scan_ms) = scan_markers(target, regions, MARKER_HIT_LIMIT)?;
+    let modules = match crate::osu::win::module_list(target.pid) {
+        Ok(list) => {
+            eprintln!(
+                "[osu] lazer modules: {} module(s) enumerated for pid {} (state.name resolves the \
+                 assembly by image base)",
+                list.len(),
+                target.pid
+            );
+            list
+        }
+        Err(reason) => {
+            eprintln!(
+                "[osu] lazer modules: enumeration failed ({reason:?}) — state.name will degrade to \
+                 `module-unresolved:…` until the module table is readable"
+            );
+            Vec::new()
+        }
+    };
+    let resolution = resolve_game_base(source, &modules, &anchors, SITE_DELTAS);
+    log_resolution(&resolution);
+    let prove = |table: &OffsetTable| -> bool {
+        let Some(candidate) = resolution.accepted() else {
+            eprintln!(
+                "[osu] lazer offsets: structural proof for {} refused — no GameBase candidate \
+                 resolved from {} anchor(s)",
+                table.key(),
+                anchors.len()
+            );
+            return false;
+        };
+        let game_base = candidate.game_base.unwrap_or(0);
+        match table_probe(source, table, game_base) {
+            Ok(detail) => eprintln!(
+                "[osu] lazer offsets: structural proof for {} passed — {detail}",
+                table.key()
+            ),
+            Err(why) => {
+                eprintln!(
+                    "[osu] lazer offsets: structural proof for {} refused — {why}",
+                    table.key()
+                );
+                return false;
+            }
+        }
+        match runtime_probe(source, table, game_base, &modules) {
+            Ok(detail) => {
+                eprintln!(
+                    "[osu] lazer offsets: runtime structure proof for {} passed — {detail}",
+                    table.key()
+                );
+                true
+            }
+            Err(why) => {
+                eprintln!(
+                    "[osu] lazer offsets: runtime structure proof for {} refused — {why}",
+                    table.key()
+                );
+                false
+            }
+        }
+    };
+    // the offsets read from the game itself come first, a bundled table only if that fails
+    let live = resolution.accepted().and_then(|candidate| live_layout(source, &modules, candidate.game_base?, &info));
+    let (loaded, live_missing) = match live {
+        Some((table, missing)) if prove(&table) => (LoadedTable { table, origin: TableOrigin::Live, path: PathBuf::from("<live>"), mismatch: None }, missing),
+        _ => (load_table(&files, env_path.as_deref(), &table_dir, &info, &prove)?, 0),
+    };
+    // 诊断：实际加载的是哪张表、有没有结算屏判定数（`results` 段）。页面只能看到
+    // `degradedFields`，这一行让现场日志能区分"表没这一段"与"读失败"。
+    crate::server::log::log_at(
+        "info",
+        &format!(
+            "osu: lazer table {} (origin {}) results_section={}",
+            loaded.table.key(),
+            loaded.origin.as_str(),
+            loaded.table.results().is_some()
+        ),
+    );
+    let Some(candidate) = resolution.accepted() else {
+        eprintln!(
+            "[osu] lazer: L1 resolution failed — no GameBase candidate for {} anchor(s); \
+              detaching (signature-miss:{ANCHOR_KEY})",
+            anchors.len()
+        );
+        return Err(Reason::SignatureMiss(ANCHOR_KEY));
+    };
+    let game_base = candidate.game_base.unwrap_or(0);
+    let vtable = candidate.method_table.unwrap_or(0);
+    eprintln!("[osu] lazer: {}", vtable_witness_note(&loaded.table, vtable));
+    if let Some(runtime) = loaded.table.runtime() {
+        eprintln!(
+            "[osu] lazer: runtime section present ({} typedef name(s) over {} module(s), \
+             {} observed): {}",
+            runtime.typedefs.values().map(|map| map.len()).sum::<usize>(),
+            runtime.typedefs.len(),
+            runtime.observed.values().map(|map| map.len()).sum::<usize>(),
+            runtime.witness
+        );
+    } else {
+        eprintln!(
+            "[osu] lazer: the table carries NO runtime section — state.name/state.number will \
+             degrade to field level"
+        );
+    }
+    eprintln!(
+        "[osu] lazer: L1 proof passed (structural) — gameBase=0x{game_base:016X} delta={:#x} \
+         site=0x{:016X} [gameBase]=0x{vtable:016X} anchors={} scan_ms={scan_ms} table={} origin={}",
+        candidate.delta,
+        candidate.site.unwrap_or(0),
+        anchors.len(),
+        loaded.table.key(),
+        loaded.origin.as_str()
+    );
+    let marker_hits = anchors.len();
+    Ok(Attach {
+        table: loaded.table,
+        origin: loaded.origin,
+        table_path: loaded.path,
+        table_mismatch: loaded.mismatch,
+        target: info,
+        game_base,
+        anchors,
+        proof: SessionProof::default(),
+        modules,
+        marker_hits,
+        scan_ms,
+        last_lazer_mods: None,
+        live_missing,
+        live_checked: None,
+    })
+}
+
+// .NET loads a type the first time the game uses it: a results screen's or a replay's aren't
+// there until one has been shown, so what the live table lacks is looked for again now and then
+const LIVE_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+
+#[cfg(any(windows, target_os = "linux"))]
+fn fill_live(attach: &mut Attach, source: &dyn Source) {
+    if attach.live_missing == 0 || attach.live_checked.is_some_and(|at| at.elapsed() < LIVE_RETRY) {
+        return;
+    }
+    attach.live_checked = Some(std::time::Instant::now());
+    let Some(template) = live_template() else { return };
+    let info = &attach.target;
+    let version = (info.lazer_version.as_str(), info.runtime_version.as_str(), info.arch.as_str());
+    let Ok(live) = super::layout::live_table(source, &attach.modules, attach.game_base, &template, version) else { return };
+    if live.missing.len() < attach.live_missing {
+        let line = match live.missing.is_empty() {
+            true => "[osu] lazer offsets read from the game: complete".to_string(),
+            false => format!("[osu] lazer offsets read from the game: still missing {}", live.missing.join(", ")),
+        };
+        crate::server::log::log_at("info", &line);
+        eprintln!("{line}");
+        if let Some(path) = std::env::var_os("OSU_READER_TABLE_OUT") {
+            let _ = std::fs::write(path, serde_json::to_vec_pretty(&live.table).unwrap_or_default());
+        }
+        attach.live_missing = live.missing.len();
+        attach.table = live.table;
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+pub fn read_tick(
+    attach: &mut Attach,
+    target: &crate::osu::win::Target,
+) -> Result<LazerFrame, Reason> {
+    let source: &dyn Source = target;
+    fill_live(attach, source);
+    if attach.modules.is_empty() {
+        attach.modules = crate::osu::win::module_list(target.pid).unwrap_or_default();
+        eprintln!(
+            "[osu] lazer modules: (re-)enumerated {} module(s) — state.name needs the module table",
+            attach.modules.len()
+        );
+    }
+    let mut frame = read_frame(FrameInput {
+        table: &attach.table,
+        source,
+        pid: target.pid,
+        game_base: attach.game_base,
+        anchors: &attach.anchors,
+        proof: &mut attach.proof,
+        songs_folder: attach.target.effective_songs_folder(),
+        game_folder: crate::osu::stable::game_folder(&target.image_path),
+        modules: &attach.modules,
+    })?;
+    if frame
+        .gaps
+        .iter()
+        .any(|gap| gap.contains("module-unresolved"))
+    {
+        let refreshed = crate::osu::win::module_list(target.pid).unwrap_or_default();
+        if refreshed.len() != attach.modules.len() {
+            eprintln!(
+                "[osu] lazer modules: module table changed ({} -> {}) — re-reading this frame",
+                attach.modules.len(),
+                refreshed.len()
+            );
+            attach.modules = refreshed;
+            frame = read_frame(FrameInput {
+                table: &attach.table,
+                source,
+                pid: target.pid,
+                game_base: attach.game_base,
+                anchors: &attach.anchors,
+                proof: &mut attach.proof,
+                songs_folder: attach.target.effective_songs_folder(),
+                game_folder: crate::osu::stable::game_folder(&target.image_path),
+                modules: &attach.modules,
+            })?;
+        }
+    }
+    // lazer 在结算屏会清空 `SelectedMods`；反馈签名沿用这局 play 帧读到的 mods，
+    // 避免把 DT 签成 NM。没有 play 帧（例如壳启动时已在结算屏）就 fail-closed。
+    let mods_from_score = frame.mods_from_score;
+    let replay_result = frame.snapshot.replay;
+    if carry_lazer_mods(
+        frame.snapshot.state_name.as_deref(),
+        &mut frame.snapshot.lazer_mods,
+        &mut frame.snapshot.lazer_mods_complete,
+        &mut attach.last_lazer_mods,
+        mods_from_score,
+        replay_result,
+    ) {
+        frame
+            .gaps
+            .push("resultsScreen.mods:no-play-frame".to_string());
+    }
+    attach.game_base = frame.chain.game_base;
+    Ok(frame)
+}
+
+/// 把 play 帧的 `SelectedMods` 带到结算屏（lazer 会在结算时清空它）。
+///
+/// 返回 `true` 表示结算屏且没有任何 play 帧可证明 mods，调用方补一条 gap。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn carry_lazer_mods(
+    state: Option<&str>,
+    mods: &mut Option<Vec<LazerMod>>,
+    complete: &mut bool,
+    last: &mut Option<(Vec<LazerMod>, bool)>,
+    mods_from_score: bool,
+    replay: bool,
+) -> bool {
+    match state {
+        Some("play") => {
+            if let Some(current) = mods.as_ref() {
+                *last = Some((current.clone(), *complete));
+            }
+            false
+        }
+        Some("resultScreen") => {
+            // 结算屏自己带了该成绩的 `ScoreInfo.ModsJson`（历史成绩 / 回放）⇒ 以它为准。
+            // 绝不能把上一局 play 的 mods 套到别的成绩上（1.3x 残留 bug）。
+            if mods_from_score || replay {
+                *last = None;
+                return false;
+            }
+            match last.as_ref() {
+                Some((cached, cached_complete)) => {
+                    *mods = Some(cached.clone());
+                    *complete = *cached_complete;
+                    false
+                }
+                None => {
+                    // 没有 play 帧就无法证明这局用了什么 mod；宁可让 /feedback 拒绝，
+                    // 也不把结算屏残留/下一局预选的 SelectedMods 当成这局成绩。
+                    if mods.as_ref().map_or(true, |mods| mods.is_empty()) {
+                        *mods = None;
+                        *complete = false;
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+        // 离开 play/result（选歌、菜单、编辑器…）⇒ 上一局的 mods 立即失效。
+        _ => {
+            *last = None;
+            false
+        }
+    }
+}
+
+/// 将已解析的类型名映射为 osu!mania / lazer 的 acronym 与默认速率。
+pub fn mod_acronym_from_type_name(name: &str) -> Option<(&'static str, Option<f64>)> {
+    if name.contains("DoubleTime") {
+        Some(("DT", Some(1.5)))
+    } else if name.contains("Nightcore") {
+        Some(("NC", Some(1.5)))
+    } else if name.contains("HalfTime") {
+        Some(("HT", Some(0.75)))
+    } else if name.contains("Daycore") {
+        Some(("DC", Some(0.75)))
+    } else if name.contains("HardRock") {
+        Some(("HR", None))
+    } else if name.contains("Easy") {
+        Some(("EZ", None))
+    } else if name.contains("Hidden") {
+        Some(("HD", None))
+    } else if name.contains("Flashlight") {
+        Some(("FL", None))
+    } else if name.contains("FadeIn") {
+        Some(("FI", None))
+    } else if name.contains("Mirror") {
+        Some(("MR", None))
+    } else if name.contains("Invert") {
+        Some(("IN", None))
+    } else if name.contains("HoldOff") {
+        Some(("HO", None))
+    } else if name.contains("Classic") {
+        Some(("CL", None))
+    } else if name.contains("ScoreV2") {
+        Some(("SV2", None))
+    } else if name.contains("DifficultyAdjust") {
+        Some(("DA", None))
+    } else if name.contains("NoFail") {
+        Some(("NF", None))
+    } else if name.contains("Relax") {
+        Some(("RX", None))
+    } else if name.contains("Autoplay") {
+        Some(("AT", None))
+    } else if name.contains("Cinema") {
+        Some(("CN", None))
+    } else if name.contains("Perfect") {
+        Some(("PF", None))
+    } else if name.contains("SuddenDeath") {
+        Some(("SD", None))
+    } else if name.contains("DualStages") {
+        Some(("DS", None))
+    } else if name.contains("Key1") {
+        Some(("1K", None))
+    } else if name.contains("Key2") {
+        Some(("2K", None))
+    } else if name.contains("Key3") {
+        Some(("3K", None))
+    } else if name.contains("Key4") {
+        Some(("4K", None))
+    } else if name.contains("Key5") {
+        Some(("5K", None))
+    } else if name.contains("Key6") {
+        Some(("6K", None))
+    } else if name.contains("Key7") {
+        Some(("7K", None))
+    } else if name.contains("Key8") {
+        Some(("8K", None))
+    } else if name.contains("Key9") {
+        Some(("9K", None))
+    } else if name.contains("WindUp") {
+        Some(("WU", None))
+    } else if name.contains("WindDown") {
+        Some(("WD", None))
+    } else if name.contains("ConstantSpeed") {
+        Some(("CS", None))
+    } else if name.contains("AdaptiveSpeed") {
+        Some(("AS", None))
+    } else {
+        None
+    }
+}
+
+/// 从 SelectedMods 链（`Bindable<IReadOnlyList<Mod>>`）读取当前态启用的 mods 列表。
+///
+/// 返回 `(mods, complete)`：`complete = false` 表示列表里至少有一个元素**读不全**
+/// （对象/类型名/acronym/mods 数超过上限）。展示层照常使用 `mods`，但签名层必须
+/// 拒绝——把 DT 静默丢成 NM 会给后端写入错误的客观字段。
+pub fn read_lazer_mods(
+    source: &dyn Source,
+    table: &OffsetTable,
+    selected_mods_ptr: u64,
+    resolved: &Resolved,
+    modules: &[(u64, String)],
+) -> Option<(Vec<LazerMod>, bool)> {
+    if modules.is_empty() {
+        return None;
+    }
+    let bindable_val_offset = resolved.bindable_value.clone().unwrap_or(32);
+    let list_or_array = read_ptr_field(source, selected_mods_ptr, bindable_val_offset)?;
+    let mt = read_u64(source, list_or_array)?;
+    if !plausible_ptr(mt) || mt == list_or_array || mt < 0x1000_0000_0000 {
+        return None;
+    }
+
+    let val_at_8 = read_u64(source, list_or_array + 8).unwrap_or(0);
+    let (items_array, size) = if plausible_ptr(val_at_8) {
+        let size = read_i32(source, list_or_array + 16).unwrap_or(0);
+        (val_at_8, size)
+    } else {
+        let size = val_at_8 as i32;
+        (list_or_array, size)
+    };
+
+    if size < 0 || size > 64 {
+        return None;
+    }
+    if size == 0 {
+        return Some((Vec::new(), true));
+    }
+    let items_mt = read_u64(source, items_array)?;
+    if !plausible_ptr(items_mt) {
+        return None;
+    }
+
+    let count = (size as usize).min(32);
+    // 超过 32 个 mod 不可能是正常游玩，按"读不全"处理（展示仍然只展示前 32 个）。
+    let mut complete = size as usize <= 32;
+    let mut mods = Vec::new();
+    for i in 0..count {
+        let Some(elem_addr) = field_addr(items_array, 16 + (i as i64) * 8) else {
+            complete = false;
+            continue;
+        };
+        let Some(mod_obj) = read_u64(source, elem_addr).filter(|obj| plausible_ptr(*obj)) else {
+            complete = false;
+            continue;
+        };
+
+        let type_name = match read_eetype(source, table, mod_obj, modules) {
+            Ok(read) => read.type_name.unwrap_or_default(),
+            Err(_) => {
+                complete = false;
+                String::new()
+            }
+        };
+
+        if super::mods::probe_enabled() {
+            let acronym = mod_acronym_from_type_name(&type_name)
+                .map(|(acronym, _)| acronym)
+                .unwrap_or("?");
+            super::mods::probe_mod_object(source, table, mod_obj, &type_name, acronym, modules);
+        }
+
+        if let Some((acronym, default_speed)) = mod_acronym_from_type_name(&type_name) {
+            let mut speed_change = default_speed;
+            let mut adjust_pitch = None;
+            let mut drain_rate = None;
+            let mut overall_difficulty = None;
+            let mut extended_limits = None;
+            let mut table_handled = false;
+
+            if let Some(section) = table.mods() {
+                // `mods` 段的 DA 位移是 osu!mania 的（OD 在 +0x28）；别的 ruleset 的
+                // `ModDifficultyAdjust` OD 在 +0x18，不能套用，直接不读（OD 留空）。
+                let mania_da = acronym != "DA" || type_name.contains("Mania");
+                if let Some(fields) = section.settings_for(acronym).filter(|_| mania_da) {
+                    table_handled = true;
+                    let read = read_mod_settings(source, mod_obj, fields, section);
+                    speed_change = read.speed_change;
+                    adjust_pitch = read.adjust_pitch;
+                    drain_rate = read.drain_rate;
+                    overall_difficulty = read.overall_difficulty;
+                    extended_limits = read.extended_limits;
+                    if !read.complete {
+                        complete = false;
+                    }
+                }
+            }
+
+            // 旧表（没有 `mods` 段）只保留倍速启发式；DA 的 OD 不再猜——旧启发式会把
+            // `DifficultyBindable` 的 f64 垃圾值当成 OD（实测 1.37e-314）。
+            if !table_handled && default_speed.is_some() {
+                for offset in [0x10, 0x18, 0x20, 0x28, 0x30, 0x38] {
+                    if let Some(bindable) = read_ptr_field(source, mod_obj, offset) {
+                        if let Some(val) = read_f64(source, bindable + 0x20) {
+                            if val.is_finite() && val >= 0.25 && val <= 3.0 {
+                                speed_change = Some(val);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            mods.push(LazerMod {
+                acronym: acronym.to_string(),
+                speed_change,
+                adjust_pitch,
+                drain_rate,
+                overall_difficulty,
+                seed: None,
+                extended_limits,
+            });
+        } else {
+            // 认不出的 mod 类型：展示层跳过，签名层必须判定为"读不全"。
+            complete = false;
+        }
+    }
+    Some((mods, complete))
+}
+
+#[derive(Default)]
+struct ModSettingsRead {
+    speed_change: Option<f64>,
+    adjust_pitch: Option<bool>,
+    drain_rate: Option<f64>,
+    overall_difficulty: Option<f64>,
+    extended_limits: Option<bool>,
+    complete: bool,
+}
+
+/// 按偏移表的 `mods` 段读一个 mod 的自定义设置。
+///
+/// 字段名决定解码：`speed_change` 是 `BindableNumber<double>` 的 f64；`adjust_pitch` /
+/// `extended_limits` 是 `BindableBool` 的 u8；`drain_rate` / `overall_difficulty` 是
+/// `DifficultyBindable` 内部的 `BindableFloat CurrentNumber`（f32），不是 bindable 自身
+/// 的 `Value`。任一字段读不到 ⇒ `complete = false`（签名层据此拒绝），但已读到的值照常返回。
+fn read_mod_settings(
+    source: &dyn Source,
+    mod_obj: u64,
+    fields: &std::collections::BTreeMap<String, i64>,
+    section: &ModsSection,
+) -> ModSettingsRead {
+    let mut read = ModSettingsRead {
+        complete: true,
+        ..ModSettingsRead::default()
+    };
+    for (name, field_offset) in fields {
+        let Some(bindable) = read_ptr_field(source, mod_obj, *field_offset) else {
+            read.complete = false;
+            continue;
+        };
+        let Some(value_addr) = field_addr(bindable, section.bindable_value) else {
+            read.complete = false;
+            continue;
+        };
+        match name.as_str() {
+            "speed_change" => match read_f64(source, value_addr) {
+                Some(value) if value.is_finite() && value > 0.0 => {
+                    read.speed_change = Some(value)
+                }
+                _ => read.complete = false,
+            },
+            "adjust_pitch" => match read_u8(source, value_addr) {
+                Some(value) => read.adjust_pitch = Some(value == 1),
+                None => read.complete = false,
+            },
+            "drain_rate" | "overall_difficulty" => {
+                let Some(current) = read_ptr_field(source, bindable, section.difficulty_current)
+                else {
+                    read.complete = false;
+                    continue;
+                };
+                let Some(current_addr) = field_addr(current, section.bindable_value) else {
+                    read.complete = false;
+                    continue;
+                };
+                match read_f32(source, current_addr) {
+                    Some(value) if value.is_finite() => {
+                        if name == "drain_rate" {
+                            read.drain_rate = Some(value as f64);
+                        } else {
+                            read.overall_difficulty = Some(value as f64);
+                        }
+                    }
+                    _ => read.complete = false,
+                }
+            }
+            "extended_limits" => match read_u8(source, value_addr) {
+                Some(value) => read.extended_limits = Some(value == 1),
+                None => read.complete = false,
+            },
+            // 校验器保证不会出现；留一条 fail-closed 的兜底。
+            _ => read.complete = false,
+        }
+    }
+    read
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn attach(
+    _target: &crate::osu::win::Target,
+    _regions: &mut crate::osu::scan::RegionCache,
+    _env_path: Option<PathBuf>,
+    _storage_root_override: Option<PathBuf>,
+) -> Result<Attach, Reason> {
+    Err(Reason::PlatformUnsupported)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn read_tick(
+    _attach: &mut Attach,
+    _target: &crate::osu::win::Target,
+) -> Result<LazerFrame, Reason> {
+    Err(Reason::PlatformUnsupported)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_screen_reuses_the_play_frame_mods() {
+        let dt = LazerMod {
+            acronym: "DT".to_string(),
+            speed_change: Some(1.2),
+            adjust_pitch: Some(false),
+            drain_rate: None,
+            overall_difficulty: None,
+            seed: None,
+            extended_limits: None,
+        };
+        let mut last = None;
+        let mut play_mods = Some(vec![dt.clone()]);
+        let mut play_complete = true;
+        assert!(!carry_lazer_mods(
+            Some("play"),
+            &mut play_mods,
+            &mut play_complete,
+            &mut last,
+            false,
+            false,
+        ));
+
+        // 结算屏上 SelectedMods 为空 → 用 play 帧的 DT（不能变成 NM）。
+        let mut result_mods = Some(Vec::new());
+        let mut result_complete = true;
+        assert!(!carry_lazer_mods(
+            Some("resultScreen"),
+            &mut result_mods,
+            &mut result_complete,
+            &mut last,
+            false,
+            false,
+        ));
+        assert_eq!(result_mods, Some(vec![dt.clone()]));
+        assert!(result_complete);
+
+        // 历史成绩自带 ModsJson（哪怕是空数组）⇒ 保持自己的 NM，绝不套上一局的 DT。
+        let mut own_mods = Some(Vec::new());
+        let mut own_complete = true;
+        assert!(!carry_lazer_mods(
+            Some("resultScreen"),
+            &mut own_mods,
+            &mut own_complete,
+            &mut last,
+            true,
+            false,
+        ));
+        assert_eq!(own_mods, Some(Vec::new()));
+        assert!(last.is_none());
+
+        // 回放结算同理：回放的 mods 以 ScoreInfo 为准。
+        last = Some((vec![dt.clone()], true));
+        let mut replay_mods = Some(Vec::new());
+        let mut replay_complete = true;
+        assert!(!carry_lazer_mods(
+            Some("resultScreen"),
+            &mut replay_mods,
+            &mut replay_complete,
+            &mut last,
+            false,
+            true,
+        ));
+        assert_eq!(replay_mods, Some(Vec::new()));
+        assert!(last.is_none());
+
+        // 离开 play/result（选歌等）⇒ 上一局 mods 立即失效。
+        last = Some((vec![dt.clone()], true));
+        assert!(!carry_lazer_mods(
+            Some("selectPlay"),
+            &mut replay_mods,
+            &mut replay_complete,
+            &mut last,
+            false,
+            false,
+        ));
+        assert!(last.is_none());
+
+        // 没有 play 帧 → fail-closed（None + complete=false）。
+        let mut no_last = None;
+        let mut empty = None;
+        let mut empty_complete = true;
+        assert!(carry_lazer_mods(
+            Some("resultScreen"),
+            &mut empty,
+            &mut empty_complete,
+            &mut no_last,
+            false,
+            false,
+        ));
+        assert!(empty.is_none());
+        assert!(!empty_complete);
+    }
+
+    #[test]
+    fn test_mod_acronym_mappings() {
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModDoubleTime"),
+            Some(("DT", Some(1.5)))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mods.ModNightcore"),
+            Some(("NC", Some(1.5)))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mods.ModHalfTime"),
+            Some(("HT", Some(0.75)))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModHardRock"),
+            Some(("HR", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModFadeIn"),
+            Some(("FI", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModMirror"),
+            Some(("MR", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModInvert"),
+            Some(("IN", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModHoldOff"),
+            Some(("HO", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mods.ModClassic"),
+            Some(("CL", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mods.ModScoreV2"),
+            Some(("SV2", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mods.ModDifficultyAdjust"),
+            Some(("DA", None))
+        );
+        assert_eq!(
+            mod_acronym_from_type_name("osu.Game.Rulesets.Mania.Mods.ManiaModKey7"),
+            Some(("7K", None))
+        );
+        assert_eq!(mod_acronym_from_type_name("osu.Game.Unknown"), None);
+    }
+
+    // ---- `mods` 表段读取（2026-10-20 活体布局的合成镜像） ----
+
+    struct Mem {
+        base: u64,
+        bytes: Vec<u8>,
+    }
+
+    impl Source for Mem {
+        fn read(&self, addr: u64, len: usize) -> Option<Vec<u8>> {
+            let start = addr.checked_sub(self.base)? as usize;
+            let end = start.checked_add(len)?;
+            if end > self.bytes.len() {
+                return None;
+            }
+            Some(self.bytes[start..end].to_vec())
+        }
+    }
+
+    fn put_q(image: &mut [u8], base: u64, addr: u64, value: u64) {
+        let at = (addr - base) as usize;
+        image[at..at + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_u8(image: &mut [u8], base: u64, addr: u64, value: u8) {
+        image[(addr - base) as usize] = value;
+    }
+
+    fn put_f32(image: &mut [u8], base: u64, addr: u64, value: f32) {
+        let at = (addr - base) as usize;
+        image[at..at + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_f64(image: &mut [u8], base: u64, addr: u64, value: f64) {
+        let at = (addr - base) as usize;
+        image[at..at + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn mods_section() -> ModsSection {
+        let mut dt = std::collections::BTreeMap::new();
+        dt.insert("speed_change".to_string(), 0x10);
+        dt.insert("adjust_pitch".to_string(), 0x18);
+        let mut da = std::collections::BTreeMap::new();
+        da.insert("drain_rate".to_string(), 0x10);
+        da.insert("extended_limits".to_string(), 0x20);
+        da.insert("overall_difficulty".to_string(), 0x28);
+        let mut settings = std::collections::BTreeMap::new();
+        settings.insert("DT".to_string(), dt);
+        settings.insert("DA".to_string(), da);
+        ModsSection {
+            bindable_value: 0x40,
+            difficulty_current: 0x60,
+            settings,
+        }
+    }
+
+    #[test]
+    fn mods_section_reads_custom_rate_and_da_od() {
+        const BASE: u64 = 0x1000_0000;
+        let mut image = vec![0u8; 0x4000];
+        let dt = BASE + 0x100;
+        let da = BASE + 0x200;
+
+        // DT: SpeedChange (BindableDouble) + AdjustPitch (BindableBool)。
+        put_q(&mut image, BASE, dt + 0x10, BASE + 0x1000);
+        put_q(&mut image, BASE, dt + 0x18, BASE + 0x1100);
+        put_f64(&mut image, BASE, BASE + 0x1000 + 0x40, 1.2);
+        put_u8(&mut image, BASE, BASE + 0x1100 + 0x40, 0);
+
+        // DA: DrainRate / OverallDifficulty 是 DifficultyBindable，值在 +0x60 的
+        // CurrentNumber（BindableFloat）的 +0x40；ExtendedLimits 是 BindableBool。
+        put_q(&mut image, BASE, da + 0x10, BASE + 0x1200);
+        put_q(&mut image, BASE, BASE + 0x1200 + 0x60, BASE + 0x1300);
+        put_f32(&mut image, BASE, BASE + 0x1300 + 0x40, 5.5);
+        put_q(&mut image, BASE, da + 0x20, BASE + 0x1400);
+        put_u8(&mut image, BASE, BASE + 0x1400 + 0x40, 1);
+        put_q(&mut image, BASE, da + 0x28, BASE + 0x1500);
+        put_q(&mut image, BASE, BASE + 0x1500 + 0x60, BASE + 0x1600);
+        put_f32(&mut image, BASE, BASE + 0x1600 + 0x40, 15.0);
+
+        let memory = Mem { base: BASE, bytes: image };
+        let section = mods_section();
+
+        let dt_fields = section.settings_for("DT").expect("DT");
+        let read = read_mod_settings(&memory, dt, dt_fields, &section);
+        assert!(read.complete);
+        assert_eq!(read.speed_change, Some(1.2));
+        assert_eq!(read.adjust_pitch, Some(false));
+
+        let da_fields = section.settings_for("DA").expect("DA");
+        let read = read_mod_settings(&memory, da, da_fields, &section);
+        assert!(read.complete);
+        assert_eq!(read.drain_rate, Some(5.5));
+        assert_eq!(read.overall_difficulty, Some(15.0));
+        assert_eq!(read.extended_limits, Some(true));
+    }
+
+    #[test]
+    fn missing_difficulty_current_marks_the_mod_incomplete() {
+        const BASE: u64 = 0x1000_0000;
+        let mut image = vec![0u8; 0x4000];
+        let da = BASE + 0x200;
+        put_q(&mut image, BASE, da + 0x10, BASE + 0x1200);
+        // 不写 +0x1200 + 0x60：CurrentNumber 为空。
+        put_q(&mut image, BASE, da + 0x20, BASE + 0x1400);
+        put_q(&mut image, BASE, da + 0x28, BASE + 0x1500);
+        let memory = Mem { base: BASE, bytes: image };
+        let section = mods_section();
+        let fields = section.settings_for("DA").expect("DA");
+        let read = read_mod_settings(&memory, da, fields, &section);
+        assert!(!read.complete, "读不到 CurrentNumber 必须 fail-closed");
+        assert_eq!(read.overall_difficulty, None);
+    }
+}
