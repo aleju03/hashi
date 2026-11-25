@@ -232,14 +232,73 @@ function skinSideBoxes(page) {
   });
 }
 
+// A picture is pressed where it shows: a skin's StageBottom is often a dot in a stage-sized clear
+// image, which would take every click on the preview. A picked one's corners resize it too
 function skinSideHit(page, px, py, grab) {
   const boxes = skinSideBoxes(page);
+  const e = skinEdit(page);
+  const picked = skinSidePicked(e);
   for (let n = boxes.length - 1; n >= 0; n--) {
     const b = boxes[n];
     const corner = [[0, 0], [1, 0], [0, 1], [1, 1]].find(([cx, cy]) => Math.hypot(px - (b.x + cx * b.w), py - (b.y + cy * b.h)) <= grab);
-    if (corner || (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h)) return { ...b, corner };
+    const inside = px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+    if (!corner && !inside) continue;
+    if (corner && skinSideWhich(e) === b.which && picked.includes(b.i)) return { ...b, corner };
+    if (skinSideShows(page, skinSideLayers(page, e, b.which)[b.i], b, px, py, grab)) return { ...b, corner };
   }
   return null;
+}
+
+// the art's pixels that show, pooled into cells no more than SIDE_MASK across
+const SIDE_MASK = 256;
+
+function skinSideMask(page, src) {
+  const masks = (page.sideMasks ??= new Map());
+  if (masks.has(src)) return masks.get(src);
+  const img = skinSideArt(page, src);
+  if (!img.complete) return undefined;
+  let mask = null;
+  try {
+    const [w, h] = [img.naturalWidth, img.naturalHeight];
+    const c = document.createElement("canvas");
+    [c.width, c.height] = [w, h];
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(img, 0, 0);
+    const px = x.getImageData(0, 0, w, h).data;
+    const cell = Math.max(1, Math.ceil(Math.max(w, h) / SIDE_MASK));
+    const [mw, mh] = [Math.ceil(w / cell), Math.ceil(h / cell)];
+    const on = new Uint8Array(mw * mh);
+    for (let y = 0; y < h; y++) {
+      for (let i = 0; i < w; i++) {
+        if (px[(y * w + i) * 4 + 3] > 25) on[Math.floor(y / cell) * mw + Math.floor(i / cell)] = 1;
+      }
+    }
+    mask = { cell, w: mw, h: mh, on };
+  } catch {}
+  masks.set(src, mask);
+  return mask;
+}
+
+// whether the picture shows within `grab` of the point. Art still loading isn't there yet, the pointer
+// passing over the preview loads it; art that can't be read counts its box
+function skinSideShows(page, l, b, px, py, grab) {
+  if (!l) return false;
+  const mask = skinSideMask(page, l.src);
+  if (mask === undefined) return false;
+  if (!mask) return true;
+  const img = skinSideArt(page, l.src);
+  const [sx, sy, sw, sh] = l.crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
+  let u = (px - b.x) / b.w;
+  if (l.flip) u = 1 - u;
+  const [fx, fy] = [sx + u * sw, sy + ((py - b.y) / b.h) * sh];
+  const [gx, gy] = [(grab * sw) / b.w, (grab * sh) / b.h];
+  const cells = (from, to, n) => [Math.max(0, Math.floor(from / mask.cell)), Math.min(n - 1, Math.floor(to / mask.cell))];
+  const [x0, x1] = cells(Math.max(sx, fx - gx), Math.min(sx + sw, fx + gx), mask.w);
+  const [y0, y1] = cells(Math.max(sy, fy - gy), Math.min(sy + sh, fy + gy), mask.h);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) if (mask.on[y * mask.w + x]) return true;
+  }
+  return false;
 }
 
 function skinSideCursor(page, ev) {

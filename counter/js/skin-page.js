@@ -73,7 +73,7 @@ async function watchSkin(page) {
 
 // another skin starts from what's applied to it, and its images aren't the last one's
 function skinForget(page) {
-  Object.assign(page, { edits: {}, history: {}, wide: null, sideArt: null, blanks: null, sideMenu: null, sideError: null, sideNote: null });
+  Object.assign(page, { edits: {}, history: {}, wide: null, sideArt: null, sideMasks: null, blanks: null, sideMenu: null, sideError: null, sideNote: null });
 }
 
 const STAGE = `<path d="M.5 .5v9M9.5 .5v9"/><circle cx="2.9" cy="7.6" r="1.3"/><circle cx="7.1" cy="7.6" r="1.3"/><rect x="1.6" y="3.4" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/><rect x="5.8" y=".8" width="2.6" height="1.4" rx=".5" fill="currentColor" stroke="none"/>`;
