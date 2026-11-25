@@ -306,7 +306,7 @@ function rateDanFacts(r) {
   const badge = (d) => (d.dan ? danBadge(d.dan, d.keys) : el("span", {}, "–"));
   return [
     (was.msd != null || now.msd != null) && el("div", { class: `rate-fact${stale ? " stale" : ""}` },
-      el("span", { class: "rate-fact-label" }, "MSD"),
+      el("span", { class: "rate-fact-label" }, ratingName(now.keys ?? was.keys)),
       el("span", { class: "rate-was" }, msd(was)),
       el("span", { class: "rate-arrow", "aria-hidden": "true" }, "→"),
       el("b", {}, msd(now))),

@@ -272,6 +272,9 @@ function drawnBadges(data) {
   }));
 }
 
+// MSD is MinaCalc's number, and MinaCalc rates 4K. Mania Tracker rates 6K to 8K with Prism, its own
+const ratingName = (keys) => (Math.round(Number(keys)) >= 6 && Math.round(Number(keys)) <= 8 ? "Prism" : "MSD");
+
 // the map selected in osu!, with its MSD and dan worked out here at its rate
 let picked = null;
 let pickedTimer = 0;
@@ -325,8 +328,8 @@ function pickedMap() {
       el("div", { class: "facts" },
         el("span", {}, diffName(map.keys, map.version)),
         !d
-          ? el("span", { class: "msd" }, el("b", { class: "wait" }), " MSD")
-          : d.msd != null && el("span", { class: "msd" }, el("b", {}, d.msd.toFixed(2)), d.rate === 1 ? " MSD" : ` MSD at ${d.rate}x`))),
+          ? el("span", { class: "msd" }, el("b", { class: "wait" }), ` ${ratingName(map.keys)}`)
+          : d.msd != null && el("span", { class: "msd" }, el("b", {}, d.msd.toFixed(2)), ` ${ratingName(map.keys)}${d.rate === 1 ? "" : ` at ${d.rate}x`}`))),
     showDans && el("div", { class: "dans" }, dans.map((x) => danBadge(x, d.keys))));
 }
 
@@ -353,7 +356,7 @@ function rating(p) {
   if (!rank && !msd && !dan) return null;
   return el("div", { class: "rating" },
     rank,
-    msd && el("span", { class: "msd" }, el("b", {}, r.msd.toFixed(2)), " MSD"),
+    msd && el("span", { class: "msd" }, el("b", {}, r.msd.toFixed(2)), ` ${ratingName(p.play.keys)}`),
     dan && danText(r.dan));
 }
 
