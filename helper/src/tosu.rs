@@ -253,6 +253,8 @@ fn selected_map(raw: &Value) -> Option<Value> {
     let has = |m: &str| acronyms.iter().any(|a| a == m);
     Some(json!({
         "md5": md5,
+        // osu!'s id for it, none for a map that was never submitted or one made here
+        "id": bm.get("id").and_then(Value::as_i64).filter(|id| *id > 0),
         "artist": bm.get("artist"),
         "title": bm.get("title"),
         "version": bm.get("version"),

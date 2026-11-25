@@ -319,7 +319,9 @@ function pickedMap() {
   const dans = d && showDans ? [d.dan, d.other].filter(Boolean) : [];
   return el("div", { class: `picked${picked.data ? "" : " stale"}` },
     el("div", { class: "what" },
-      el("span", { class: "title" }, map.title ?? "Unknown"),
+      map.id
+        ? el("a", { class: "title", href: `${snapshot.connection.origin}/maps?map=${map.id}`, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, map.title ?? "Unknown")
+        : el("span", { class: "title" }, map.title ?? "Unknown"),
       el("div", { class: "facts" },
         el("span", {}, diffName(map.keys, map.version)),
         !d
