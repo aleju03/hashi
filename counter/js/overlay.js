@@ -2,6 +2,8 @@
 // OBS browser source, set up by its link, never touching the window, scaled to the source's width
 const OVERLAY = new URLSearchParams(location.search).has("overlay");
 const STREAM = new URLSearchParams(location.search).get("overlay") === "stream";
+// a wayland layer: the compositor can't move or resize it, the page does through the app
+const LAYER = new URLSearchParams(location.search).has("layer");
 const PIP = `<rect x=".5" y="1.5" width="9" height="7" rx="1"/><rect x="5" y="5" width="3" height="2" fill="currentColor" stroke="none"/>`;
 const DISC = `<circle cx="5" cy="5" r="4.5"/><circle cx="5" cy="5" r="1.3"/>`;
 const GRIP = `<path d="M9.5 4.5l-5 5M9.5 7.5l-2 2" stroke-linecap="round"/>`;
@@ -32,7 +34,7 @@ function streamSettings() {
 }
 
 const ov = {
-  set: STREAM ? streamSettings() : { see: 90, zoom: 100, rows: 8, art: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
+  set: STREAM ? streamSettings() : { see: 90, zoom: 100, rows: 8, art: true, status: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
   sent: { size: "", zoom: 0, through: null, blur: null },
@@ -200,11 +202,16 @@ function ovSettings() {
   });
   return el("div", { class: "ov-settings" },
     row("Background", see),
+    row("Status line", el("button", {
+      class: `switch${s.status ? " on" : ""}`, role: "switch", "aria-checked": String(s.status), "aria-label": "Status line",
+      onclick: () => ovSave((x) => (x.status = !x.status)),
+    }, el("i"))),
     row("Map art", el("button", {
       class: `switch${s.art ? " on" : ""}`, role: "switch", "aria-checked": String(s.art), "aria-label": "Map art",
       onclick: () => ovSave((x) => (x.art = !x.art)),
     }, el("i"))),
     row("While playing", segs([["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]], s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
+    row("Leaderboard rows", segs([[5, "5"], [8, "8"], [10, "10"], [15, "15"]], s.rows, (r) => ovSave((x) => (x.rows = r)), "Leaderboard rows")),
     el("p", { class: "ov-hint" }, "Drag the corner to make it bigger or smaller."),
     el("button", { class: "link", onclick: () => ((ov.open = false), render()) }, "Done"));
 }
@@ -233,7 +240,11 @@ function ovShell() {
   ov.card = el("div", {
     class: "ov",
     // the whole card moves it, as a title bar would
-    onmousedown: (e) => !STREAM && e.button === 0 && !e.target.closest("button, a, input") && windowAction("drag"),
+    onmousedown: (e) => {
+      if (STREAM || e.button !== 0 || e.target.closest("button, a, input")) return;
+      if (LAYER) layerDrag(e, "move");
+      else windowAction("drag");
+    },
   });
   return ov.card;
 }
@@ -254,7 +265,7 @@ function overlayCard() {
   const playing = ovPlaying();
   // on stream, nothing at all rather than a card saying there's nothing
   const empty = STREAM && (view === "board" ? !map : !map && !(ovFresh(snapshot.plays[0]) && !playing));
-  card.className = `ov view-${view}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < 45 ? " thin" : ""}${empty ? " empty" : ""}${card.classList.contains("flash") ? " flash" : ""}`;
+  card.className = `ov view-${view}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < 45 ? " thin" : ""}${empty ? " empty" : ""}${ov.set.status || ov.open ? "" : " quiet"}${card.classList.contains("flash") ? " flash" : ""}`;
   card.style.setProperty("--see", ov.set.see / 100);
   if (art) card.style.setProperty("--art", `url("${art}")`);
   else card.style.removeProperty("--art");
@@ -272,7 +283,11 @@ function overlayCard() {
       class: "grip",
       title: "Resize",
       "aria-label": "Resize",
-      onmousedown: (e) => e.button === 0 && windowAction("resize"),
+      onmousedown: (e) => {
+        if (e.button !== 0) return;
+        if (LAYER) layerDrag(e, "scale");
+        else windowAction("resize");
+      },
     }, icon(GRIP))];
   card.replaceChildren(...parts.flat(Infinity).filter((c) => c != null && c !== false));
   return card;
@@ -320,8 +335,45 @@ function drawOverlay() {
 
 if (STREAM) addEventListener("resize", () => render());
 
-if (OVERLAY && !STREAM) {
-  addEventListener("pointerup", () => ov.holding && ((ov.holding = false), render()));
+// a layer, moved or scaled by the pointer. its own pixels shift under the pointer once the app has
+// moved it, so each step asks for where the pointer is now against where it was held, and the next
+// waits until that's been done
+function layerDrag(e, how) {
+  e.preventDefault();
+  const held = [e.clientX, e.clientY];
+  const card = ov.card.getBoundingClientRect();
+  const grip = card.right - e.clientX;
+  let busy = false;
+  const step = (ev) => {
+    if (busy) return;
+    const zoom = ov.set.zoom / 100;
+    let ask;
+    if (how === "move") {
+      const [dx, dy] = [Math.round((ev.clientX - held[0]) * zoom), Math.round((ev.clientY - held[1]) * zoom)];
+      if (!dx && !dy) return;
+      ask = `overlay-move/${dx},${dy}`;
+    } else {
+      const next = Math.max(60, Math.min(300, Math.round(((ev.clientX + grip) * zoom / OV_WIDTH) * 100)));
+      if (next === ov.set.zoom) return;
+      ov.set.zoom = ov.sent.zoom = next;
+      ask = `overlay-zoom/${next}`;
+    }
+    busy = true;
+    fetch(`${BRIDGE}/window/${ask}`, { method: "POST" }).catch(() => {}).finally(() =>
+      requestAnimationFrame(() => requestAnimationFrame(() => (busy = false))));
+  };
+  const done = () => {
+    removeEventListener("pointermove", step);
+    removeEventListener("pointerup", done);
+    if (how === "scale") ovSave(() => {});
+  };
+  addEventListener("pointermove", step);
+  addEventListener("pointerup", done);
+}
+
+if (OVERLAY && !STREAM) addEventListener("pointerup", () => ov.holding && ((ov.holding = false), render()));
+
+if (OVERLAY && !STREAM && !LAYER) {
   // dragged bigger or smaller, from the corner or by the window manager: the width sets the scale
   // and, on the leaderboard, the height how many rows fit. the page's own pixels are the window's
   // over its zoom, so a window the size it was asked for is OV_WIDTH wide here

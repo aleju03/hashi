@@ -113,6 +113,28 @@
   display: none;
 }
 
+/* without the status line its buttons sit in the corner, over what the card shows */
+.ov.quiet .bar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 1;
+  min-height: 0;
+}
+
+.ov.quiet .bar .now {
+  display: none;
+}
+
+.ov.quiet .bar .tools {
+  position: static;
+  transform: none;
+}
+
+.ov.quiet > .ov-map, .ov.quiet > .ov-board-head, .ov.quiet > .ov-empty {
+  margin-top: 0;
+}
+
 .ov .tools button {
   display: grid;
   place-items: center;
