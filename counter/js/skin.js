@@ -20,11 +20,19 @@ function skinAspect(page) {
 
 async function loadSkinScene(page) {
   const hidden = page.sideHidden ?? null;
-  const edits = skinSideScene(page, page.editsJson ?? skinEditsJson(page));
-  const query = `keys=${page.keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}${skinAspect(page)}`;
+  const keys = page.keys;
+  const asked = page.editsJson ?? skinEditsJson(page);
+  const edits = skinSideScene(page, asked);
+  const query = `keys=${keys}&at=${page.stamp}${edits ? `&edits=${encodeURIComponent(edits)}` : ""}${skinAspect(page)}`;
   const res = await fetch(`${BRIDGE}/skin/scene?${query}`);
   if (!res.ok) throw new Error("scene");
   const scene = await res.json();
+  // edits go in skin units, which need the skin's own HitPosition from a scene first: edits applied
+  // before, back when the editor opens, are drawn in once it's known
+  if (page.editsJson == null && !page.hitUnits?.[keys] && page.keys === keys) {
+    (page.hitUnits ??= {})[keys] = scene.ownHit;
+    if (skinEditsJson(page) !== asked) return loadSkinScene(page);
+  }
   // an edit only changes a few sprites, the rest are the ones already loaded
   const load = `${page.keys} ${page.stamp}`;
   if (page.sprites?.load !== load) page.sprites = { load, byId: new Map() };
