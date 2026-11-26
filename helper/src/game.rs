@@ -308,8 +308,7 @@ fn live_accuracy(raw: &Value, settings: Option<&crate::types::Settings>) -> Opti
 }
 
 pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
-    let pause_menu = raw.pointer("/game/pauseMenu").and_then(Value::as_bool);
-    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true);
+    let game = json!({ "client": raw.get("client"), "game": raw.get("game") });
     let mut finished = None;
     {
         let mut s = b.st();
@@ -487,7 +486,7 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
         t.prev_state = Some(state);
         t.last_frame = Some(raw);
     }
-    crate::live::on_game(b, pause_menu, failed);
+    crate::live::on_game(b, &game);
     if let Some((finish, rs)) = finished {
         on_play_finished(b, finish, rs);
     }

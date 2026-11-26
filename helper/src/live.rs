@@ -77,6 +77,7 @@ pub(crate) struct LiveState {
     seed_wait_since: Option<i64>,
     pause_menu: Option<bool>,
     failed_seen: bool,
+    still_seen: bool,
     reset_pending: bool,
     // the play failed and lazer's fail screen is up, the same attempt isn't a new play
     failed_attempt: bool,
@@ -104,6 +105,7 @@ impl Default for LiveState {
             seed_wait_since: None,
             pause_menu: None,
             failed_seen: false,
+            still_seen: false,
             reset_pending: false,
             failed_attempt: false,
         }
@@ -268,6 +270,7 @@ fn follow(s: &mut State) {
     // the log is also cleared as a play opens, before its first press
     let retry = playing && s.live.restarted && s.live.play.as_ref().is_some_and(|p| p.sent > 0);
     let menu = raw.pointer("/game/pauseMenu").and_then(Value::as_bool);
+    let stood_still = stable_still(&raw);
     let other_map = s.live.play.as_ref().is_some_and(|p| Some(&p.md5) != md5.as_ref());
     if s.live.play.is_some() && (!playing || retry || other_map) {
         let reason = if retry {
@@ -337,7 +340,7 @@ fn follow(s: &mut State) {
         play.started |= last.is_some_and(|l| time > l);
         // lazer's pause menu says so at once, otherwise it's the song standing still
         let still = last == Some(time) && now - play.moved_at >= PAUSED_AFTER_MS;
-        let paused = play.started && (menu == Some(true) || still);
+        let paused = play.started && (menu == Some(true) || still || stood_still);
         let resuming = paused && menu == Some(false);
         if play.clock != Some((time, paused, resuming)) {
             play.clock = Some((time, paused, resuming));
@@ -406,12 +409,16 @@ fn clock_event(id: &str, time: i64, paused: bool, resuming: bool, age: i64, rate
 
 // lazer's pause menu opening or closing, or the play failing, goes out now, not on the next
 // tick: spectators count down to the resume from when it arrives, and stop where it failed
-pub(crate) fn on_game(b: &Arc<Bridge>, menu: Option<bool>, failed: bool) {
+pub(crate) fn on_game(b: &Arc<Bridge>, raw: &Value) {
+    let menu = raw.pointer("/game/pauseMenu").and_then(Value::as_bool);
+    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true);
+    let still = stable_still(raw);
     let changed = {
         let mut s = b.st();
-        let changed = (s.live.pause_menu != menu || s.live.failed_seen != failed) && s.live.play.is_some();
+        let changed = (s.live.pause_menu != menu || s.live.failed_seen != failed || s.live.still_seen != still) && s.live.play.is_some();
         s.live.pause_menu = menu;
         s.live.failed_seen = failed;
+        s.live.still_seen = still;
         changed
     };
     if changed {
@@ -426,6 +433,12 @@ pub(crate) fn on_game(b: &Arc<Bridge>, menu: Option<bool>, failed: bool) {
             }
         });
     }
+}
+
+// stable has no pause menu to read: the reader says when the song's time didn't move between two
+// of its reads, a quarter second apart
+fn stable_still(raw: &Value) -> bool {
+    raw.get("client").and_then(Value::as_str) == Some("stable") && raw.pointer("/game/paused").and_then(Value::as_bool) == Some(true)
 }
 
 fn play_rate(play: &Option<Play>) -> f64 {
