@@ -387,6 +387,7 @@ pub(crate) fn connection_summary(env: &Env, s: &State) -> Value {
     let c = s.config.connection.as_ref();
     let user_id = c.map(|c| c.user_id.clone()).unwrap_or(Value::Null);
     let mine = !user_id.is_null() && s.profile.user_id == user_id;
+    let mine_look = crate::looks::mine_for(s, &crate::types::text(&user_id)).filter(|_| !user_id.is_null());
     let environment = c
         .map(|c| c.environment.clone())
         .filter(|v| !v.is_null())
@@ -403,6 +404,9 @@ pub(crate) fn connection_summary(env: &Env, s: &State) -> Value {
         "environment": environment,
         "avatarUrl": if mine { s.profile.avatar_url.clone() } else { None },
         "accent": if mine { s.profile.accent.clone() } else { None },
+        "supporter": mine_look.is_some_and(|m| m["supporter"] == true),
+        "look": mine_look.map(|m| m["look"].clone()),
+        "looksSheet": format!("{}{}", env.origin, crate::looks::SHEET_PATH),
     })
 }
 
@@ -673,6 +677,15 @@ async fn exchange_code(b: &Arc<Bridge>, caps: &Value, code: &str, verifier: &str
 fn load_profile_later(b: &Arc<Bridge>) {
     let b2 = b.clone();
     b.spawn(async move { load_profile(&b2).await });
+    crate::looks::refresh_mine(b, true);
+}
+
+// the backend's own origin, for its public endpoints
+pub(crate) async fn backend(b: &Arc<Bridge>) -> Option<String> {
+    match &b.env.live_backend_url {
+        u if !u.is_empty() => Some(u.clone()),
+        _ => caps(b).await.ok().as_ref().and_then(backend_origin),
+    }
 }
 
 async fn load_profile(b: &Arc<Bridge>) {
@@ -689,11 +702,7 @@ async fn load_profile(b: &Arc<Bridge>) {
     let id = crate::types::text(&user_id);
     // a.ppy.sh/{id} is cached for a month, the profile's url changes with the avatar
     b.st().profile = crate::Profile { user_id, avatar_url: Some(format!("https://a.ppy.sh/{id}")), accent: None };
-    let backend = match &b.env.live_backend_url {
-        u if !u.is_empty() => Some(u.clone()),
-        _ => caps(b).await.ok().as_ref().and_then(backend_origin),
-    };
-    if let Some(backend) = backend {
+    if let Some(backend) = backend(b).await {
         let url = format!("{backend}/api/profiles/{id}/cached-snapshot");
         match b.client().get(&url).timeout(Duration::from_secs(10)).send().await {
             Ok(res) => {

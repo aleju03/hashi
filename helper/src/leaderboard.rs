@@ -148,7 +148,8 @@ pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mod
         let message = body.pointer("/error/message").and_then(Value::as_str).map(String::from);
         return (502, json!({ "error": message.unwrap_or_else(|| format!("Mania Tracker answered {}", res.status)) }));
     }
-    let page = public_board(&body, &b.env.origin);
+    let mut page = public_board(&body, &b.env.origin);
+    crate::looks::dress(b, &mut page).await;
     let mut s = b.st();
     let fetched = &mut s.boards.fetched;
     if fetched.len() >= KEEP {

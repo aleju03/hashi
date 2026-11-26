@@ -90,10 +90,10 @@ function idCard(c, d, days, tip) {
   const main = d.modes.reduce((a, b) => (!a || b.plays > a.plays ? b : a), null);
   return el("section", { class: "panel id-card" },
     el("div", { class: "id-top" },
-      el("span", { class: "id-face" }, c.avatarUrl ? el("img", { src: c.avatarUrl, alt: "" }) : playerName(c)[0].toUpperCase()),
+      lookFace("id-face", c.avatarUrl ? el("img", { src: c.avatarUrl, alt: "" }) : playerName(c)[0].toUpperCase(), c.look?.frame, 58, { play: true, key: "me card" }),
       el("div", { class: "id-who" },
         el("span", { class: "id-kind" }, "Player card"),
-        el("b", { class: "id-name" }, playerName(c)),
+        el("b", { class: "id-name" }, styledName(playerName(c), c.look?.name)),
         el("span", { class: "id-since" }, first ? `With Hashi since ${shortDate(new Date(first))}` : "No plays yet")),
       main && el("span", { class: "id-keys", style: "--tilt: 9deg" }, `${main.keys}K`)),
     el("ul", { class: "id-facts" },

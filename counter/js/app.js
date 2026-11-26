@@ -72,7 +72,7 @@ function home(c, host) {
   const account = !!c.username;
   return el("div", { class: "home" },
     el("div", { class: "me" },
-      el("span", { class: "face" }, face(c)),
+      lookFace("face", face(c), c.look?.frame, 42, { play: true, key: "me" }),
       el("div", { class: "who" },
         el("div", { class: "name" },
           snapshot.analysis
@@ -82,8 +82,8 @@ function home(c, host) {
               "aria-pressed": String(!!profilePage),
               style: c.accent && `color: ${c.accent}`,
               onclick: () => (profilePage ? closeProfile() : openProfile()),
-            }, playerName(c))
-            : el("span", { class: "profile", style: c.accent && `color: ${c.accent}` }, playerName(c)),
+            }, styledName(playerName(c), c.look?.name))
+            : el("span", { class: "profile", style: c.accent && `color: ${c.accent}` }, styledName(playerName(c), c.look?.name)),
           account
             ? host && el("span", {}, host)
             : el("button", { class: "link", disabled: slow, onclick: () => action("connect") }, "Connect to Mania Tracker")),
@@ -234,7 +234,7 @@ function draw() {
   }
 
   if (atHome) {
-    app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen, bottleVersion(), sentBottle())));
+    app.append(el("div", { class: "ground" }, home(c, host), shore(settingsOpen && !c.supporter, bottleVersion(), sentBottle())));
     const view = settingsOpen ? "settings" : notesOpen ? "notes" : reportOpen ? "report" : goalsOpen ? "goals" : profilePage ? "profile" : skinPage ? "skin" : cutter ? "cut" : rater ? "rate" : board ? "board" : maker ? "maker" : trainer ? "trainer" : analysis ? `analysis ${analysis.id}` : "plays";
     document.documentElement.classList.toggle("roomy", !!(analysis || skinPage || cutter || rater) && ROOMY.matches);
     if (view !== shownView) (document.documentElement.classList.contains("framed") ? app : document.scrollingElement).scrollTop = 0;

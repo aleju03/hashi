@@ -8,6 +8,7 @@ mod goals;
 mod judge;
 pub mod lazer;
 mod leaderboard;
+mod looks;
 mod osr;
 pub mod player;
 mod practice;
@@ -319,6 +320,7 @@ pub(crate) struct State {
     pub pump: queue::PumpState,
     pub presence: presence::PresenceState,
     pub boards: leaderboard::Boards,
+    pub looks: looks::Looks,
     pub dans: dan::Dans,
     pub update: update::UpdateState,
     pub autostart: Option<bool>,
@@ -808,6 +810,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
             pump: queue::PumpState::default(),
             presence: presence::PresenceState::default(),
             boards: Default::default(),
+            looks: Default::default(),
             dans: Default::default(),
             update: update::UpdateState::default(),
             autostart: None,
@@ -961,6 +964,7 @@ pub(crate) mod tests {
             pump: Default::default(),
             presence: Default::default(),
             boards: Default::default(),
+            looks: Default::default(),
             dans: Default::default(),
             update: Default::default(),
             autostart: None,

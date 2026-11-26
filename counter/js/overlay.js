@@ -184,8 +184,8 @@ function ovStanding(e, mine, still = false) {
   return [el("li", { class: `ov-standing${e.username === snapshot.connection.username ? " me" : ""}${mine ? " mine" : ""}${open ? " open" : ""}`, onclick: !still && !STREAM && ((ev) => toggleBoardRow(e, ev)) },
     el("span", { class: "pos" }, `#${e.position ?? "?"}`),
     grade && el("span", { class: `grade ${tone}` }, grade),
-    el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "" })),
-    el("span", { class: "player", style: e.avatarAccent && `--name: ${e.avatarAccent}` }, e.username),
+    lookFace("avatar", e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "" }), e.look?.frame, 20, { key: `ov row ${e.userId}` }),
+    el("span", { class: "player", style: e.avatarAccent && `--name: ${e.avatarAccent}` }, styledName(e.username, e.look?.name)),
     el("span", { class: "mods" }, e.mods.filter((m) => m !== "CL").map((m) => modBadge(m, { rate: e.rate }))),
     el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : "")),
   open && el("li", { class: "ov-standing-detail" }, scoreDetail(e))];

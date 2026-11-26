@@ -409,6 +409,10 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             b.window_action(name);
             return empty(204);
         }
+        if path == "/looks/mine" {
+            crate::looks::refresh_mine(b, false);
+            return empty(204);
+        }
         if path == "/presence/on" || path == "/presence/off" {
             let ok = presence::set_presence_setting(b, path == "/presence/on").await;
             return saved(b, ok);
