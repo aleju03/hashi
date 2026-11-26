@@ -27,9 +27,9 @@ fn stable_mods(bits: i64) -> Vec<String> {
 pub(crate) fn replay_mods(replay: &crate::osr::Replay, lazer: bool) -> (String, Option<f64>) {
     let list = replay.lazer.as_ref().filter(|_| lazer).and_then(|l| l.get("mods")).and_then(Value::as_array);
     let Some(list) = list else { return (stable_mods(replay.mods).concat(), None) };
-    let names: String = list.iter().map(acronym).collect();
-    let default = if names.contains("DT") || names.contains("NC") { 1.5 } else if names.contains("HT") || names.contains("DC") { 0.75 } else { 1.0 };
-    (names, lazer_rate(list).filter(|r| (r - default).abs() > 1e-9))
+    let has = |a: &str| list.iter().any(|m| acronym(m) == a);
+    let default = if has("DT") || has("NC") { 1.5 } else if has("HT") || has("DC") { 0.75 } else { 1.0 };
+    (list.iter().map(acronym).collect(), lazer_rate(list).filter(|r| (r - default).abs() > 1e-9))
 }
 
 // the one speed a lazer play ran at, None when it changes during the play
@@ -1355,6 +1355,18 @@ mod tests {
     fn nc_and_pf_drop_what_they_imply() {
         let bits = (1 << 5) | (1 << 6) | (1 << 9) | (1 << 14);
         assert_eq!(super::stable_mods(bits), ["NC", "PF"]);
+    }
+
+    #[test]
+    fn lazer_mods_are_matched_whole() {
+        let replay = |mods: serde_json::Value| crate::osr::Replay { mode: 3, mods: 0, counts: [0; 6], rows: vec![], lazer: Some(serde_json::json!({ "mods": mods })) };
+        // HD+CO reads "HDCO", which isn't daycore
+        let hdco = replay(serde_json::json!([{ "acronym": "HD" }, { "acronym": "CO" }]));
+        assert_eq!(super::replay_mods(&hdco, true), ("HDCO".into(), None));
+        let dt = replay(serde_json::json!([{ "acronym": "DT" }]));
+        assert_eq!(super::replay_mods(&dt, true), ("DT".into(), None));
+        let dt12 = replay(serde_json::json!([{ "acronym": "DT", "settings": { "speed_change": 1.2 } }]));
+        assert_eq!(super::replay_mods(&dt12, true), ("DT".into(), Some(1.2)));
     }
 
     #[test]
