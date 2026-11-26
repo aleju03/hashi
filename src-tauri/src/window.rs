@@ -346,6 +346,11 @@ mod hypr {
         })
     }
 
+    // the overlay's gone: its keep-on-top threads stop with this
+    pub fn forget() {
+        set(&ADDRESS, None);
+    }
+
     // once it's mapped: floating, sized, and where it was left or where the window was
     pub fn settle(app: AppHandle, at: Option<(f64, f64)>) {
         set(&ADDRESS, None);
@@ -518,6 +523,8 @@ fn show(app: &AppHandle) {
             set(&OVERLAY_AT, Some((x, y)));
             tell(&format!("overlay-place {x},{y}"));
         }
+        #[cfg(target_os = "linux")]
+        hypr::forget();
         let _ = w.destroy();
     }
     if let Some(w) = app.get_webview_window(MAIN) {
