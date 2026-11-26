@@ -409,3 +409,71 @@
 .board .lead .link:hover {
   color: #fff;
 }
+
+/* a row opened to its score */
+.standing, .ov-standing {
+  cursor: pointer;
+}
+
+.overlay-stream .ov-standing {
+  cursor: default;
+}
+
+.standing.open, .ov-standing.open {
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.standing-detail, .ov-standing-detail {
+  list-style: none;
+}
+
+.standing-detail {
+  padding: 4px 6px 12px 44px;
+}
+
+.score-detail .facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: var(--osu-f1);
+}
+
+.score-detail .facts span:first-child {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.score-detail .counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.score-detail .counts li {
+  display: flex;
+  flex-direction: column;
+}
+
+.score-detail .counts small {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--j);
+}
+
+.score-detail .counts b {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-detail .link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 12px;
+}

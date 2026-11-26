@@ -183,7 +183,18 @@ fn is_hex_color(c: &str) -> bool {
     c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-fn entry(e: &Value) -> Option<Value> {
+// the judgements as [perfect, great, good, ok, meh, miss], from lazer's names or osu!'s older ones
+fn counts(stats: &Value) -> Option<[u64; 6]> {
+    let lazer = ["perfect", "great", "good", "ok", "meh", "miss"];
+    let legacy = ["count_geki", "count_300", "count_katu", "count_100", "count_50", "count_miss"];
+    let read = |keys: [&str; 6]| -> Option<[u64; 6]> {
+        let got = keys.map(|k| stats.get(k).and_then(Value::as_u64));
+        got.iter().any(Option::is_some).then(|| got.map(|n| n.unwrap_or(0)))
+    };
+    read(lazer).or_else(|| read(legacy))
+}
+
+fn entry(e: &Value, origin: &str) -> Option<Value> {
     let user = e.get("user")?;
     let username = user.get("username").and_then(Value::as_str)?;
     let mods: Vec<&str> = e.get("mods").and_then(Value::as_array).map(|m| m.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
@@ -206,11 +217,13 @@ fn entry(e: &Value) -> Option<Value> {
         "playedAt": str_field(e, "played_at"),
         "app": str_field(e, "app"),
         "rate": num_field(e, "rate"),
+        "counts": e.get("statistics").and_then(counts),
+        "replayUrl": on_site(e.get("replay_url").unwrap_or(&Value::Null), origin),
     }))
 }
 
 fn public_board(body: &Value, origin: &str) -> Value {
-    let entries: Vec<Value> = body.get("entries").and_then(Value::as_array).map(|l| l.iter().filter_map(entry).collect()).unwrap_or_default();
+    let entries: Vec<Value> = body.get("entries").and_then(Value::as_array).map(|l| l.iter().filter_map(|e| entry(e, origin)).collect()).unwrap_or_default();
     json!({
         "beatmapId": body.get("beatmap_id"),
         "artist": str_field(body, "artist"),
@@ -220,7 +233,7 @@ fn public_board(body: &Value, origin: &str) -> Value {
         "url": on_site(body.get("url").unwrap_or(&Value::Null), origin),
         "total": body.get("total").and_then(Value::as_u64).unwrap_or(entries.len() as u64),
         "entries": entries,
-        "self": body.get("self").and_then(entry),
+        "self": body.get("self").and_then(|e| entry(e, origin)),
         "speed": board_speed(body),
         "mods": board_mods(body),
         "offset": body.get("offset").and_then(Value::as_u64).unwrap_or(0),
@@ -308,8 +321,15 @@ mod tests {
         assert!((page["entries"][0]["accuracy"].as_f64().unwrap() - 99.1).abs() < 1e-9);
         assert_eq!(page["entries"][0]["app"], json!("mania-bridge"));
         assert_eq!(page["entries"][0]["avatarAccent"], json!("#ff8899"));
-        let odd = super::entry(&json!({ "user": { "username": "b", "avatar_accent": "red;background:url(x)" } })).unwrap();
+        let odd = super::entry(&json!({ "user": { "username": "b", "avatar_accent": "red;background:url(x)" }, "replay_url": "https://elsewhere.example/replay" }), "https://mania-tracker.com").unwrap();
         assert_eq!(odd["avatarAccent"], json!(null));
+        assert_eq!(odd["replayUrl"], json!(null));
+        assert_eq!(odd["counts"], json!(null));
+        let lazer = super::entry(&json!({ "user": { "username": "c" }, "statistics": { "perfect": 900, "great": 80, "miss": 2 }, "replay_url": "https://mania-tracker.com/replay?scoreId=5" }), "https://mania-tracker.com").unwrap();
+        assert_eq!(lazer["counts"], json!([900, 80, 0, 0, 0, 2]));
+        assert_eq!(lazer["replayUrl"], json!("https://mania-tracker.com/replay?scoreId=5"));
+        let stable = super::entry(&json!({ "user": { "username": "d" }, "statistics": { "count_geki": 500, "count_300": 40, "count_100": 3 } }), "https://mania-tracker.com").unwrap();
+        assert_eq!(stable["counts"], json!([500, 40, 0, 3, 0, 0]));
         assert_eq!(page["entries"].as_array().unwrap().len(), 1);
         assert_eq!(page["entries"][0]["mods"], json!(["DT"]));
         assert_eq!(page["self"], json!(null));

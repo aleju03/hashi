@@ -148,10 +148,37 @@ function rowImg(key, attrs) {
   return img;
 }
 
+const JUDGE_NAMES = { lazer: ["Perfect", "Great", "Good", "Ok", "Meh", "Miss"], stable: ["MAX", "300", "200", "100", "50", "Miss"] };
+const boardRowKey = (e) => String(e.userId ?? e.username);
+
+// a row opens to its score, and closes again
+function toggleBoardRow(e, ev) {
+  if (ev.target.closest("a, button")) return;
+  board.open = board.open === boardRowKey(e) ? null : boardRowKey(e);
+  render();
+}
+
+function scoreDetail(e) {
+  const num = (x) => (typeof x === "number" ? x.toLocaleString("en-US") : null);
+  const names = JUDGE_NAMES[e.lazer ? "lazer" : "stable"];
+  const facts = [
+    num(e.score),
+    typeof e.maxCombo === "number" && `${num(e.maxCombo)}x`,
+    typeof e.pp === "number" && `${Math.round(e.pp)}pp`,
+    e.lazer ? "lazer" : "stable",
+    e.playedAt && new Date(e.playedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+  ].filter(Boolean);
+  return el("div", { class: "score-detail" },
+    el("div", { class: "facts" }, facts.map((f) => el("span", {}, f))),
+    e.counts && el("ul", { class: "counts" }, e.counts.map((c, i) => el("li", { class: `j${i + 1}` }, el("small", {}, names[i]), el("b", {}, num(c))))),
+    e.replayUrl && el("a", { class: "link", href: e.replayUrl, target: "_blank", rel: "noreferrer" }, "Watch the replay"));
+}
+
 function standing(e, mine) {
   const [grade, tone] = GRADES[e.grade] ?? [e.grade, "d"];
   const name = e.username === snapshot.connection.username;
-  return el("li", { class: `standing${name ? " me" : ""}${mine ? " mine" : ""}` },
+  const open = board.open === boardRowKey(e);
+  return [el("li", { class: `standing${name ? " me" : ""}${mine ? " mine" : ""}${open ? " open" : ""}`, onclick: (ev) => toggleBoardRow(e, ev) },
     el("span", { class: "pos" }, `#${e.position ?? "?"}`),
     grade && el("span", { class: `grade ${tone}` }, grade),
     el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "", loading: "lazy" })),
@@ -166,7 +193,8 @@ function standing(e, mine) {
     e.app === "mania-bridge" && rowImg(`app ${e.userId ?? e.username}`, { class: "app", src: "images/app.svg", alt: "", title: "Sent with Hashi" }),
     el("span", { class: "mods" }, e.mods.filter((m) => m !== "CL").map((m) => modBadge(m, { rate: e.rate }))),
     el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : ""),
-    el("span", { class: "when", title: e.playedAt ? new Date(e.playedAt).toLocaleString() : null }, e.playedAt ? ago(e.playedAt) : ""));
+    el("span", { class: "when", title: e.playedAt ? new Date(e.playedAt).toLocaleString() : null }, e.playedAt ? ago(e.playedAt) : "")),
+  open && el("li", { class: "standing-detail" }, scoreDetail(e))];
 }
 
 function boardFilter(change) {

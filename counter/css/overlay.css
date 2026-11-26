@@ -717,3 +717,7 @@
     animation: none;
   }
 }
+
+.ov-standing-detail {
+  padding: 2px 4px 8px 45px;
+}

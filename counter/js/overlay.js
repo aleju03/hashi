@@ -176,15 +176,18 @@ function ovNow(map) {
   ];
 }
 
-function ovStanding(e, mine) {
+// on stream nobody clicks, so a row there never opens
+function ovStanding(e, mine, still = false) {
   const [grade, tone] = GRADES[e.grade] ?? [e.grade, "d"];
-  return el("li", { class: `ov-standing${e.username === snapshot.connection.username ? " me" : ""}${mine ? " mine" : ""}` },
+  const open = !still && !STREAM && board.open === boardRowKey(e);
+  return [el("li", { class: `ov-standing${e.username === snapshot.connection.username ? " me" : ""}${mine ? " mine" : ""}${open ? " open" : ""}`, onclick: !still && !STREAM && ((ev) => toggleBoardRow(e, ev)) },
     el("span", { class: "pos" }, `#${e.position ?? "?"}`),
     grade && el("span", { class: `grade ${tone}` }, grade),
     el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "" })),
     el("span", { class: "player", style: e.avatarAccent && `--name: ${e.avatarAccent}` }, e.username),
     el("span", { class: "mods" }, e.mods.filter((m) => m !== "CL").map((m) => modBadge(m, { rate: e.rate }))),
-    el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : ""));
+    el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : "")),
+  open && el("li", { class: "ov-standing-detail" }, scoreDetail(e))];
 }
 
 function ovBoard(map) {
@@ -198,7 +201,7 @@ function ovBoard(map) {
   let body;
   if (board.error) body = el("p", { class: "ov-empty" }, board.error);
   // the last board's rows, dimmed, until this one's come: the card keeps its height from map to map
-  else if (!data) body = ov.rows ? el("ol", { class: "ov-standings stale", "aria-label": "Loading" }, ov.rows.map((e) => ovStanding(e.e, e.mine)))
+  else if (!data) body = ov.rows ? el("ol", { class: "ov-standings stale", "aria-label": "Loading" }, ov.rows.map((e) => ovStanding(e.e, e.mine, true)))
     : el("ol", { class: "ov-standings", "aria-label": "Loading" }, Array.from({ length: ov.set.rows }, () => el("li", { class: "ov-standing" })));
   else if (data.unsupported || data.unknown) body = el("p", { class: "ov-empty" }, "Mania Tracker has no leaderboard for this map.");
   else if (!data.entries.length) body = el("p", { class: "ov-empty" }, "Nobody has played this map yet.");
@@ -274,9 +277,9 @@ function ovShell() {
   if (ov.card) return ov.card;
   ov.card = el("div", {
     class: "ov",
-    // the whole card moves it, as a title bar would
+    // the card moves it, as a title bar would, except its leaderboard rows, which open
     onmousedown: (e) => {
-      if (STREAM || e.button !== 0 || e.target.closest("button, a, input")) return;
+      if (STREAM || e.button !== 0 || e.target.closest("button, a, input, .ov-standing, .ov-standing-detail")) return;
       windowAction("drag");
     },
   });
