@@ -39,9 +39,11 @@
   opacity: var(--see);
 }
 
+/* a map background's own shape at the top, so the card growing doesn't zoom it */
 .ov-art {
   position: absolute;
-  inset: 0;
+  inset: 0 0 auto;
+  aspect-ratio: 16 / 9;
   z-index: -1;
   background: var(--art) center / cover;
   opacity: calc(var(--see) * 0.5);
