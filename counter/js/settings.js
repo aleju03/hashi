@@ -1,9 +1,9 @@
 const PRESENCE_NOTES = {
-  off: "Shown on your profile while osu! is open.",
+  off: "Shows what you're playing on your profile.",
   unsupported: "Mania Tracker doesn't support this yet.",
   needs_reconnect: "Mania Tracker needs your OK first.",
-  sharing: "Shown on your profile while osu! is open.",
-  paused: "Shown on your profile once osu! is open.",
+  sharing: "Shows what you're playing on your profile.",
+  paused: "Shows what you're playing on your profile once osu! is open.",
 };
 
 const WATCH_NOTES = {
@@ -147,7 +147,7 @@ function sharing() {
   const l = snapshot.live;
   return [
     row("Send my plays", plays, true, choice(!plays, live), !plays && `Off. The maps you finish aren't sent${snapshot.analysis ? ", only analyzed here" : ""}.`, ""),
-    row("Share my live status", live, liveAvailable, choice(plays, !live),
+    row("Rich presence on Mania Tracker", live, liveAvailable, choice(plays, !live),
       live ? liveNote : p.status === "unsupported" && liveNote, live ? ` is-${p.status}` : ""),
     l && el("div", { class: `setting${l.enabled ? ` is-${l.status}` : ""}` },
       el("div", { class: "text" },

@@ -372,7 +372,7 @@ pub(crate) async fn set_presence_setting(b: &Arc<Bridge>, on: bool) -> bool {
         }
     }
     let saved = b.save_config().await;
-    log!("sharing live status {}", if on { "on" } else { "off" });
+    log!("rich presence {}", if on { "on" } else { "off" });
     // a task of its own: the page can leave mid-request, and a dropped one would leave it busy for good
     let b2 = b.clone();
     let _ = tokio::spawn(async move { presence_tick(&b2).await }).await;
