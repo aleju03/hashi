@@ -70,7 +70,7 @@ function ovSave(change = () => {}) {
   render();
 }
 
-const ovPlaying = () => snapshot?.tosu.state === "play";
+const ovPlaying = () => snapshot?.reader.state === "play";
 
 // the selected map's background, swapped in once it's loaded so the card never shows it half drawn
 function ovArt(map) {
@@ -167,9 +167,9 @@ function ovNow(map) {
   const last = snapshot.plays[0];
   const playing = ovPlaying();
   const fresh = !playing && ovFresh(last);
-  const live = playing && ov.set.live && snapshot.tosu.live;
+  const live = playing && ov.set.live && snapshot.reader.live;
   return [
-    map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.tosu.osu ? "Select a mania map in osu! to see it here." : "Open osu! to see your map here."),
+    map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.reader.osu ? "Select a mania map in osu! to see it here." : "Open osu! to see your map here."),
     live ? ovLive(live) : fresh ? ovResult(last, map) : last && !playing && ovLast(last),
   ];
 }
@@ -287,7 +287,7 @@ function overlayCard() {
     card.replaceChildren(el("p", { class: "status warn" }, helperDown ? "Lost Hashi's helper. Reconnecting." : ""));
     return card;
   }
-  const map = snapshot.tosu.map;
+  const map = snapshot.reader.map;
   const newest = snapshot.plays[0]?.id;
   const flash = ov.newest !== undefined && newest && newest !== ov.newest;
   ov.newest = newest ?? null;

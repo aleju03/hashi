@@ -26,7 +26,7 @@ pub(crate) fn suffix(speed: f64) -> String {
 }
 
 pub(crate) async fn map(b: &Arc<Bridge>) -> (u16, Value) {
-    if b.st().tosu.client.as_deref() == Some("lazer") {
+    if b.st().reader.client.as_deref() == Some("lazer") {
         return (422, json!({ "error": "Use Rate Adjust in lazer." }));
     }
     let s = match crate::cut::load_selected(b).await {

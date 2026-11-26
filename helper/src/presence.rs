@@ -16,8 +16,8 @@ const PRESENCE_SETTLE_MS: i64 = 1500;
 const PRESENCE_TEXT_MAX: usize = 256;
 const RULESETS: [&str; 4] = ["osu", "taiko", "fruits", "mania"];
 
-fn presence_state(tosu_state: &str) -> &'static str {
-    match tosu_state {
+fn presence_state(state: &str) -> &'static str {
+    match state {
         "menu" => "menu",
         "selectPlay" | "selectDrawings" => "song_select",
         "play" => "playing",
@@ -122,7 +122,7 @@ pub(crate) fn split_mods(name: &str) -> Vec<String> {
 pub(crate) fn mod_acronyms(mods: &Value) -> Vec<String> {
     let list: Vec<String> = match mods.get("array").and_then(Value::as_array).filter(|a| !a.is_empty()) {
         Some(a) => a.iter().filter_map(|m| m.as_str().or_else(|| m.get("acronym").and_then(Value::as_str)).map(String::from)).collect(),
-        None => split_mods(&crate::tosu::mods_name(mods)),
+        None => split_mods(&crate::game::mods_name(mods)),
     };
     list.into_iter().filter(|m| !m.is_empty() && m.len() <= 8).take(32).collect()
 }
@@ -139,14 +139,14 @@ pub(crate) fn mod_rate(mods: &Value, acronyms: &[String]) -> f64 {
 }
 
 fn presence_body(s: &mut State) -> Option<Value> {
-    let raw = s.tosu.last_frame.as_ref()?;
-    if !s.tosu.osu {
+    let raw = s.reader.last_frame.as_ref()?;
+    if !s.reader.osu {
         return None;
     }
     let null = Value::Null;
     let bm = raw.get("beatmap").unwrap_or(&null);
-    let mut state = presence_state(s.tosu.state.as_deref().unwrap_or(""));
-    if state == "playing" && s.tosu.replay {
+    let mut state = presence_state(s.reader.state.as_deref().unwrap_or(""));
+    if state == "playing" && s.reader.replay {
         state = "watching_replay";
     }
     // older sites refuse states they don't list
@@ -184,7 +184,7 @@ fn presence_body(s: &mut State) -> Option<Value> {
         _ => Value::Null,
     };
     let mut body = json!({
-        "game_client": s.tosu.client.as_deref().unwrap_or("stable"),
+        "game_client": s.reader.client.as_deref().unwrap_or("stable"),
         "state": state,
         "ruleset": ruleset,
         "beatmap": beatmap,

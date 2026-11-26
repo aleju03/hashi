@@ -50,7 +50,7 @@ pub(crate) struct PendingFinish {
 }
 
 // blocked: { fix } when osu! runs but linux won't let hashi-reader read it
-pub(crate) struct TosuState {
+pub(crate) struct ReaderState {
     pub connected: bool,
     pub osu: bool,
     pub client: Option<String>,
@@ -93,9 +93,9 @@ pub(crate) struct TosuState {
     pending_finish: Option<PendingFinish>,
 }
 
-impl TosuState {
+impl ReaderState {
     pub fn new(lazer_files_dir: PathBuf) -> Self {
-        TosuState {
+        ReaderState {
             connected: false,
             osu: false,
             client: None,
@@ -307,12 +307,12 @@ fn live_accuracy(raw: &Value, settings: Option<&crate::types::Settings>) -> Opti
     Some(json!({ "columns": columns, "hands": { "left": acc(&hands[0]), "right": acc(&hands[1]) }, "judged": judged }))
 }
 
-pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
+pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
     let mut finished = None;
     {
         let mut s = b.st();
         let live = live_accuracy(&raw, s.config.settings.as_ref());
-        let t = &mut s.tosu;
+        let t = &mut s.reader;
         t.last_frame_at = now_ms();
         if !t.osu {
             t.osu = true;
@@ -589,7 +589,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
 pub(crate) fn reader_gone(b: &Arc<Bridge>) {
     {
         let mut s = b.st();
-        let t = &mut s.tosu;
+        let t = &mut s.reader;
         t.connected = false;
         t.gone();
         t.prev_state = None;
@@ -603,8 +603,8 @@ pub(crate) fn reader_gone(b: &Arc<Bridge>) {
 pub(crate) fn osu_gone(b: &Arc<Bridge>) {
     let was = {
         let mut s = b.st();
-        let was = s.tosu.osu;
-        s.tosu.gone();
+        let was = s.reader.osu;
+        s.reader.gone();
         was
     };
     if was {
@@ -616,12 +616,12 @@ pub(crate) fn osu_gone(b: &Arc<Bridge>) {
 pub(crate) fn set_blocked(b: &Arc<Bridge>, blocked: Option<String>) {
     let changed = {
         let mut s = b.st();
-        let changed = s.tosu.blocked != blocked;
+        let changed = s.reader.blocked != blocked;
         if changed {
             if let Some(fix) = &blocked {
                 log!("osu! is running but can't be read; fix: {fix}");
             }
-            s.tosu.blocked = blocked;
+            s.reader.blocked = blocked;
         }
         changed
     };
@@ -639,9 +639,9 @@ pub(crate) fn watch_osu_frames(b: &Arc<Bridge>) {
             second.tick().await;
             let stopped = {
                 let mut s = b2.st();
-                let stopped = s.tosu.osu && now_ms() - s.tosu.last_frame_at > 3000;
+                let stopped = s.reader.osu && now_ms() - s.reader.last_frame_at > 3000;
                 if stopped {
-                    s.tosu.gone();
+                    s.reader.gone();
                 }
                 stopped
             };
@@ -731,7 +731,7 @@ mod tests {
     fn captured(frames: &[Value]) -> usize {
         let (b, dir) = crate::auth::tests::test_bridge("http://localhost:3000");
         for f in frames {
-            super::on_tosu_message(&b, f.clone());
+            super::on_frame(&b, f.clone());
         }
         let n = b.st().queue.items.len();
         std::fs::remove_dir_all(dir).ok();

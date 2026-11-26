@@ -26,7 +26,7 @@ struct Wanted {
 
 fn wanted(b: &Bridge) -> Option<Wanted> {
     let s = b.st();
-    let map = s.tosu.map.as_ref()?;
+    let map = s.reader.map.as_ref()?;
     let mods = map.get("mods").and_then(Value::as_array);
     Some(Wanted {
         md5: map.get("md5")?.as_str()?.to_string(),
@@ -182,8 +182,8 @@ mod tests {
         let md5 = crate::replays::md5_hex(chart().as_bytes());
         let select = |rate: f64, mods: &[&str]| {
             let mut s = b.st();
-            s.tosu.last_frame = Some(json!({ "client": "lazer", "files": { "beatmap": file.to_string_lossy() } }));
-            s.tosu.map = Some(json!({ "md5": md5, "rate": rate, "od": null, "mods": mods }));
+            s.reader.last_frame = Some(json!({ "client": "lazer", "files": { "beatmap": file.to_string_lossy() } }));
+            s.reader.map = Some(json!({ "md5": md5, "rate": rate, "od": null, "mods": mods }));
         };
 
         select(1.0, &[]);

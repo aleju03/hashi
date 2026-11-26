@@ -20,7 +20,7 @@ function openSkin(from = null) {
   rater = null;
   board = null;
   clearTimeout(boardTimer);
-  const keys = Math.round((from ? from.keys : null) ?? snapshot.tosu.map?.keys ?? snapshot.plays[0]?.play.keys ?? 4);
+  const keys = Math.round((from ? from.keys : null) ?? snapshot.reader.map?.keys ?? snapshot.plays[0]?.play.keys ?? 4);
   skinPage = {
     source: from ? "play" : ["mix", "lns", "selected"].find((s) => s === stored(SKIN_SOURCE, "mix")) ?? "mix", play: from, back, map: null,
     keys: keys >= 4 && keys <= 10 ? keys : 4, info: null, stamp: Date.now(), loading: true, error: null,
@@ -97,7 +97,7 @@ async function skinSource(p, source, picked = false) {
     swapSkinChart(p);
     return render();
   }
-  if (source === "selected") p.followed = snapshot.tosu.map ? boardKey(snapshot.tosu.map) : null;
+  if (source === "selected") p.followed = snapshot.reader.map ? boardKey(snapshot.reader.map) : null;
   // a failed read leaves the preview as it was
   try {
     const query = source === "play" ? `?play=${encodeURIComponent(p.play.id)}` : "";
@@ -126,7 +126,7 @@ async function skinSource(p, source, picked = false) {
 // runs on every render; `followed` is set before the read, so a map that fails isn't read again
 function skinFollow() {
   const p = skinPage;
-  const selected = snapshot.tosu.map;
+  const selected = snapshot.reader.map;
   if (!p || (p.want ?? p.source) !== "selected" || !selected || p.loading || !p.info?.found) return;
   if (boardKey(selected) === p.followed) return;
   skinSource(p, "selected");

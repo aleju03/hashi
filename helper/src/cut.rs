@@ -45,9 +45,9 @@ pub(crate) fn source(md5: &str) -> Option<Arc<Source>> {
 fn selected_background(b: &Bridge) -> Option<PathBuf> {
     let (rel, folder, lazer_dir) = {
         let s = b.st();
-        let frame = s.tosu.last_frame.as_ref()?;
+        let frame = s.reader.last_frame.as_ref()?;
         let text = |p: &str| frame.pointer(p).and_then(Value::as_str).filter(|x| !x.is_empty()).map(String::from);
-        (text("/files/background")?, text("/folders/beatmap"), (s.tosu.client.as_deref() == Some("lazer")).then(|| s.tosu.lazer_files_dir.clone()))
+        (text("/files/background")?, text("/folders/beatmap"), (s.reader.client.as_deref() == Some("lazer")).then(|| s.reader.lazer_files_dir.clone()))
     };
     if [rel.as_str(), folder.as_deref().unwrap_or("")].iter().any(|p| p.split(['/', '\\']).any(|c| c == "..")) {
         return None;
@@ -68,7 +68,7 @@ pub(crate) struct Selected {
 // the map selected in osu!, remembered by md5 for make and rate::make
 pub(crate) async fn load_selected(b: &Arc<Bridge>) -> Result<Selected, (u16, Value)> {
     let Some(chart) = crate::skin::selected_chart(b) else { return Err((404, json!({ "error": "Select a map in osu! first." }))) };
-    let lazer = b.st().tosu.client.as_deref() == Some("lazer");
+    let lazer = b.st().reader.client.as_deref() == Some("lazer");
     let Ok(bytes) = crate::read_capped(&chart, crate::MAX_CHART_BYTES).await else { return Err((404, json!({ "error": "Couldn't read the map." }))) };
     let text = String::from_utf8_lossy(&bytes).into_owned();
     let parsed = match crate::beatmap::parse_chart(&text) {

@@ -176,12 +176,12 @@ function shore(boat = false, adrift = null, away = null) {
 }
 
 function rows(site) {
-  const { tosu } = snapshot;
-  const osuOpen = tosu.connected && tosu.osu;
+  const { reader } = snapshot;
+  const osuOpen = reader.connected && reader.osu;
   return {
     osu: osuOpen
-      ? { state: "ok", name: gameName(tosu), detail: osuLabel(tosu), sub: tosu.player }
-      : tosu.blocked
+      ? { state: "ok", name: gameName(reader), detail: osuLabel(reader), sub: reader.player }
+      : reader.blocked
         ? { state: "warn", name: "osu!", detail: "Can't be read" }
         : { state: "idle", name: "osu!", detail: "Not open" },
     site,

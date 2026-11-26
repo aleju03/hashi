@@ -12,16 +12,16 @@ const OSU_STATES = {
   onlineSelection: "osu!direct",
 };
 
-function gameName(tosu) {
-  return tosu.client === "lazer" ? "osu!lazer" : "osu!";
+function gameName(reader) {
+  return reader.client === "lazer" ? "osu!lazer" : "osu!";
 }
 
-function osuLabel(tosu) {
-  return OSU_STATES[tosu.state] ?? String(tosu.state ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+function osuLabel(reader) {
+  return OSU_STATES[reader.state] ?? String(reader.state ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
 function blockedHint() {
-  const { blocked } = snapshot.tosu;
+  const { blocked } = snapshot.reader;
   return blocked && el("div", { class: "blocked" },
     el("p", {}, "osu! can't be read until you run this once:"),
     el("code", { title: "Click to copy", onclick: (e) => {
@@ -31,7 +31,7 @@ function blockedHint() {
 }
 
 function readHint() {
-  return snapshot.tosu.blocked ? blockedHint() : null;
+  return snapshot.reader.blocked ? blockedHint() : null;
 }
 
 function statusLine(c) {
@@ -46,11 +46,11 @@ function statusLine(c) {
 }
 
 function now() {
-  const { tosu } = snapshot;
+  const { reader } = snapshot;
   const line = (state, name, ...rest) => el("div", { class: `now ${state}` }, el("i"), el("b", {}, name), rest);
-  if (!tosu.connected || tosu.blocked) return line("missing", "osu!", "Can't be read");
-  if (!tosu.osu) return line("off", "osu!", "Not open");
-  return line("on", gameName(tosu), el("span", {}, osuLabel(tosu), tosu.player && [" as ", el("b", {}, tosu.player)]));
+  if (!reader.connected || reader.blocked) return line("missing", "osu!", "Can't be read");
+  if (!reader.osu) return line("off", "osu!", "Not open");
+  return line("on", gameName(reader), el("span", {}, osuLabel(reader), reader.player && [" as ", el("b", {}, reader.player)]));
 }
 
 // reuse the same <img>, a new one is blank until it decodes
@@ -88,23 +88,23 @@ function home(c, host) {
             ? host && el("span", {}, host)
             : el("button", { class: "link", disabled: slow, onclick: () => action("connect") }, "Connect to Mania Tracker")),
         now()),
-      snapshot.tosu.map && el("button", {
+      snapshot.reader.map && el("button", {
         class: `gear${cutter ? " on" : ""}`,
         title: "Cut the map selected in osu!",
         "aria-pressed": String(!!cutter),
         onclick: () => (cutter ? closeCutter() : openCutter()),
       }, icon(SCISSORS)),
-      snapshot.tosu.map && snapshot.tosu.client !== "lazer" && el("button", {
+      snapshot.reader.map && snapshot.reader.client !== "lazer" && el("button", {
         class: `gear${rater ? " on" : ""}`,
         title: "Change the rate of the map selected in osu!",
         "aria-pressed": String(!!rater),
         onclick: () => (rater ? closeRater() : openRater()),
       }, icon(GAUGE)),
-      account && snapshot.tosu.map && el("button", {
+      account && snapshot.reader.map && el("button", {
         class: `gear${board?.follow ? " on" : ""}`,
         title: "Leaderboard of the map selected in osu!",
         "aria-pressed": String(!!board?.follow),
-        onclick: () => (board?.follow ? closeBoard() : openBoard(snapshot.tosu.map, true)),
+        onclick: () => (board?.follow ? closeBoard() : openBoard(snapshot.reader.map, true)),
       }, icon(PODIUM)),
       snapshot.analysis && (snapshot.goals ?? []).length > 0 && el("button", {
         class: `gear${goalsOpen ? " on" : ""}${goalsUnseen() ? " dot" : ""}`,
@@ -219,7 +219,7 @@ function draw() {
     board = null;
     clearTimeout(boardTimer);
   }
-  if (snapshot.tosu.client === "lazer") rater = null;
+  if (snapshot.reader.client === "lazer") rater = null;
   boardChanged();
   analysisChanged();
   skinFollow();

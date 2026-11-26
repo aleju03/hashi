@@ -8,7 +8,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use crate::{log, tosu, Bridge};
+use crate::{game, log, Bridge};
 
 const RETRY_BLOCKED: Duration = Duration::from_secs(5);
 
@@ -72,7 +72,7 @@ pub(crate) fn start(b: &Arc<Bridge>) {
             cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
             match cmd.spawn() {
                 Ok(mut child) => {
-                    b.st().tosu.connected = true;
+                    b.st().reader.connected = true;
                     b.broadcast();
                     // it leaves once this closes, with the app
                     let _stdin = child.stdin.take();
@@ -97,7 +97,7 @@ pub(crate) fn start(b: &Arc<Bridge>) {
                 }
                 Err(e) => log!("could not start {NAME}: {e}"),
             }
-            tosu::reader_gone(&b);
+            game::reader_gone(&b);
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
@@ -107,10 +107,10 @@ pub(crate) fn start(b: &Arc<Bridge>) {
 fn on_line(b: &Arc<Bridge>, exe: &Path, msg: Value) -> bool {
     let denied = msg.get("reason").and_then(Value::as_str) == Some("access-denied");
     let blocked = (denied && cfg!(target_os = "linux")).then(|| format!("sudo setcap cap_sys_ptrace=eip {}", shell_quote(&exe.display().to_string())));
-    tosu::set_blocked(b, blocked);
+    game::set_blocked(b, blocked);
     match msg.get("frame").filter(|f| f.is_object()) {
-        Some(frame) => tosu::on_tosu_message(b, frame.clone()),
-        None => tosu::osu_gone(b),
+        Some(frame) => game::on_frame(b, frame.clone()),
+        None => game::osu_gone(b),
     }
     denied
 }

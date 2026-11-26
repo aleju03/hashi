@@ -199,7 +199,7 @@ pub(crate) async fn match_replays(b: &Arc<Bridge>) {
         if lazer_since.is_some() && due {
             s.replays.last_lazer_scan = now;
         }
-        (waiting, lazer_since.filter(|_| due), s.tosu.lazer_files_dir.clone())
+        (waiting, lazer_since.filter(|_| due), s.reader.lazer_files_dir.clone())
     };
 
     if let Some(since) = lazer_since {
@@ -543,7 +543,7 @@ fn no_dots(rel: &str) -> bool {
 
 // the map selected in osu!'s background
 pub(crate) fn selected_cover(b: &Arc<Bridge>) -> Option<PathBuf> {
-    let cover = b.st().tosu.map_cover.clone()?;
+    let cover = b.st().reader.map_cover.clone()?;
     if cover.lazer == Some(true) {
         return lazer_cover(b, &cover);
     }
@@ -552,7 +552,7 @@ pub(crate) fn selected_cover(b: &Arc<Bridge>) -> Option<PathBuf> {
 }
 
 fn lazer_cover(b: &Arc<Bridge>, cover: &Cover) -> Option<PathBuf> {
-    let root = b.st().tosu.lazer_files_dir.clone();
+    let root = b.st().reader.lazer_files_dir.clone();
     let file = root.join(&cover.file);
     (no_dots(&cover.file) && inside(&root, &file)).then_some(file)
 }

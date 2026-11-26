@@ -98,7 +98,7 @@ async function loadBoard() {
 // called on every render, follows the selection and new plays on the map
 function boardChanged() {
   if (!board) return;
-  const selected = snapshot.tosu.map;
+  const selected = snapshot.reader.map;
   if (board.follow && selected && boardKey(selected) !== boardKey(board)) {
     board.map = selected;
     board.md5 = selected.md5;

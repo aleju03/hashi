@@ -14,7 +14,7 @@ const newRater = () => ({
   map: null, loading: true, error: null, busy: false, made: [], own: [], makeError: null,
   rate: 1,
   keep: true,
-  asked: snapshot.tosu.map?.md5,
+  asked: snapshot.reader.map?.md5,
 });
 
 function openRater() {
@@ -57,7 +57,7 @@ async function loadRater(r) {
 // osu! opens a map made here by itself, the page stays on the one it came from
 function raterFollow() {
   const r = rater;
-  const md5 = snapshot.tosu.map?.md5;
+  const md5 = snapshot.reader.map?.md5;
   if (!r || r.loading || r.busy || !md5 || md5 === r.asked || r.own.includes(md5)) return;
   loadRater(r);
 }

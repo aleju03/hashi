@@ -98,11 +98,11 @@ fn cfg_size(game: &Path) -> Option<GameSize> {
 pub(crate) fn current(b: &Bridge) -> Result<Found, &'static str> {
     let (client, last, skin, game) = {
         let s = b.st();
-        let last = s.tosu.last_frame.as_ref().and_then(|f| f.get("client")?.as_str().map(str::to_string));
-        (s.tosu.client.clone(), last, s.tosu.skin.clone(), s.tosu.stable_dirs.as_ref().map(|(g, _)| g.clone()))
+        let last = s.reader.last_frame.as_ref().and_then(|f| f.get("client")?.as_str().map(str::to_string));
+        (s.reader.client.clone(), last, s.reader.skin.clone(), s.reader.stable_dirs.as_ref().map(|(g, _)| g.clone()))
     };
     if client.as_deref() == Some("lazer") {
-        let lazer = b.st().tosu.lazer_files_dir.parent().map(Path::to_path_buf);
+        let lazer = b.st().reader.lazer_files_dir.parent().map(Path::to_path_buf);
         if let Some(dir) = lazer.as_deref().and_then(lazer_mount) {
             let name = ini_name(&dir).unwrap_or_else(|| "lazer skin".into());
             return Ok(Found { dir, name, client: "lazer", stored: false });
@@ -140,7 +140,7 @@ pub(crate) fn forget_stored() {
 
 // the skin lazer is set to, out of its database into a folder of links to lazer's own files
 fn lazer_stored(b: &Bridge) -> Result<Found, &'static str> {
-    let files = b.st().tosu.lazer_files_dir.clone();
+    let files = b.st().reader.lazer_files_dir.clone();
     let root = files.parent().ok_or("lazer")?;
     let id = lazer_skin_id(root).ok_or("lazer")?;
     let realm = root.join("client.realm");
@@ -274,10 +274,10 @@ pub(crate) enum GameSize {
 pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
     let (lazer, lazer_dir, resolution, game) = {
         let s = b.st();
-        let frame = s.tosu.last_frame.as_ref();
-        let lazer = s.tosu.client.as_deref() == Some("lazer") || frame.and_then(|f| f.get("client")).and_then(Value::as_str) == Some("lazer");
-        let game = s.tosu.stable_dirs.as_ref().map(|(g, _)| g.clone()).unwrap_or_else(|| b.env.osu_dir.clone());
-        (lazer, s.tosu.lazer_files_dir.parent().map(Path::to_path_buf), frame.and_then(|f| f.pointer("/settings/resolution")).cloned(), game)
+        let frame = s.reader.last_frame.as_ref();
+        let lazer = s.reader.client.as_deref() == Some("lazer") || frame.and_then(|f| f.get("client")).and_then(Value::as_str) == Some("lazer");
+        let game = s.reader.stable_dirs.as_ref().map(|(g, _)| g.clone()).unwrap_or_else(|| b.env.osu_dir.clone());
+        (lazer, s.reader.lazer_files_dir.parent().map(Path::to_path_buf), frame.and_then(|f| f.pointer("/settings/resolution")).cloned(), game)
     };
     if let Some(size) = tiled_size() {
         return Some(size);
@@ -363,7 +363,7 @@ fn judging_mods(mods: Vec<String>) -> Vec<String> {
 
 fn selected_mods(b: &Bridge) -> Vec<String> {
     let s = b.st();
-    let mods = s.tosu.last_frame.as_ref().and_then(|raw| raw.pointer("/play/mods")).cloned().unwrap_or(Value::Null);
+    let mods = s.reader.last_frame.as_ref().and_then(|raw| raw.pointer("/play/mods")).cloned().unwrap_or(Value::Null);
     judging_mods(crate::presence::mod_acronyms(&mods))
 }
 
@@ -392,13 +392,13 @@ pub(crate) fn window_line(b: &Bridge) -> Option<String> {
 
 pub(crate) fn selected_chart(b: &Bridge) -> Option<PathBuf> {
     let s = b.st();
-    let raw = s.tosu.last_frame.as_ref()?;
+    let raw = s.reader.last_frame.as_ref()?;
     let file = raw.pointer("/files/beatmap").and_then(Value::as_str).filter(|f| !f.is_empty())?;
     if raw.get("client").and_then(Value::as_str) == Some("lazer") {
-        return Some(s.tosu.lazer_files_dir.join(file));
+        return Some(s.reader.lazer_files_dir.join(file));
     }
     let folder = raw.pointer("/folders/beatmap").and_then(Value::as_str).filter(|f| !f.is_empty())?;
-    Some(s.tosu.stable_dirs.as_ref()?.1.join(folder.replace('\\', "/")).join(file))
+    Some(s.reader.stable_dirs.as_ref()?.1.join(folder.replace('\\', "/")).join(file))
 }
 
 // notes for the preview to play: [column, time, end or null] in the map's own milliseconds
@@ -447,7 +447,7 @@ pub(crate) async fn chart(b: &std::sync::Arc<Bridge>, play: Option<&str>) -> (u1
         None => md5.clone(),
     };
     let song = play.is_none().then(|| crate::practice::selected_audio(b, &md5)).flatten();
-    let client = b.st().tosu.client.clone();
+    let client = b.st().reader.client.clone();
     (200, json!({ "keys": chart.keys, "od": chart.od, "title": meta("Title:"), "version": meta("Version:"), "notes": notes, "id": id, "song": song, "client": client, "mods": mods }))
 }
 

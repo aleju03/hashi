@@ -297,7 +297,7 @@ async function loadPicked(key) {
   } catch {}
   // osu! has moved on and a new key brings its own load. any other failure shows nothing, not the last map's
   if (picked?.key !== key || moved) return;
-  const map = snapshot.tosu.map;
+  const map = snapshot.reader.map;
   if (!data) {
     picked.data = { keys: map.keys };
     render();
@@ -312,7 +312,7 @@ async function loadPicked(key) {
 }
 
 function pickedMap() {
-  const map = snapshot.tosu.map;
+  const map = snapshot.reader.map;
   if (!map) {
     picked = null;
     return null;

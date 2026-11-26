@@ -36,7 +36,7 @@ pub(crate) fn windows_install(torii: bool) -> Option<(PathBuf, PathBuf)> {
 }
 
 fn game_root(b: &Bridge) -> Option<PathBuf> {
-    b.st().tosu.lazer_files_dir.parent().map(Path::to_path_buf)
+    b.st().reader.lazer_files_dir.parent().map(Path::to_path_buf)
 }
 
 pub(crate) fn can_save() -> bool {

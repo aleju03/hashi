@@ -161,13 +161,13 @@ async fn audio_file(b: &Arc<Bridge>, item: &Item, chart: &[u8]) -> Result<PathBu
 pub(crate) fn selected_audio(b: &Bridge, md5: &str) -> Option<PathBuf> {
     let (rel, folder, lazer_dir) = {
         let s = b.st();
-        let frame = s.tosu.last_frame.as_ref()?;
+        let frame = s.reader.last_frame.as_ref()?;
         let checksum = frame.pointer("/beatmap/checksum").and_then(Value::as_str)?.to_lowercase();
         if checksum != md5 {
             return None;
         }
         let text = |p: &str| frame.pointer(p).and_then(Value::as_str).filter(|x| !x.is_empty()).map(String::from);
-        (text("/files/audio")?, text("/folders/beatmap"), (s.tosu.client.as_deref() == Some("lazer")).then(|| s.tosu.lazer_files_dir.clone()))
+        (text("/files/audio")?, text("/folders/beatmap"), (s.reader.client.as_deref() == Some("lazer")).then(|| s.reader.lazer_files_dir.clone()))
     };
     let f = match lazer_dir {
         Some(dir) => dir.join(rel),
@@ -420,8 +420,8 @@ pub(crate) fn longest_beat(reds: impl Iterator<Item = (f64, f64)>, end: f64) -> 
 }
 
 pub(crate) fn open_in_osu(b: &Bridge, lazer: bool, file: &Path) {
-    let stable_exe = if cfg!(windows) && !lazer { b.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe")) } else { None };
-    let torii = b.st().tosu.lazer_files_dir.parent().is_some_and(crate::lazer::is_torii);
+    let stable_exe = if cfg!(windows) && !lazer { b.st().reader.stable_dirs.as_ref().map(|(game, _)| game.join("osu!.exe")) } else { None };
+    let torii = b.st().reader.lazer_files_dir.parent().is_some_and(crate::lazer::is_torii);
     let file = file.to_path_buf();
     // a handler takes a moment to fail, see handed_on
     std::thread::spawn(move || {

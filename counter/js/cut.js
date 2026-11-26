@@ -615,12 +615,12 @@ function cutNameField(c) {
 
 function cutterView() {
   const c = cutter;
-  if (snapshot.tosu.client === "lazer" && c.rate !== 1) {
+  if (snapshot.reader.client === "lazer" && c.rate !== 1) {
     c.rate = 1;
     c.changed();
   }
   const m = c.map;
-  const selected = snapshot.tosu.map;
+  const selected = snapshot.reader.map;
   const other = m && selected && selected.md5 !== m.md5;
   cutReadouts(c);
   const mark = (label, which, text, key) => el("div", { class: "cut-mark" },
@@ -672,7 +672,7 @@ function cutterView() {
       (c.silent || c.songState === "none") && el("p", { class: "caption cut-silent" }, NO_SOUND[snapshot.soundHelp] ?? "No sound. Check that your computer has a working audio output."),
       part("cut-make",
         el("p", { class: "caption" }, `A new difficulty with only the notes between the two lines, and the song cut to fit${c.rate === 1 ? "" : `, at ${rateText(c.rate)}x`}. Plays of it aren't sent to Mania Tracker.`),
-        snapshot.tosu.client !== "lazer" && el("div", { class: "cut-rate" },
+        snapshot.reader.client !== "lazer" && el("div", { class: "cut-rate" },
           el("span", { class: "cut-label" }, "Rate"),
           rateStepper(c),
           c.rate !== 1 && pitchSegs(c)),

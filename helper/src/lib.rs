@@ -22,7 +22,7 @@ mod report;
 mod skin;
 mod skin_render;
 mod server;
-mod tosu;
+mod game;
 mod types;
 mod update;
 
@@ -313,7 +313,7 @@ pub(crate) struct State {
     pub connection: ConnState,
     pub connect_attempt: Option<Arc<auth::Attempt>>,
     pub profile: Profile,
-    pub tosu: tosu::TosuState,
+    pub reader: game::ReaderState,
     pub replays: replays::Replays,
     pub chart_index: Option<HashMap<String, replays::ChartEntry>>,
     pub pump: queue::PumpState,
@@ -407,7 +407,7 @@ impl Bridge {
             "tray": self.opts.tray,
             "titlebar": self.opts.titlebar,
             "clock": clock(),
-            "tosu": s.tosu.public(),
+            "reader": s.reader.public(),
             "presence": {
                 "enabled": s.config.settings.as_ref().is_some_and(|x| x.presence),
                 "status": s.presence.status,
@@ -444,11 +444,11 @@ impl Bridge {
 
     // where the reader says stable is, it can be installed anywhere
     pub(crate) fn replay_dir(&self) -> PathBuf {
-        self.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("Data").join("r")).unwrap_or_else(|| self.env.replay_dir.clone())
+        self.st().reader.stable_dirs.as_ref().map(|(game, _)| game.join("Data").join("r")).unwrap_or_else(|| self.env.replay_dir.clone())
     }
 
     pub(crate) fn songs_dir(&self) -> PathBuf {
-        self.st().tosu.stable_dirs.as_ref().map(|(_, songs)| songs.clone()).unwrap_or_else(|| self.env.songs_dir.clone())
+        self.st().reader.stable_dirs.as_ref().map(|(_, songs)| songs.clone()).unwrap_or_else(|| self.env.songs_dir.clone())
     }
 
     pub fn theme(&self) -> (u16, u8) {
@@ -802,7 +802,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
             connection: ConnState { status: "disconnected".into(), message: None, authorize_url: None },
             connect_attempt: None,
             profile: Profile::default(),
-            tosu: tosu::TosuState::new(lazer_files),
+            reader: game::ReaderState::new(lazer_files),
             replays: replays::Replays::default(),
             chart_index: None,
             pump: queue::PumpState::default(),
@@ -838,7 +838,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
     server::serve(&bridge, listener);
     replays::watch_replay_dir(&bridge);
     reader::start(&bridge);
-    tosu::watch_osu_frames(&bridge);
+    game::watch_osu_frames(&bridge);
     server::watch_counter(&bridge);
     update::watch_updates(&bridge);
     autostart::load(&bridge);
@@ -955,7 +955,7 @@ pub(crate) mod tests {
             connection: crate::ConnState { status: "disconnected".into(), message: None, authorize_url: None },
             connect_attempt: None,
             profile: Default::default(),
-            tosu: crate::tosu::TosuState::new(Default::default()),
+            reader: crate::game::ReaderState::new(Default::default()),
             replays: Default::default(),
             chart_index: None,
             pump: Default::default(),
