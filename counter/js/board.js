@@ -157,6 +157,7 @@ function standing(e, mine) {
     el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "", loading: "lazy" })),
     el("a", {
       class: "player",
+      style: e.avatarAccent && `--name: ${e.avatarAccent}`,
       href: `${snapshot.connection.origin}/player/${encodeURIComponent(e.username)}`,
       target: "_blank",
       rel: "noreferrer",

@@ -199,7 +199,8 @@
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: inherit;
+  /* the color the site gives the player's name */
+  color: var(--name, inherit);
   text-decoration: none;
   outline: none;
 }

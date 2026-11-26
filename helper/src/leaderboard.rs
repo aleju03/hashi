@@ -178,6 +178,11 @@ fn on_site(v: &Value, origin: &str) -> Value {
     v.as_str().filter(|u| u.strip_prefix(origin).is_some_and(|rest| rest.starts_with('/'))).map(Value::from).unwrap_or(Value::Null)
 }
 
+// #rrggbb only: it goes into a style attribute
+fn is_hex_color(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 fn entry(e: &Value) -> Option<Value> {
     let user = e.get("user")?;
     let username = user.get("username").and_then(Value::as_str)?;
@@ -187,6 +192,8 @@ fn entry(e: &Value) -> Option<Value> {
         "userId": user.get("id"),
         "username": username,
         "avatarUrl": https(user.get("avatar_url").unwrap_or(&Value::Null)),
+        // the color the site writes the name in, picked from the avatar
+        "avatarAccent": user.get("avatar_accent").and_then(Value::as_str).filter(|c| is_hex_color(c)),
         "country": str_field(user, "country_code"),
         // a fraction on the wire
         "accuracy": e.get("accuracy").and_then(Value::as_f64).filter(|a| a.is_finite()).map(|a| a * 100.0),
@@ -289,7 +296,7 @@ mod tests {
         let body = json!({
             "beatmap_id": 5, "title": "T", "url": "javascript:alert(1)", "total": 2,
             "entries": [
-                { "position": 1, "user": { "id": 1, "username": "a", "avatar_url": "https://a.ppy.sh/1" }, "accuracy": 0.991, "mods": ["DT", 3], "app": "mania-bridge" },
+                { "position": 1, "user": { "id": 1, "username": "a", "avatar_url": "https://a.ppy.sh/1", "avatar_accent": "#ff8899" }, "accuracy": 0.991, "mods": ["DT", 3], "app": "mania-bridge" },
                 { "position": 2, "user": { "id": 2 } },
             ],
             "self": null,
@@ -300,6 +307,9 @@ mod tests {
         assert_eq!(super::public_board(&json!({ "url": "https://mania-tracker.com.evil/maps" }), "https://mania-tracker.com")["url"], json!(null));
         assert!((page["entries"][0]["accuracy"].as_f64().unwrap() - 99.1).abs() < 1e-9);
         assert_eq!(page["entries"][0]["app"], json!("mania-bridge"));
+        assert_eq!(page["entries"][0]["avatarAccent"], json!("#ff8899"));
+        let odd = super::entry(&json!({ "user": { "username": "b", "avatar_accent": "red;background:url(x)" } })).unwrap();
+        assert_eq!(odd["avatarAccent"], json!(null));
         assert_eq!(page["entries"].as_array().unwrap().len(), 1);
         assert_eq!(page["entries"][0]["mods"], json!(["DT"]));
         assert_eq!(page["self"], json!(null));

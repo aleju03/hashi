@@ -180,7 +180,7 @@ function ovStanding(e, mine) {
     el("span", { class: "pos" }, `#${e.position ?? "?"}`),
     grade && el("span", { class: `grade ${tone}` }, grade),
     el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "" })),
-    el("span", { class: "player" }, e.username),
+    el("span", { class: "player", style: e.avatarAccent && `--name: ${e.avatarAccent}` }, e.username),
     el("span", { class: "mods" }, e.mods.filter((m) => m !== "CL").map((m) => modBadge(m, { rate: e.rate }))),
     el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : ""));
 }

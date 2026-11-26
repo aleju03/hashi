@@ -618,6 +618,7 @@
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
+  color: var(--name, inherit);
 }
 
 .ov-standing .mods {
