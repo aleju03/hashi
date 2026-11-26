@@ -99,7 +99,7 @@ fn frame(snapshot: &Snapshot, mut raw: Value) -> Value {
         raw["game"]["pauseMenu"] = json!(menu);
     }
     if let Some(health) = snapshot.health {
-        raw["game"]["health"] = json!((health * 1000.0).round() / 1000.0);
+        raw["game"]["health"] = json!(health);
     }
     if snapshot.failed == Some(true) {
         raw["game"]["failed"] = json!(true);

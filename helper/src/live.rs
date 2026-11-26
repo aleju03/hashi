@@ -230,12 +230,17 @@ pub(crate) async fn live_tick(b: &Arc<Bridge>) {
                 set_status(b, &mut s, status, None);
             }
             match s.live.stream.take() {
-                Some(stream) if connected => Next::Close(stream.id),
+                Some(stream) if connected => {
+                    s.live.busy = true;
+                    Next::Close(stream.id)
+                }
                 _ => Next::Nothing,
             }
         } else if now_ms() < s.live.paused_until {
             Next::Nothing
         } else if s.live.stream.is_none() {
+            // claimed here, or another tick could open a second stream before this one is up
+            s.live.busy = true;
             Next::Open
         } else {
             follow(&mut s);
@@ -461,6 +466,12 @@ fn stable_out_of_health(s: &mut State, raw: &Value) -> bool {
         return false;
     }
     play.had_health |= health > 0.0;
+    // a quick retry reads 0 while the next attempt loads, its time back near the start
+    let time = raw.pointer("/beatmap/time/live").and_then(Value::as_f64);
+    let went_back = play.clock.zip(time).is_some_and(|((t, ..), now)| now < t as f64 - 1000.0);
+    if s.live.restarted || went_back {
+        return false;
+    }
     let kept_alive = play.start["mods"].as_array().is_some_and(|m| m.iter().any(|x| matches!(x.as_str(), Some("NF" | "EZ"))));
     play.had_health && health <= 0.0 && !kept_alive
 }
@@ -490,7 +501,10 @@ fn end_play(s: &mut State, reason: &str) {
 
 fn end_play_at(s: &mut State, reason: &str, time: Option<i64>) {
     let Some(play) = s.live.play.take() else { return };
-    send_frames_of(s, &play);
+    // after a retry the frames are already the next attempt's
+    if !s.live.restarted {
+        send_frames_of(s, &play);
+    }
     let stats = play.stats.unwrap_or_else(|| json!({ "hits": {}, "acc": 0 }));
     let mut end = json!({ "type": "play_end", "play_id": play.id, "reason": reason, "hits": stats["hits"], "acc": stats["acc"] });
     if let Some(time) = time {
