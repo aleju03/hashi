@@ -37,6 +37,12 @@ function styledName(text, name) {
   return el("bdi", { class: `look-name ${cls.join(" ")}`, style: style.join("; ") || null }, text);
 }
 
+// the player's own row wears the look the header does, which is fetched again when the window comes back
+function rowLook(e) {
+  const c = snapshot.connection;
+  return c.userId != null && String(e.userId) === String(c.userId) ? c.look : e.look;
+}
+
 // transparent WebM needs VP9 alpha, which WebKit drops
 function canPlayFrames() {
   const ua = navigator.userAgent;

@@ -120,10 +120,10 @@ pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mod
     .collect::<Vec<_>>()
     .join("&");
     let key = format!("{md5}?{query}");
-    if let Some((at, v)) = b.st().boards.fetched.get(&key) {
-        if now_ms() - at < FRESH_MS {
-            return (200, v.clone());
-        }
+    let fresh = b.st().boards.fetched.get(&key).filter(|(at, _)| now_ms() - at < FRESH_MS).map(|(_, v)| v.clone());
+    if let Some(mut page) = fresh {
+        crate::looks::dress(b, &mut page).await;
+        return (200, page);
     }
     let path = if query.is_empty() { format!("/charts/{md5}/leaderboard") } else { format!("/charts/{md5}/leaderboard?{query}") };
     let res = match api(b, &path, Req::get()).await {
@@ -148,8 +148,9 @@ pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mod
         let message = body.pointer("/error/message").and_then(Value::as_str).map(String::from);
         return (502, json!({ "error": message.unwrap_or_else(|| format!("Mania Tracker answered {}", res.status)) }));
     }
-    let mut page = public_board(&body, &b.env.origin);
-    crate::looks::dress(b, &mut page).await;
+    let page = public_board(&body, &b.env.origin);
+    let mut dressed = page.clone();
+    crate::looks::dress(b, &mut dressed).await;
     let mut s = b.st();
     let fetched = &mut s.boards.fetched;
     if fetched.len() >= KEEP {
@@ -158,8 +159,8 @@ pub(crate) async fn board(b: &Arc<Bridge>, md5: &str, speed: Option<String>, mod
             fetched.remove(&k);
         }
     }
-    fetched.insert(key, (now_ms(), page.clone()));
-    (200, page)
+    fetched.insert(key, (now_ms(), page));
+    (200, dressed)
 }
 
 fn str_field(v: &Value, k: &str) -> Value {
