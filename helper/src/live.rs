@@ -22,6 +22,7 @@ const GIVE_UP_MS: i64 = 25_000;
 // the song's clock standing still this long is a pause
 const PAUSED_AFTER_MS: i64 = 400;
 const SEED_WAIT_MS: i64 = 2000;
+const EASY_EMPTY_MS: i64 = 1500;
 
 const HIT_KEYS: [(&str, &str); 6] = [("geki", "perfect"), ("300", "great"), ("katu", "good"), ("100", "ok"), ("50", "meh"), ("0", "miss")];
 
@@ -49,6 +50,8 @@ struct Play {
     started: bool,
     opened_at: i64,
     had_health: bool,
+    // when the bar ran empty: the time and where in the map
+    empty_since: Option<(i64, i64)>,
     stats: Option<Value>,
 }
 
@@ -295,7 +298,7 @@ fn follow(s: &mut State) {
     let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true) || stable_out_of_health(s, &raw);
     if failed && s.live.play.as_ref().is_some_and(|p| now_ms() - p.opened_at >= 1000) {
         // where it failed: lazer slows the song to a stop after, so as read, not carried forward
-        let at = raw.pointer("/beatmap/time/live").and_then(Value::as_f64).map(|t| t.round() as i64);
+        let at = s.live.play.as_ref().and_then(|p| p.empty_since.map(|(_, t)| t)).or_else(|| raw.pointer("/beatmap/time/live").and_then(Value::as_f64).map(|t| t.round() as i64));
         end_play_at(s, "failed", at);
         s.live.failed_attempt = true;
     }
@@ -314,7 +317,7 @@ fn follow(s: &mut State) {
     let convert = raw.pointer("/beatmap/mode/number").and_then(Value::as_u64).is_some_and(|m| m != 3);
     if s.live.play.is_none() {
         let Some(start) = play_start(s, &raw, &beatmap, &md5, &body, convert) else { return };
-        s.live.play = Some(Play { id: start["play_id"].as_str().unwrap_or("").into(), md5, start: start.clone(), sent: 0, clock: None, moved_at: now_ms(), started: false, opened_at: now_ms(), had_health: false, stats: None });
+        s.live.play = Some(Play { id: start["play_id"].as_str().unwrap_or("").into(), md5, start: start.clone(), sent: 0, clock: None, moved_at: now_ms(), started: false, opened_at: now_ms(), had_health: false, empty_since: None, stats: None });
         push(s, start);
     }
     if convert {
@@ -376,9 +379,7 @@ fn follow(s: &mut State) {
 fn play_start(s: &mut State, raw: &Value, beatmap: &Value, md5: &str, body: &Value, convert: bool) -> Option<Value> {
     let keys = beatmap.get("key_count").and_then(Value::as_u64).or_else(|| raw.pointer("/beatmap/stats/cs/converted").and_then(Value::as_f64).map(|k| k.round() as u64))?;
     let text = |k: &str| beatmap.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    // stable names no mods "NM"
-    let mods: Vec<Value> = body.get("mods").and_then(Value::as_array).into_iter().flatten().filter(|m| m.as_str() != Some("NM")).cloned().collect();
-    let mods = json!(mods);
+    let mods = body.get("mods").cloned().unwrap_or(json!([]));
     let random = mods.as_array().is_some_and(|m| m.iter().any(|x| x.as_str() == Some("RD")));
     let since = *s.live.seed_wait_since.get_or_insert_with(now_ms);
     if random && !convert && seed(raw).is_none() && now_ms() - since < SEED_WAIT_MS {
@@ -457,8 +458,9 @@ fn stable_still(raw: &Value) -> bool {
     raw.get("client").and_then(Value::as_str) == Some("stable") && raw.pointer("/game/paused").and_then(Value::as_bool) == Some(true)
 }
 
-// stable fails the moment health runs out, unless No Fail or Easy's extra lives keep it going.
-// only once the bar was seen above 0, it can start empty while the play loads
+// stable fails the moment health runs out, unless No Fail keeps it going; Easy refills it a few
+// times, so with it the bar has to stay empty. only once the bar was seen above 0, it can start
+// empty while the play loads
 fn stable_out_of_health(s: &mut State, raw: &Value) -> bool {
     let Some(play) = s.live.play.as_mut() else { return false };
     let Some(health) = raw.pointer("/game/health").and_then(Value::as_f64) else { return false };
@@ -472,8 +474,13 @@ fn stable_out_of_health(s: &mut State, raw: &Value) -> bool {
     if s.live.restarted || went_back {
         return false;
     }
-    let kept_alive = play.start["mods"].as_array().is_some_and(|m| m.iter().any(|x| matches!(x.as_str(), Some("NF" | "EZ"))));
-    play.had_health && health <= 0.0 && !kept_alive
+    let has = |code: &str| play.start["mods"].as_array().is_some_and(|m| m.iter().any(|x| x.as_str() == Some(code)));
+    if health > 0.0 || !play.had_health || has("NF") {
+        play.empty_since = None;
+        return false;
+    }
+    let (since, _) = *play.empty_since.get_or_insert((now_ms(), time.map_or(0, |t| t.round() as i64)));
+    !has("EZ") || now_ms() - since >= EASY_EMPTY_MS
 }
 
 fn play_rate(play: &Option<Play>) -> f64 {

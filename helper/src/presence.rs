@@ -124,7 +124,8 @@ pub(crate) fn mod_acronyms(mods: &Value) -> Vec<String> {
         Some(a) => a.iter().filter_map(|m| m.as_str().or_else(|| m.get("acronym").and_then(Value::as_str)).map(String::from)).collect(),
         None => split_mods(&crate::game::mods_name(mods)),
     };
-    list.into_iter().filter(|m| !m.is_empty() && m.len() <= 8).take(32).collect()
+    // stable names no mods "NM"
+    list.into_iter().filter(|m| !m.is_empty() && m != "NM" && m.len() <= 8).take(32).collect()
 }
 
 pub(crate) fn mod_rate(mods: &Value, acronyms: &[String]) -> f64 {
