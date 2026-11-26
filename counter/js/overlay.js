@@ -51,6 +51,8 @@ const ov = {
   art: { md5: null, src: null },
   card: null,
   seen: new Map(),
+  // the leaderboard rows last shown, kept up dimmed while the next map's are loading
+  rows: null,
 };
 
 // the card is drawn again on every change, so something that animates in carries when it first
@@ -195,7 +197,9 @@ function ovBoard(map) {
     data?.entries?.length > 0 && el("span", { class: "count" }, `${data.total} ${data.total === 1 ? "player" : "players"}`));
   let body;
   if (board.error) body = el("p", { class: "ov-empty" }, board.error);
-  else if (!data) body = el("p", { class: "doing" }, el("i", { class: "spinner", style: `animation-delay: -${Date.now() % SPIN_MS}ms` }), "Loading");
+  // the last board's rows, dimmed, until this one's come: the card keeps its height from map to map
+  else if (!data) body = ov.rows ? el("ol", { class: "ov-standings stale", "aria-label": "Loading" }, ov.rows.map((e) => ovStanding(e.e, e.mine)))
+    : el("ol", { class: "ov-standings", "aria-label": "Loading" }, Array.from({ length: ov.set.rows }, () => el("li", { class: "ov-standing" })));
   else if (data.unsupported || data.unknown) body = el("p", { class: "ov-empty" }, "Mania Tracker has no leaderboard for this map.");
   else if (!data.entries.length) body = el("p", { class: "ov-empty" }, "Nobody has played this map yet.");
   else {
@@ -216,9 +220,8 @@ function ovBoard(map) {
       board.from = to;
       render();
     };
-    body = el("ol", { class: "ov-standings", onwheel: wheel },
-      data.entries.slice(board.from, board.from + room).map((e) => ovStanding(e)),
-      data.self && mine < 0 && ovStanding(data.self, true));
+    ov.rows = [...data.entries.slice(board.from, board.from + room).map((e) => ({ e })), ...(data.self && mine < 0 ? [{ e: data.self, mine: true }] : [])];
+    body = el("ol", { class: "ov-standings", onwheel: wheel }, ov.rows.map((r) => ovStanding(r.e, r.mine)));
   }
   return [head, body];
 }

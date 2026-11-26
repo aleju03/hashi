@@ -633,6 +633,10 @@
   font-variant-numeric: tabular-nums;
 }
 
+.ov-standings.stale {
+  opacity: 0.35;
+}
+
 .ov-standing.me .pos, .ov-standing.me .player {
   color: var(--accent);
 }
