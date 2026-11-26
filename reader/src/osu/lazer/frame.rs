@@ -393,7 +393,10 @@ pub fn read_frame(input: FrameInput<'_>) -> Result<LazerFrame, Reason> {
                 if let Some(counts_offset) = score_sec.score_result_counts {
                     if let Some(score_proc) = read_ptr_field(source, player, score_sec.player_score_processor) {
                         if let Some(dict) = read_ptr_field(source, score_proc, counts_offset) {
-                            if let Some(results_sec) = table.results() {
+                            // lazer loads the results screen's type only once one is shown; the
+                            // play's counts need only the judgements' values, the bundled ones do
+                            let results_sec = table.results().or_else(|| live_template().and_then(|t| t.results.as_ref()));
+                            if let Some(results_sec) = results_sec {
                                 let entries_offset = results_sec.dict_entries_offset.unwrap_or(0x10);
                                 play_hits_read = results::read_dictionary_hits(
                                     source,
