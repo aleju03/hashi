@@ -130,20 +130,6 @@
   }
 }
 
-@keyframes steam {
-  0% {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  30% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-}
-
 .scrollbar {
   position: fixed;
   z-index: 3;
@@ -616,7 +602,7 @@
   position: relative;
 }
 
-.kofi-dock {
+.support-dock {
   position: absolute;
   left: 50%;
   top: -20px;
@@ -627,61 +613,53 @@
   pointer-events: auto;
 }
 
-.kofi-dock:hover .kofi-say {
+.support-dock:hover .support-say {
   color: #fff;
   text-decoration: underline wavy var(--accent) 1.5px;
   text-underline-offset: 2px;
 }
 
-.kofi {
+.support {
   display: block;
 }
 
-.kofi svg {
+.support svg {
   display: block;
   overflow: visible;
 }
 
-.kofi .hull {
+.support .hull {
   fill: var(--osu-b5);
   stroke: var(--ink);
   stroke-width: 2;
   stroke-linejoin: round;
 }
 
-.kofi .plank {
+.support .plank {
   fill: none;
   stroke: var(--osu-b1);
   stroke-width: 1.5;
   stroke-linecap: round;
 }
 
-.kofi .cup {
-  fill: #fff;
+.support .heart {
   stroke: var(--ink);
   stroke-width: 2;
   stroke-linejoin: round;
 }
 
-.kofi .handle {
-  fill: none;
-  stroke: #fff;
-  stroke-width: 3;
-  stroke-linecap: round;
-}
-
-.kofi .heart, .kofi .flag {
+.support .heart, .support .flag {
   fill: var(--osu-pink);
 }
 
-.kofi .mast {
+.support .mast {
   fill: none;
   stroke: var(--ink);
   stroke-width: 2;
   stroke-linecap: round;
 }
 
-.kofi .flag {
+.support .flag {
   transform-origin: 64px 13px;
   animation: flutter 900ms steps(3) infinite;
 }
@@ -692,14 +670,14 @@
   }
 }
 
-.kofi .ripples path {
+.support .ripples path {
   fill: none;
   stroke: var(--osu-b1);
   stroke-width: 1.5;
   stroke-linecap: round;
 }
 
-.kofi .ripples {
+.support .ripples {
   animation: ripple steps(4) infinite;
 }
 
@@ -710,15 +688,7 @@
   }
 }
 
-.kofi .steam path {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 2;
-  stroke-linecap: round;
-  animation: steam steps(8) infinite;
-}
-
-.kofi .boat {
+.support .boat {
   transform-origin: 36px 46px;
   animation: boat-bob steps(8) infinite;
 }
@@ -732,19 +702,14 @@
   }
 }
 
-.kofi:hover .boat, .kofi-dock:hover .boat {
+.support:hover .boat, .support-dock:hover .boat {
   transform: translateY(-3px);
   animation-play-state: paused;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .kofi .steam path {
-    opacity: 0.8;
-  }
-}
-
-.kofi-say {
+.support-say {
   margin-top: 6px;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--osu-f1);

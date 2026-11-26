@@ -13,6 +13,7 @@
       { "kind": "new", "text": "Added picking skin parts in the preview or a grid to color and swap them." },
       { "kind": "changed", "text": "osu! is picked up within a second of opening." },
       { "kind": "changed", "text": "6K to 8K ratings say Prism instead of MSD." },
+      { "kind": "changed", "text": "The boat under the settings leads to Mania Tracker's supporter page." },
       { "kind": "fixed", "text": "Plays could show the wrong mods or speed." },
       { "kind": "fixed", "text": "A lazer play could be counted twice around its results." },
       { "kind": "fixed", "text": "Clicks in the skin editor's preview could pick a stage picture where it's see-through." },

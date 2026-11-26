@@ -126,27 +126,24 @@ function riverbed() {
   return node;
 }
 
-const KOFI = "https://ko-fi.com/aleju03";
-const BOB_KOFI_MS = 3200;
-const STEAM_MS = 2600;
+const SUPPORT = "https://mania-tracker.com/support";
+const BOB_SUPPORT_MS = 3200;
 
 // moored on the shore under the settings
-function kofi() {
-  const node = el("a", { class: "kofi", href: KOFI, target: "_blank", rel: "noreferrer", title: "Support on Ko-fi" });
+function support() {
+  const link = (attrs, ...children) => el("a", { href: SUPPORT, target: "_blank", rel: "noreferrer", ...attrs }, ...children);
+  const node = link({ class: "support", title: "Become a Mania Tracker supporter" });
   node.innerHTML = `<svg viewBox="0 0 92 60" width="110" height="72" aria-hidden="true"><g class="ink">
-    <g class="ripples" style="${loop(BOB_KOFI_MS)}"><path d="M-6 47q4-3 8 0t8 0"/><path d="M76 47q4-3 8 0t8 0"/></g>
-    <g class="boat" style="${loop(BOB_KOFI_MS)}">
+    <g class="ripples" style="${loop(BOB_SUPPORT_MS)}"><path d="M-6 47q4-3 8 0t8 0"/><path d="M76 47q4-3 8 0t8 0"/></g>
+    <g class="boat" style="${loop(BOB_SUPPORT_MS)}">
       <path class="mast" d="M64 39V9"/>
       <path class="flag" d="M64 9l15 4.5l-15 4.5z"/>
-      <g class="steam"><path d="M31 15q-3-4 0-7t0-7" style="${loop(STEAM_MS)}"/><path d="M39 16q3-4 0-7t1-7" style="${loop(STEAM_MS, 0.5)}"/></g>
-      <path class="cup" d="M24 19h22v12q0 7-7 7h-8q-7 0-7-7z"/>
-      <path class="handle" d="M46 22q7 0 7 5t-7 5"/>
-      <path class="heart" d="M35 32q-6-4-6-7.5q0-3 3-3q2 0 3 2q1-2 3-2q3 0 3 3q0 3.5-6 7.5z"/>
+      <path class="heart" d="M35 39q-13-8.500-13-16.500q0-6.500 6.500-6.500q4.300 0 6.500 4.300q2.200-4.300 6.500-4.300q6.500 0 6.500 6.500q0 8-13 16.500z"/>
       <path class="hull" d="M3 37q36 5 72 0l-8 13q-28 4-56 0z"/>
       <path class="plank" d="M11 44q28 3 56 0"/>
     </g>
   </g></svg>`;
-  return el("span", { class: "kofi-dock" }, node, el("a", { class: "kofi-say", href: KOFI, target: "_blank", rel: "noreferrer" }, "Support on Ko-fi"));
+  return el("span", { class: "support-dock" }, node, link({ class: "support-say" }, "Become a supporter"));
 }
 
 function shore(boat = false, adrift = null, away = null) {
@@ -169,7 +166,7 @@ function shore(boat = false, adrift = null, away = null) {
       </svg>
     </svg>
   </g></svg>`;
-  if (boat) node.append(kofi());
+  if (boat) node.append(support());
   if (adrift) node.append(bottle(adrift));
   if (away) node.append(away);
   return node;
