@@ -301,6 +301,9 @@
 
 .now {
   overflow: hidden;
+  /* room for the font's descenders, which the clip would cut */
+  padding-bottom: 2px;
+  margin-bottom: -2px;
 }
 
 .now > * {
