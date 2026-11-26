@@ -95,6 +95,9 @@ fn frame(snapshot: &Snapshot, mut raw: Value) -> Value {
             raw["resultsScreen"]["replay"] = json!(true);
         }
     }
+    if snapshot.replay && snapshot.state_name.as_deref() == Some("play") {
+        raw["play"]["replay"] = json!(true);
+    }
     if let Some(menu) = snapshot.pause_menu {
         raw["game"]["pauseMenu"] = json!(menu);
     }

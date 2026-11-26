@@ -148,6 +148,9 @@ pub(crate) fn presence_body(s: &mut State) -> Option<Value> {
     let mut state = presence_state(s.reader.state.as_deref().unwrap_or(""));
     if state == "playing" && s.reader.replay {
         state = "watching_replay";
+    } else if state == "playing" && raw.pointer("/play/replay").and_then(Value::as_bool) == Some(true) {
+        // someone else's play, not started from a results screen: spectating
+        state = "spectating";
     }
     // older sites refuse states they don't list
     if state == "watching_replay" && !site_has_state(s, state) {

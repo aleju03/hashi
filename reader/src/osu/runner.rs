@@ -1126,6 +1126,19 @@ pub fn read_frame(
                     snapshot.hits_candidates = in_game.hits_candidates.clone();
                     snapshot.hits_candidates_complete = in_game.hits_candidates_complete;
                     snapshot.retries = in_game.retries;
+                    // the play's own score names its player too: someone else's is spectating or
+                    // their replay, the same check as the results below
+                    if snapshot.is_play_state() {
+                        let name = in_game.score_base.and_then(|score| {
+                            let ptr = win::read_u32(target, score.wrapping_add(topo.map_or(0, |t| t.result_player_name_offset))).ok()?;
+                            win::read_csharp_string(target, ptr).ok()
+                        });
+                        if let (Some(name), Some(folder)) = (name.as_deref(), stable::game_folder(&target.image_path)) {
+                            if stable::replay_from_player_name(Some(name), &stable::local_player_names_cached(&folder)) {
+                                snapshot.replay = true;
+                            }
+                        }
+                    }
                     snapshot.health = in_game.gameplay_base.zip(topo.and_then(|t| t.hp.as_ref())).and_then(|(gameplay, hp)| {
                         let bar = win::read_u32(target, gameplay.wrapping_add(hp.hp_bar)).ok().filter(|b| *b != 0)?;
                         let value = win::read_f64(target, bar.wrapping_add(hp.current)).ok()?;
