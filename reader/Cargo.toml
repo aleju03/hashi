@@ -12,6 +12,7 @@ name = "osu_reader"
 ed25519-compact = "2"
 lzma-rs = "0.3"
 md-5 = "0.10"
+memchr = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

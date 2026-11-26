@@ -545,19 +545,37 @@ fn field_i32(
     }
 }
 
+// where the last game object was found: a restarted lazer puts it in about the same place
+static LAST_FOUND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// region by region in address order, that one first, stopping once `found` takes what's been hit:
+// the whole of lazer's memory is over a GB and its game object sits early in it
 #[cfg(any(windows, target_os = "linux"))]
 pub fn scan_markers(
     target: &crate::osu::win::Target,
     regions: &mut crate::osu::scan::RegionCache,
     limit: usize,
+    found: &mut dyn FnMut(&[u64]) -> bool,
 ) -> Result<(Vec<u64>, u128), Reason> {
     use crate::osu::scan;
     let pattern = scan::Pattern::parse(MARKER_PATTERN).map_err(|_| Reason::SignatureMiss(ANCHOR_KEY))?;
     let started = std::time::Instant::now();
     let mut stats = scan::ScanStats::default();
+    let last = LAST_FOUND.load(std::sync::atomic::Ordering::Relaxed) as usize;
     for mask in crate::osu::FILTER_READY {
-        let list = target.regions_cached(regions, *mask, crate::osu::REGION_LIMIT);
-        let hits = scan::find_in_regions64(target.handle(), &list, &pattern, 0, limit, &mut stats);
+        let mut list = target.regions_cached(regions, *mask, crate::osu::REGION_LIMIT).to_vec();
+        list.sort_by_key(|r| (!(r.base..r.base + r.size).contains(&last), r.base));
+        let mut hits = Vec::new();
+        for region in &list {
+            let more = scan::find_in_regions64(target.handle(), std::slice::from_ref(region), &pattern, 0, limit - hits.len(), &mut stats);
+            if more.is_empty() {
+                continue;
+            }
+            hits.extend(more);
+            if found(&hits) || hits.len() >= limit {
+                break;
+            }
+        }
         if !hits.is_empty() {
             eprintln!(
                 "[osu] lazer scan: filter#{} regions={} bytes={} hits={} elapsed={}ms",
@@ -641,7 +659,6 @@ pub fn attach(
     eprintln!("{target_line}");
     crate::server::log::log_at("info", &target_line);
     let source: &dyn Source = target;
-    let (anchors, scan_ms) = scan_markers(target, regions, MARKER_HIT_LIMIT)?;
     let modules = match crate::osu::win::module_list(target.pid) {
         Ok(list) => {
             eprintln!(
@@ -660,8 +677,13 @@ pub fn attach(
             Vec::new()
         }
     };
+    let found = &mut |hits: &[u64]| resolve_game_base(source, &modules, hits, SITE_DELTAS).accepted().is_some();
+    let (anchors, scan_ms) = scan_markers(target, regions, MARKER_HIT_LIMIT, found)?;
     let resolution = resolve_game_base(source, &modules, &anchors, SITE_DELTAS);
     log_resolution(&resolution);
+    if let Some(game_base) = resolution.accepted().and_then(|c| c.game_base) {
+        LAST_FOUND.store(game_base, std::sync::atomic::Ordering::Relaxed);
+    }
     let prove = |table: &OffsetTable| -> bool {
         let Some(candidate) = resolution.accepted() else {
             eprintln!(

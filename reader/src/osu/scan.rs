@@ -132,6 +132,20 @@ impl Pattern {
         true
     }
 
+    // the longest stretch without wildcards and where it starts: searched for, the rest checked around it
+    pub fn anchor(&self) -> (usize, &[u8]) {
+        let (mut best, mut start) = ((0, 0), 0);
+        for i in 0..=self.sig.len() {
+            if i == self.sig.len() || self.mask[i] == 0 {
+                if i - start > best.1 {
+                    best = (start, i - start);
+                }
+                start = i + 1;
+            }
+        }
+        (best.0, &self.sig[best.0..best.0 + best.1])
+    }
+
     /// 首个命中在 `window` 内的偏移（从左到右，取第一个）。零命中返回 `None`。
     pub fn find_first(&self, window: &[u8]) -> Option<usize> {
         if self.sig.is_empty() || window.len() < self.sig.len() {
@@ -188,9 +202,8 @@ fn read_chunk(handle: win::Handle, addr: usize, want: usize) -> Option<Vec<u8>> 
 /// 分块读时携带 `pattern.len() - 1` 字节的尾接（overlap），保证跨块边界的签名不被漏掉；
 /// 读失败的块**推进 `CHUNK_MAX` 并丢弃尾接**（不能拿上一块的尾巴去接下一块的头冒充连续内存）。
 ///
-/// 热点路径：**首字节是实字节**时先用它做快速筛（x86 签名首字节是 opcode，命中率低），
-/// 命中候选才逐个做掩码比较——否则每个窗口位置进一次掩码循环，1.4 GB 的扫描会到秒级。
-/// 首字节是通配（`??`）时**跳过**快筛（它不携带信息，拿它筛会丢真命中）。
+/// The pattern's longest run of fixed bytes is searched for with memmem, the whole pattern checked
+/// only where it turns up.
 #[cfg(any(windows, target_os = "linux"))]
 pub fn find_in_regions(
     handle: win::Handle,
@@ -225,10 +238,8 @@ pub fn find_in_regions64(
         return Vec::new();
     }
     let carry_len = sig_len - 1;
-    // 首字节快速筛：**只在首字节是实字节时**才能用它当必要条件。首字节是通配（`??`）时
-    // 它不携带任何信息，拿它筛会把所有"该位 ≠ 0"的真命中全丢掉（C1 修）。
-    let first_byte = pattern.mask[0] != 0;
-    let first_value = pattern.sig[0];
+    let (anchor_at, anchor) = pattern.anchor();
+    let finder = (!anchor.is_empty()).then(|| memchr::memmem::Finder::new(anchor));
     let mut hits: Vec<u64> = Vec::new();
     'regions: for region in regions {
         let mut addr = region.base;
@@ -245,23 +256,31 @@ pub fn find_in_regions64(
                     window.extend_from_slice(&carry);
                     window.extend_from_slice(&buf);
                     let last = window.len() - sig_len;
-                    let mut at = 0usize;
-                    while at <= last {
-                        let candidate = if first_byte {
-                            window[at] == first_value && pattern.matches_at(&window, at)
-                        } else {
-                            pattern.matches_at(&window, at)
-                        };
-                        if candidate {
-                            // 有符号位移必须先在 i128 里加：`statusPtr` 是 -0x4，命中地址可能是
-                            // 0x0…3（相减会下溢 panic，debug 构建直接崩），且 64 位地址回绕面更宽。
-                            let hit = window_base as i128 + at as i128 + offset as i128;
-                            hits.push(hit as u64);
-                            if hits.len() >= limit {
-                                break 'regions;
+                    let mut push = |at: usize| {
+                        // 有符号位移必须先在 i128 里加：`statusPtr` 是 -0x4，命中地址可能是
+                        // 0x0…3（相减会下溢 panic，debug 构建直接崩），且 64 位地址回绕面更宽。
+                        hits.push((window_base as i128 + at as i128 + offset as i128) as u64);
+                        hits.len() >= limit
+                    };
+                    match &finder {
+                        // one by one, not find_iter: a stretch can overlap itself
+                        Some(finder) => {
+                            let mut from = 0;
+                            while let Some(found) = finder.find(&window[from..]).map(|i| from + i) {
+                                from = found + 1;
+                                let Some(at) = found.checked_sub(anchor_at).filter(|at| *at <= last) else { continue };
+                                if pattern.matches_at(&window, at) && push(at) {
+                                    break 'regions;
+                                }
                             }
                         }
-                        at += 1;
+                        None => {
+                            for at in 0..=last {
+                                if pattern.matches_at(&window, at) && push(at) {
+                                    break 'regions;
+                                }
+                            }
+                        }
                     }
                     let keep = carry_len.min(window.len());
                     carry = window[window.len() - keep..].to_vec();

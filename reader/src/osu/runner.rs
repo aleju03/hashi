@@ -44,6 +44,8 @@ pub fn detect_stable_variant(_target: &win::Target) -> &'static str {
 
 /// 当前 32 位 stable 进程实际使用的偏移表变体：0=stable/unknown，1=ppysb。
 pub static ACTIVE_STABLE_VARIANT: AtomicU8 = AtomicU8::new(0);
+const GAME_POLL: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// 主循环：发现 → 附着 → 定址 → 每 tick 读 + 过门 + 发布。
 #[cfg(any(windows, target_os = "linux"))]
 pub fn run(
@@ -178,13 +180,13 @@ pub fn run(
                     };
                     let retry_soon = win::retry_soon();
                     let used_sweep = win::last_discovery_used_sweep();
-                    let delay = sweep_delay(
-                        lost_from_attached,
-                        elapsed_ms,
-                        attach_failures,
-                        retry_soon,
-                        used_sweep,
-                    );
+                    // no game yet is only a look at the process list, cheap enough to do every second so
+                    // one that starts is seen at once; the backoff is for one that's there but won't attach
+                    let delay = if reason == Reason::ProcessNotFound {
+                        GAME_POLL
+                    } else {
+                        sweep_delay(lost_from_attached, elapsed_ms, attach_failures, retry_soon, used_sweep)
+                    };
                     eprintln!(
                         "[osu] attach retry in {}ms (lost_from_attached={} since_loss={}ms failures={} retry_soon={} swept={})",
                         delay.as_millis(),
