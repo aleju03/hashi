@@ -80,11 +80,15 @@ fn scan_replay_dir(b: &Arc<Bridge>, initial: bool) {
         if moved {
             s.replays.dir = Some(path.clone());
             s.replays.dir_stamp = None;
+            log!("replays: looking in {}", path.display());
         }
         initial || moved
     };
     let Ok(stamp) = std::fs::metadata(&path).and_then(|m| m.modified()) else { return };
-    if b.st().replays.dir_stamp == Some(stamp) {
+    // FAT32 and exFAT drives don't move a folder's time when a file is added to it, so while a
+    // stable play waits for its replay the folder is always read
+    let waiting = b.st().queue.items.iter().any(|i| i.phase == "waiting_replay" && !i.play.is_lazer());
+    if !waiting && b.st().replays.dir_stamp == Some(stamp) {
         return;
     }
     let Ok(dir) = std::fs::read_dir(&path) else { return };
