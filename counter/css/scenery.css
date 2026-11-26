@@ -253,11 +253,6 @@
   fill: var(--warn);
 }
 
-.light.is-spin .stop {
-  fill: var(--warn);
-  animation: blink steps(1) infinite;
-}
-
 @keyframes blink {
   50% {
     fill: var(--osu-b4);

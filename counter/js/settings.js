@@ -118,14 +118,7 @@ function toggle(title, on, path, note, cls = "") {
     el("div", { class: "text" },
       el("span", { class: "title" }, title),
       note && el("span", { class: "line" }, note)),
-    el("button", {
-      class: `switch${on ? " on" : ""}`,
-      role: "switch",
-      "aria-checked": String(on),
-      "aria-label": title,
-      disabled: slow,
-      onclick: () => action(`${path}/${on ? "off" : "on"}`),
-    }, el("i")));
+    switchButton(on, title, () => action(`${path}/${on ? "off" : "on"}`), slow));
 }
 
 function sharing() {
@@ -139,14 +132,7 @@ function sharing() {
     el("div", { class: "text" },
       el("span", { class: "title" }, title),
       line && el("span", { class: "line" }, line)),
-    el("button", {
-      class: `switch${on ? " on" : ""}`,
-      role: "switch",
-      "aria-checked": String(on),
-      "aria-label": title,
-      disabled: slow || (!on && !can),
-      onclick: () => action(`sharing/${next}`),
-    }, el("i")));
+    switchButton(on, title, () => action(`sharing/${next}`), slow || (!on && !can)));
   return [
     row("Send my plays", plays, true, choice(!plays, live), !plays && `Off. The maps you finish aren't sent${snapshot.analysis ? ", only analyzed here" : ""}.`, ""),
     row("Share my live status", live, liveAvailable, choice(plays, !live),

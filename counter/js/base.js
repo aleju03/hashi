@@ -107,6 +107,12 @@ function segs(options, current, pick, label) {
     }, text)));
 }
 
+function switchButton(on, label, flip, disabled = false) {
+  return el("button", {
+    class: `switch${on ? " on" : ""}`, role: "switch", "aria-checked": String(on), "aria-label": label, disabled, onclick: flip,
+  }, el("i"));
+}
+
 function part(area, ...children) {
   return el("section", { class: `part ${area}` }, children);
 }

@@ -23,7 +23,7 @@ function osuLabel(tosu) {
 function blockedHint() {
   const { blocked } = snapshot.tosu;
   return blocked && el("div", { class: "blocked" },
-    el("p", {}, "Linux won't let Hashi read osu! yet. Run this once:"),
+    el("p", {}, "osu! can't be read until you run this once:"),
     el("code", { title: "Click to copy", onclick: (e) => {
       navigator.clipboard?.writeText(blocked.fix);
       e.currentTarget.classList.add("copied");

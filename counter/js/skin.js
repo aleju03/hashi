@@ -27,8 +27,8 @@ async function loadSkinScene(page) {
   const res = await fetch(`${BRIDGE}/skin/scene?${query}`);
   if (!res.ok) throw new Error("scene");
   const scene = await res.json();
-  // edits go in skin units, which need the skin's own HitPosition from a scene first: edits applied
-  // before, back when the editor opens, are drawn in once it's known
+  // edits are sent in skin units, which need the skin's own HitPosition, so saved edits only go out
+  // once a first scene has told it
   if (page.editsJson == null && !page.hitUnits?.[keys] && page.keys === keys) {
     (page.hitUnits ??= {})[keys] = scene.ownHit;
     if (skinEditsJson(page) !== asked) return loadSkinScene(page);
@@ -173,7 +173,7 @@ function skinFrame(frames, time) {
 const skinMapY = (s, y) => (s.upscroll ? s.height - y : y);
 
 // `hits` gets where each part was drawn, for picking it in the preview
-function skinTap(s, column, y, time, out, hits = []) {
+function skinTap(s, column, y, time, out, hits) {
   const c = s.columns[column];
   const anchor = skinMapY(s, y);
   const f = skinFrame(c.tap, time);
@@ -214,7 +214,7 @@ function skinTiles(top, bottom, rows, scale, full = rows) {
   return tiles;
 }
 
-function skinHold(s, column, headY, tailY, time, out, hits = []) {
+function skinHold(s, column, headY, tailY, time, out, hits) {
   const c = s.columns[column];
   const up = s.upscroll;
   const { x, w } = c;
@@ -725,7 +725,7 @@ const skinCutText = (cuts) => {
 function skinRestored(state) {
   const e = { ...skinFresh(), ...state };
   if (Array.isArray(e.colors)) e.colors = Object.fromEntries(SKIN_PARTS.map(([p]) => [p, e.parts?.[p] === false ? [] : [...e.colors]]));
-  // what was picked before picks were parts of columns
+  // what older saves kept for picking is dropped, a restored edit starts with nothing picked
   for (const k of ["picks", "parts", "swapPart", "swapCols"]) delete e[k];
   e.sel = [];
   return e;
@@ -1052,7 +1052,7 @@ function skinColours(page) {
     for (const p of picks) x.colors[SKIN_COLOR_OF[p.part]][p.c] = color;
   });
   const first = picks[0];
-  const shown = first && (e.colors[SKIN_COLOR_OF[first.part]][first.c] ?? skinPartColour(page, first.c, SKIN_COLOR_OF[first.part]));
+  const shown = first && skinShownColour(page, e, first.part, first.c);
   return part("skin-colours", null,
     el("p", { class: "caption" }, "Click a note in the preview, or drag a box over some, to pick what to color. Shift adds more."),
     skinPickTools(page, SKIN_NOTE_PARTS),

@@ -2,14 +2,20 @@
 // over them, or in the grid. Colors and Parts both work on them. Kept as "head:3" and so on
 const SKIN_PICK_PARTS = [["note", "Notes"], ["head", "LN Heads"], ["body", "LN Bodies"], ["tail", "LN Tails"], ["key", "Receptors"], ["keyDown", "Pressed"]];
 const SKIN_NOTE_PARTS = SKIN_PICK_PARTS.slice(0, 4);
+const SKIN_PICK_NAMES = Object.fromEntries(SKIN_PICK_PARTS);
 // the parts by the name their colors go under
 const SKIN_COLOR_OF = { note: "notes", head: "heads", body: "bodies", tail: "tails" };
+// the edit's color for a part, else the skin's own
+const skinShownColour = (page, e, part, c) => e.colors[SKIN_COLOR_OF[part]][c] ?? skinPartColour(page, c, SKIN_COLOR_OF[part]);
 // a press that moves less than this, in screen pixels, is a click
 const SKIN_PICK_SLOP = 4;
 
 const skinPickKey = (part, c) => `${part}:${c}`;
 const skinPicked = (e) => (e.sel ?? []).map((k) => k.split(":")).map(([part, c]) => ({ part, c: Number(c) }));
 const skinIsPicked = (e, part, c) => (e.sel ?? []).includes(skinPickKey(part, c));
+const skinPickAll = (rows, keys) => rows.flatMap(([p]) => [...Array(keys).keys()].map((c) => skinPickKey(p, c)));
+// the tabs that work on what's picked
+const skinPicking = (page) => ["colours", "parts"].includes(page.tab);
 
 function skinPick(page, keys, add = false) {
   const e = skinEdit(page);
@@ -28,12 +34,11 @@ function skinPickToggle(page, keys) {
 // "Notes in columns 1–3", "LN Heads in column 4", or how many when it's a mix
 function skinPickText(picks, keys) {
   if (!picks.length) return "";
-  const names = Object.fromEntries(SKIN_PICK_PARTS);
   const parts = [...new Set(picks.map((p) => p.part))];
   const cols = [...new Set(picks.map((p) => p.c))].sort((a, b) => a - b);
   const whole = picks.length === parts.length * cols.length;
   if (!whole) return `${picks.length} picked`;
-  const what = parts.length === 1 ? names[parts[0]] : parts.length === 4 && parts.every((p) => SKIN_COLOR_OF[p]) ? "Everything" : parts.map((p) => names[p]).join(", ");
+  const what = parts.length === 1 ? SKIN_PICK_NAMES[parts[0]] : parts.length === 4 && parts.every((p) => SKIN_COLOR_OF[p]) ? "Everything" : parts.map((p) => SKIN_PICK_NAMES[p]).join(", ");
   if (cols.length === keys) return `${what} in every column`;
   const run = cols.length > 2 && cols.at(-1) - cols[0] === cols.length - 1;
   return `${what} in column${cols.length > 1 ? "s" : ""} ${run ? `${cols[0] + 1}–${cols.at(-1) + 1}` : cols.map((c) => c + 1).join(", ")}`;
@@ -108,11 +113,11 @@ function skinPickGrid(page, rows) {
   const cols = [...Array(keys).keys()];
   const cell = (part, c) => {
     const art = skinPartArt(page, part, c);
-    const color = !art && SKIN_COLOR_OF[part] && (e.colors[SKIN_COLOR_OF[part]][c] ?? skinPartColour(page, c, SKIN_COLOR_OF[part]));
+    const color = !art && SKIN_COLOR_OF[part] && skinShownColour(page, e, part, c);
     return el("button", {
       class: `skin-cell${skinIsPicked(e, part, c) ? " on" : ""}${art || color ? "" : " none"}`,
       style: art ? `--art: ${art}` : color ? `--swatch: ${color}` : "",
-      title: `${Object.fromEntries(SKIN_PICK_PARTS)[part]}, column ${c + 1}`,
+      title: `${SKIN_PICK_NAMES[part]}, column ${c + 1}`,
       "aria-pressed": String(skinIsPicked(e, part, c)),
       onclick: () => skinPickToggle(page, [skinPickKey(part, c)]),
     });
@@ -128,7 +133,7 @@ function skinPickGrid(page, rows) {
 
 function skinPickTools(page, rows) {
   const e = skinEdit(page);
-  const all = rows.flatMap(([p]) => [...Array(page.keys).keys()].map((c) => skinPickKey(p, c)));
+  const all = skinPickAll(rows, page.keys);
   return el("div", { class: "skin-tools skin-pick-tools" },
     el("span", { class: "skin-label" }, skinPickText(skinPicked(e), page.keys) || "Nothing picked"),
     el("span", {},
@@ -195,7 +200,7 @@ function skinPickStart(page, ev) {
     }
     page.noPause = true;
     if (!keys.length && !add) return skinPick(page, []);
-    if (!["colours", "parts"].includes(page.tab)) page.tab = keys.every((k) => SKIN_COLOR_OF[k.split(":")[0]]) ? "colours" : "parts";
+    if (!skinPicking(page)) page.tab = keys.every((k) => SKIN_COLOR_OF[k.split(":")[0]]) ? "colours" : "parts";
     skinPick(page, keys, add);
   };
   addEventListener("pointermove", move);
@@ -205,20 +210,16 @@ function skinPickStart(page, ev) {
 
 // a receptor's box, every op its art is drawn with
 function skinOpsBox(ops) {
-  let box = null;
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  const take = (x, y, w, h) => {
+    [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x + w), Math.max(y1, y + h)];
+  };
   for (const o of ops) {
-    const r = o.dst ?? o.r ?? (o.p && (() => {
-      const xs = o.p.filter((_, i) => i % 2 === 0);
-      const ys = o.p.filter((_, i) => i % 2 === 1);
-      return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
-    })());
-    if (!r) continue;
-    box = !box ? [...r] : (() => {
-      const [x, y] = [Math.min(box[0], r[0]), Math.min(box[1], r[1])];
-      return [x, y, Math.max(box[0] + box[2], r[0] + r[2]) - x, Math.max(box[1] + box[3], r[1] + r[3]) - y];
-    })();
+    const r = o.dst ?? o.r;
+    if (r) take(...r);
+    else if (o.p) for (let i = 0; i + 1 < o.p.length; i += 2) take(o.p[i], o.p[i + 1], 0, 0);
   }
-  return box;
+  return x1 >= x0 ? [x0, y0, x1 - x0, y1 - y0] : null;
 }
 
 // what's picked outlined on the preview, and the box being dragged
@@ -228,7 +229,7 @@ function skinPickMarks(ctx) {
   if (!live) return;
   const e = page.edits?.[page.keys];
   ctx.save();
-  if (e?.sel?.length && ["colours", "parts"].includes(page.tab)) {
+  if (e?.sel?.length && skinPicking(page)) {
     ctx.lineWidth = 2;
     ctx.strokeStyle = "#fff";
     ctx.shadowColor = "rgba(0, 0, 0, 0.8)";
@@ -252,9 +253,8 @@ document.addEventListener("keydown", (ev) => {
   if (!page?.live || ev.target.closest?.("input, textarea")) return;
   if (ev.key === "Escape" && page.edits?.[page.keys]?.sel?.length) {
     skinPick(page, []);
-  } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a" && ["colours", "parts"].includes(page.tab)) {
+  } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a" && skinPicking(page)) {
     ev.preventDefault();
-    const rows = page.tab === "colours" ? SKIN_NOTE_PARTS : SKIN_PICK_PARTS;
-    skinPick(page, rows.flatMap(([p]) => [...Array(page.keys).keys()].map((c) => skinPickKey(p, c))));
+    skinPick(page, skinPickAll(page.tab === "colours" ? SKIN_NOTE_PARTS : SKIN_PICK_PARTS, page.keys));
   }
 });

@@ -128,10 +128,12 @@ function chartName(play) {
   return diff ? `${play.title ?? "Unknown"} [${diff}]` : play.title ?? "Unknown";
 }
 
+const playAcc = (play) => (typeof play.accuracy === "number" && play.accuracy > 0 ? `${accText(play.accuracy)}%` : null);
+
 function playRow(p) {
   const status = playStatus(p);
   const diff = diffName(p.play.keys, p.play.version);
-  const acc = typeof p.play.accuracy === "number" && p.play.accuracy > 0 ? `${accText(p.play.accuracy)}%` : null;
+  const acc = playAcc(p.play);
   const mods = modList(p.play.mods);
   const holdable = !p.practice && ["waiting_replay", "send"].includes(p.phase);
   const removable = holdable || ["held", "failed", "unbound"].includes(p.phase);
@@ -274,8 +276,11 @@ function drawnBadges(data) {
   }));
 }
 
-// MSD is MinaCalc's number, and MinaCalc rates 4K. Mania Tracker rates 6K to 8K with Prism, its own
-const ratingName = (keys) => (Math.round(Number(keys)) >= 6 && Math.round(Number(keys)) <= 8 ? "Prism" : "MSD");
+// Mania Tracker rates 6K to 8K with its own Prism, every other keymode with MinaCalc's MSD
+function ratingName(keys) {
+  const k = Math.round(Number(keys));
+  return k >= 6 && k <= 8 ? "Prism" : "MSD";
+}
 
 // the map selected in osu!, with its MSD and dan worked out here at its rate
 let picked = null;
