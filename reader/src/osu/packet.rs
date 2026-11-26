@@ -514,11 +514,20 @@ pub fn lazer_mods_value(mods: &[LazerMod]) -> Value {
             number |= bit;
         }
     }
+    // lazer leaves a setting out at its default, DT and NC without one are at 1.5x
+    let has = |codes: &[&str]| acronyms.iter().any(|a| codes.contains(&a.as_str()));
+    let default_rate = if has(&["DT", "NC"]) {
+        1.5
+    } else if has(&["HT", "DC"]) {
+        0.75
+    } else {
+        1.0
+    };
     let rate = mods
         .iter()
         .filter_map(|mod_| mod_.speed_change)
         .find(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(1.0);
+        .unwrap_or(default_rate);
     json!({
         "number": number,
         "name": acronyms.concat(),
