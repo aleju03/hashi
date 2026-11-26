@@ -1133,9 +1133,17 @@ pub fn read_frame(
                             let ptr = win::read_u32(target, score.wrapping_add(topo.map_or(0, |t| t.result_player_name_offset))).ok()?;
                             win::read_csharp_string(target, ptr).ok()
                         });
-                        if let (Some(name), Some(folder)) = (name.as_deref(), stable::game_folder(&target.image_path)) {
+                        // only a name that could be an osu! username: a misread is the player's own play
+                        let username = |n: &&str| (2..=15).contains(&n.chars().count()) && n.chars().all(|c| c.is_ascii_alphanumeric() || " _-[]".contains(c));
+                        if let (Some(name), Some(folder)) = (name.as_deref().filter(username), stable::game_folder(&target.image_path)) {
                             if stable::replay_from_player_name(Some(name), &stable::local_player_names_cached(&folder)) {
                                 snapshot.replay = true;
+                                static SAID: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+                                let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+                                if said.as_deref() != Some(name) {
+                                    eprintln!("[osu] stable: playing {name}'s play, not this computer's account");
+                                    *said = Some(name.to_string());
+                                }
                             }
                         }
                     }
