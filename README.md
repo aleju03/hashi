@@ -5,7 +5,7 @@
 <h1 align="center">Hashi</h1>
 
 <p align="center">
-  Your osu!mania plays, map leaderboards and live status on <a href="https://mania-tracker.com">Mania Tracker</a>, as you play.
+  Your osu!mania plays, map leaderboards and rich presence on <a href="https://mania-tracker.com">Mania Tracker</a>, as you play.
 </p>
 
 ---
@@ -100,10 +100,12 @@ app only installs files signed with Hashi's release key.
 ## What gets sent
 
 For each play: the replay osu! saved, the chart file if Mania Tracker doesn't have that version,
-the app's version and whether it was stable or lazer. With the live status on, also what you're
-doing in osu! and the current map, mods and speed. To know what you're playing, the app reads osu!'s
-memory on your computer, and only what's listed here leaves it. Apart from Mania Tracker, the app
-only talks to osu!'s servers for your avatar and GitHub for updates.
+the app's version and whether it was stable or lazer. With rich presence on, also what you're
+doing in osu! and the current map, mods and speed. With Liveplay mode on, also your key presses,
+the song's time, your health and counts while you play, and the chart file when Mania Tracker asks
+for it, so anyone can spectate. To know what you're playing, the app reads osu!'s memory on your
+computer, and only what's listed here leaves it. Apart from Mania Tracker, the app only talks to
+osu!'s servers for your avatar and GitHub for updates.
 
 ## Troubleshooting
 
