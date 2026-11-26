@@ -47,6 +47,8 @@ pub(crate) struct PendingFinish {
     play: LastPlay,
     viewed: Option<String>,
     stale: Option<String>,
+    // stable's retry count went up since the results before: the same results are a new attempt
+    retried: bool,
 }
 
 // blocked: { fix } when osu! runs but linux won't let hashi-reader read it
@@ -77,6 +79,9 @@ pub(crate) struct ReaderState {
     last_play: Option<LastPlay>,
     last_result_shown: Option<String>,
     viewed_result: Option<String>,
+    // stable's retry count, as last seen in play and as it was at the last results shown
+    play_retries: Option<i64>,
+    results_retries: Option<i64>,
     // the results up are from a play finished here, a retry starts from those. not by result_key,
     // what's read for them can change while they're up
     own_results: bool,
@@ -116,6 +121,8 @@ impl ReaderState {
             last_play: None,
             last_result_shown: None,
             viewed_result: None,
+            play_retries: None,
+            results_retries: None,
             own_results: false,
             replay: false,
             torii: false,
@@ -375,6 +382,9 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
             t.results_left_at = now_ms();
         }
         if state == "play" {
+            if let Some(n) = raw.pointer("/play/retries").and_then(Value::as_i64) {
+                t.play_retries = Some(n);
+            }
             if t.prev_state.as_deref() != Some("play") {
                 // retry or watch replay from results, remember which score was up. lazer goes back
                 // to song select for a moment on the way
@@ -436,7 +446,7 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
             let finished = t.last_play.as_ref().filter(|p| t.torii && p.completed && p.started_at == t.play_started_at).cloned();
             match finished {
                 Some(done) if at("live") < at("lastObject") - RESTART_GAP_MS => {
-                    t.pending_finish = Some(PendingFinish { since: now_ms(), play: done, viewed: None, stale: None });
+                    t.pending_finish = Some(PendingFinish { since: now_ms(), play: done, viewed: None, stale: None, retried: false });
                     t.play_started_at = now_ms();
                     t.saw_start = at_start;
                     t.last_play = Some(LastPlay { started_at: t.play_started_at, ..play });
@@ -455,7 +465,7 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
         };
         if room_results && t.prev_state.as_deref() == Some("play") {
             if let Some(play) = t.last_play.clone().filter(|p| p.completed) {
-                t.pending_finish = Some(PendingFinish { since: now_ms(), play, viewed: None, stale: None });
+                t.pending_finish = Some(PendingFinish { since: now_ms(), play, viewed: None, stale: None, retried: false });
             }
         }
 
@@ -463,8 +473,10 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
             let finished = t.prev_state.as_deref() == Some("play");
             t.own_results = finished && t.last_play.as_ref().is_some_and(|p| p.whose == "playing");
             if let Some(play) = t.last_play.clone().filter(|p| finished && (p.completed || p.client != "lazer")) {
-                t.pending_finish = Some(PendingFinish { since: now_ms(), play, viewed: t.viewed_result.clone(), stale: t.last_result_shown.clone() });
+                let retried = t.play_retries.zip(t.results_retries).is_some_and(|(now, then)| now > then);
+                t.pending_finish = Some(PendingFinish { since: now_ms(), play, viewed: t.viewed_result.clone(), stale: t.last_result_shown.clone(), retried });
             }
+            t.results_retries = t.play_retries;
         }
 
         if let Some(pending) = &t.pending_finish {
@@ -493,7 +505,7 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
 }
 
 fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
-    let PendingFinish { play, viewed, stale, .. } = finish;
+    let PendingFinish { play, viewed, stale, retried, .. } = finish;
     let bm = &play.beatmap;
     let label = format!("{} - {} [{}]", crate::types::text(&bm.artist), crate::types::text(&bm.title), crate::types::text(&bm.version));
     // the reader tells a replay by its results: lazer's ReplayPlayer, stable's name that isn't this computer's
@@ -503,8 +515,8 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
     if play.whose != "playing" {
         return log!("skip ({}): {label}", play.whose.replace('_', " "));
     }
-    // same results as before = watched the replay
-    if rs.is_none() && viewed.is_some() && viewed == stale {
+    // same results as before = watched the replay, unless stable counted a retry
+    if rs.is_none() && viewed.is_some() && viewed == stale && !retried {
         return log!("skip (watched replay): {label}");
     }
     let rs = rs.unwrap_or(json!({}));

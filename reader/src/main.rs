@@ -98,6 +98,10 @@ fn frame(snapshot: &Snapshot, mut raw: Value) -> Value {
     if snapshot.replay && snapshot.state_name.as_deref() == Some("play") {
         raw["play"]["replay"] = json!(true);
     }
+    // stable counts retries, not replays watched: what tells the two apart when the results match
+    if let Some(retries) = snapshot.retries.filter(|_| snapshot.state_name.as_deref() == Some("play")) {
+        raw["play"]["retries"] = json!(retries);
+    }
     if let Some(menu) = snapshot.pause_menu {
         raw["game"]["pauseMenu"] = json!(menu);
     }
