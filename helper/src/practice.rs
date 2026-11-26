@@ -139,7 +139,7 @@ async fn build(b: &Arc<Bridge>, id: &str, o: Options) -> Result<Value, String> {
     Ok(json!({ "version": made.version, "file": made.file, "md5": made.md5 }))
 }
 
-// lazer keeps the song under its hash, which only tosu knows: from the play, or the map selected now
+// lazer keeps the song under its hash, which only the reader knows: from the play, or the map selected now
 async fn audio_file(b: &Arc<Bridge>, item: &Item, chart: &[u8]) -> Result<PathBuf, String> {
     if let Some(f) = item.play.audio_file.as_ref().map(PathBuf::from).filter(|f| f.is_file()) {
         return Ok(f);

@@ -22,8 +22,6 @@ static OVERLAY_AT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 // the card's size in the page's pixels, which its zoom makes bigger on screen
 static OVERLAY_SIZE: Mutex<(f64, f64)> = Mutex::new((320.0, 90.0));
 static OVERLAY_ZOOM: Mutex<f64> = Mutex::new(1.0);
-// the card is a wayland layer rather than a window: OVERLAY_AT is then its margins on its monitor
-static LAYERED: AtomicBool = AtomicBool::new(false);
 // windows: the background goes first, this one has to stay until the installer is started
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
@@ -72,6 +70,14 @@ fn parse(args: &[String]) -> Args {
     }
 }
 
+fn get<T: Copy>(m: &Mutex<T>) -> T {
+    *m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn set<T>(m: &Mutex<T>, v: T) {
+    *m.lock().unwrap_or_else(|e| e.into_inner()) = v;
+}
+
 fn tell(line: &str) {
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{TELL}{line}");
@@ -84,7 +90,7 @@ pub fn run(args: &[String]) {
         let _ = HELPER_PORT.set(port);
     }
     let _ = COUNTER_URL.set(args.url.clone());
-    *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = args.overlay_at;
+    set(&OVERLAY_AT, args.overlay_at);
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
@@ -109,7 +115,7 @@ pub fn run(args: &[String]) {
                     WindowEvent::Moved(at) if !cfg!(target_os = "linux") || std::env::var_os("WAYLAND_DISPLAY").is_none() => {
                         let Ok(scale) = w.scale_factor() else { return };
                         let at = at.to_logical::<f64>(scale);
-                        *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some((at.x, at.y));
+                        set(&OVERLAY_AT, Some((at.x, at.y)));
                         tell(&format!("overlay-place {},{}", at.x, at.y));
                     }
                     _ => {}
@@ -190,18 +196,10 @@ fn overlay(app: &AppHandle, on: bool) {
         let url = format!("{}?overlay", COUNTER_URL.get().map_or("", String::as_str));
         let Ok(url) = url.parse() else { return };
         let (width, height) = overlay_size();
-        #[cfg(target_os = "linux")]
-        let layered = layer::wanted();
-        #[cfg(not(target_os = "linux"))]
-        let layered = false;
-        LAYERED.store(layered, Ordering::SeqCst);
-        let url = if layered { format!("{url}&layer").parse().unwrap_or(url) } else { url };
         let mut window = WebviewWindowBuilder::new(app, OVERLAY, WebviewUrl::External(url))
             .title("Hashi overlay")
             .inner_size(width, height)
-            // a layer is shown once it's been made one
-            .visible(!layered)
-            .resizable(!hyprland() && !layered)
+            .resizable(!hyprland())
             .decorations(false)
             .transparent(true)
             .shadow(false)
@@ -210,32 +208,19 @@ fn overlay(app: &AppHandle, on: bool) {
             .focused(false)
             .disable_drag_drop_handler()
             .on_new_window(to_browser);
-        let at = *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner());
+        let at = get(&OVERLAY_AT);
         let near = main.as_ref().and_then(|w| Some(w.outer_position().ok()?.to_logical::<f64>(w.scale_factor().ok()?)));
         if let Some((x, y)) = at.or(near.map(|p| (p.x, p.y))) {
             window = window.position(x, y);
         }
-        let built = match window.build() {
-            Ok(w) => w,
-            Err(e) => {
-                eprintln!("no overlay window: {e}");
-                return show(app);
-            }
-        };
+        if let Err(e) = window.build() {
+            eprintln!("no overlay window: {e}");
+            return show(app);
+        }
         #[cfg(target_os = "linux")]
-        if layered {
-            let margins = at.map_or(layer::START, |(x, y)| (x.max(0.0) as i32, y.max(0.0) as i32));
-            *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some((f64::from(margins.0), f64::from(margins.1)));
-            let made = built.gtk_window().is_ok_and(|w| layer::make(&w, margins));
-            if !made {
-                LAYERED.store(false, Ordering::SeqCst);
-            }
-            let _ = built.show();
-        } else if hyprland() {
+        if hyprland() {
             hypr::settle(app.clone(), at);
         }
-        #[cfg(not(target_os = "linux"))]
-        let _ = built;
     }
     if let Some(w) = main {
         let _ = w.hide();
@@ -244,119 +229,24 @@ fn overlay(app: &AppHandle, on: bool) {
 
 // on screen, zoom and all
 fn overlay_size() -> (f64, f64) {
-    let (w, h) = *OVERLAY_SIZE.lock().unwrap_or_else(|e| e.into_inner());
-    let zoom = *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner());
+    let (w, h) = get(&OVERLAY_SIZE);
+    let zoom = get(&OVERLAY_ZOOM);
     ((w * zoom).round(), (h * zoom).round())
 }
 
 fn size_overlay(app: &AppHandle) {
     #[cfg(target_os = "linux")]
-    if hyprland() && !LAYERED.load(Ordering::SeqCst) {
+    if hyprland() {
         return hypr::resize();
     }
     if let Some(w) = app.get_webview_window(OVERLAY) {
         let (width, height) = overlay_size();
-        #[cfg(target_os = "linux")]
-        if LAYERED.load(Ordering::SeqCst) {
-            if let Ok(g) = w.gtk_window() {
-                layer::size(&g, (width as i32, height as i32));
-            }
-            return;
-        }
         let _ = w.set_size(tauri::LogicalSize::new(width, height));
     }
 }
 
 fn hyprland() -> bool {
     cfg!(target_os = "linux") && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some_and(|s| !s.is_empty())
-}
-
-// gtk-layer-shell, loaded where it's installed: wayland's way for a surface to stay above every
-// window, a fullscreen game too, the layer the compositor's own bars are in. hyprland, kde and sway
-// have it, gnome doesn't. the compositor can't move a layer, Hashi does through its margins
-#[cfg(target_os = "linux")]
-mod layer {
-    use std::ffi::{c_int, c_void};
-    use std::sync::OnceLock;
-
-    use gtk::glib::object::ObjectType;
-    use libloading::Library;
-
-    const LAYER_OVERLAY: c_int = 3;
-    const EDGE_LEFT: c_int = 0;
-    const EDGE_TOP: c_int = 2;
-    const KEYBOARD_NONE: c_int = 0;
-    pub const START: (i32, i32) = (24, 24);
-
-    static LIB: OnceLock<Option<Library>> = OnceLock::new();
-
-    fn lib() -> Option<&'static Library> {
-        // SAFETY: a plain C library, nothing runs on load
-        LIB.get_or_init(|| unsafe { Library::new("libgtk-layer-shell.so.0").ok() }).as_ref()
-    }
-
-    // off until a webkit layer's size and margins take reliably (they sometimes don't, and the
-    // card then stays where and how big it came up). HASHI_OVERLAY_LAYER=1 tries it
-    pub fn wanted() -> bool {
-        if std::env::var_os("HASHI_OVERLAY_LAYER").is_none() {
-            return false;
-        }
-        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var("GDK_BACKEND").map_or(true, |b| b.contains("wayland"));
-        let Some(lib) = lib().filter(|_| wayland) else { return false };
-        // SAFETY: gtk_layer_is_supported takes nothing, gtk is up by the time a window is made
-        unsafe { lib.get::<unsafe extern "C" fn() -> c_int>(b"gtk_layer_is_supported\0").is_ok_and(|f| f() != 0) }
-    }
-
-    // before it's shown: a window already on screen can't become a layer
-    pub fn make(window: &gtk::ApplicationWindow, margins: (i32, i32)) -> bool {
-        let Some(lib) = lib() else { return false };
-        // tao gives an undecorated window an empty title bar, so the compositor draws none. a layer
-        // with one never draws at all
-        {
-            use gtk::prelude::GtkWindowExt;
-            window.set_titlebar(None::<&gtk::Widget>);
-        }
-        let w = window.as_ptr().cast::<c_void>();
-        // SAFETY: gtk-layer-shell's own signatures, called on gtk's thread with a live, unrealized window
-        unsafe {
-            let (Ok(init), Ok(layer), Ok(anchor), Ok(keyboard), Ok(namespace)) = (
-                lib.get::<unsafe extern "C" fn(*mut c_void)>(b"gtk_layer_init_for_window\0"),
-                lib.get::<unsafe extern "C" fn(*mut c_void, c_int)>(b"gtk_layer_set_layer\0"),
-                lib.get::<unsafe extern "C" fn(*mut c_void, c_int, c_int)>(b"gtk_layer_set_anchor\0"),
-                lib.get::<unsafe extern "C" fn(*mut c_void, c_int)>(b"gtk_layer_set_keyboard_mode\0"),
-                lib.get::<unsafe extern "C" fn(*mut c_void, *const std::ffi::c_char)>(b"gtk_layer_set_namespace\0"),
-            ) else {
-                return false;
-            };
-            init(w);
-            namespace(w, c"hashi-overlay".as_ptr());
-            layer(w, LAYER_OVERLAY);
-            keyboard(w, KEYBOARD_NONE);
-            anchor(w, EDGE_LEFT, 1);
-            anchor(w, EDGE_TOP, 1);
-        }
-        place(window, margins);
-        true
-    }
-
-    // a layer is as big as its window asks to be, a resize alone doesn't change it
-    pub fn size(window: &gtk::ApplicationWindow, (w, h): (i32, i32)) {
-        use gtk::prelude::{GtkWindowExt, WidgetExt};
-        window.set_size_request(w, h);
-        window.resize(w, h);
-    }
-
-    pub fn place(window: &gtk::ApplicationWindow, (x, y): (i32, i32)) {
-        let Some(lib) = lib() else { return };
-        let w = window.as_ptr().cast::<c_void>();
-        // SAFETY: as above, on a window made a layer
-        unsafe {
-            if let Ok(margin) = lib.get::<unsafe extern "C" fn(*mut c_void, c_int, c_int)>(b"gtk_layer_set_margin\0") {
-                margin(w, EDGE_LEFT, x);
-                margin(w, EDGE_TOP, y);
-            }
-        }
-    }
 }
 
 // hyprland floats a window at half the screen whatever size it asks for, ignores where it asks to
@@ -370,7 +260,7 @@ mod hypr {
 
     use tauri::{AppHandle, Manager};
 
-    use super::{overlay_size, OVERLAY, OVERLAY_ZOOM};
+    use super::{get, overlay_size, set, OVERLAY, OVERLAY_ZOOM};
 
     static ADDRESS: Mutex<Option<String>> = Mutex::new(None);
     // blur behind it, but not behind a card with next to no background
@@ -378,19 +268,19 @@ mod hypr {
 
     // its own corners, so the blur and the window stop where the card does
     fn rounding(a: &str) -> String {
-        let zoom = *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner());
+        let zoom = get(&OVERLAY_ZOOM);
         format!("dispatch setprop {a} rounding {}", (14.0 * zoom).round())
     }
 
     fn blur(a: &str) -> String {
-        format!("dispatch setprop {a} no_blur {}", u8::from(!*BLUR.lock().unwrap_or_else(|e| e.into_inner())))
+        format!("dispatch setprop {a} no_blur {}", u8::from(!get(&BLUR)))
     }
 
     // hyprland keeps no window above the others for an app, and a click in the game raises it over the
     // card. so the card goes back on top whenever another window takes the focus, and a few times a
     // second for clicks in one that has it already, which say nothing. through hyprland's socket, not a
     // hyprctl a time. it stops once the card is gone
-    const RAISE_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+    const RAISE_EVERY: Duration = Duration::from_millis(100);
 
     fn keep_on_top(address: String) {
         use std::io::{BufRead, BufReader};
@@ -432,7 +322,7 @@ mod hypr {
                 if !focused.is_empty() && focused.trim_start_matches("0x") != ours {
                     raise();
                     // and once hyprland is done raising what was clicked
-                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    std::thread::sleep(Duration::from_millis(120));
                     raise();
                 }
             }
@@ -458,7 +348,7 @@ mod hypr {
 
     // once it's mapped: floating, sized, and where it was left or where the window was
     pub fn settle(app: AppHandle, at: Option<(f64, f64)>) {
-        *ADDRESS.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        set(&ADDRESS, None);
         let near = find("Hashi").map(|(_, at)| at);
         std::thread::spawn(move || {
             let until = Instant::now() + Duration::from_secs(3);
@@ -494,7 +384,7 @@ mod hypr {
             if let Some((x, y)) = at.or(near) {
                 batch.push(format!("dispatch movewindowpixel exact {x} {y},{a}"));
             }
-            *ADDRESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(address.clone());
+            set(&ADDRESS, Some(address.clone()));
             hyprctl(&["--batch", &batch.join(" ; ")]);
             keep_on_top(address);
         });
@@ -514,7 +404,7 @@ mod hypr {
     }
 
     pub fn set_blur(on: bool) {
-        *BLUR.lock().unwrap_or_else(|e| e.into_inner()) = on;
+        set(&BLUR, on);
         let Some(address) = ADDRESS.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
         std::thread::spawn(move || hyprctl(&["--batch", &blur(&format!("address:{address}"))]));
     }
@@ -624,8 +514,8 @@ fn opened(app: &AppHandle) {
 fn show(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(OVERLAY) {
         #[cfg(target_os = "linux")]
-        if let Some((x, y)) = (hyprland() && !LAYERED.load(Ordering::SeqCst)).then(hypr::place).flatten() {
-            *OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some((x, y));
+        if let Some((x, y)) = hyprland().then(hypr::place).flatten() {
+            set(&OVERLAY_AT, Some((x, y)));
             tell(&format!("overlay-place {x},{y}"));
         }
         let _ = w.destroy();
@@ -683,13 +573,13 @@ fn command(app: &AppHandle, line: &str) {
         }
         "overlay-size" => {
             let Some((w, h)) = rest.split_once(' ').and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))) else { return };
-            *OVERLAY_SIZE.lock().unwrap_or_else(|e| e.into_inner()) = (w, h);
+            set(&OVERLAY_SIZE, (w, h));
             size_overlay(app);
         }
         "overlay-zoom" => {
             let Ok(percent) = rest.parse::<f64>() else { return };
             let zoom = percent / 100.0;
-            *OVERLAY_ZOOM.lock().unwrap_or_else(|e| e.into_inner()) = zoom;
+            set(&OVERLAY_ZOOM, zoom);
             if let Some(w) = app.get_webview_window(OVERLAY) {
                 let _ = w.set_zoom(zoom);
             }
@@ -697,27 +587,8 @@ fn command(app: &AppHandle, line: &str) {
         }
         "overlay-blur" => {
             #[cfg(target_os = "linux")]
-            if hyprland() && !LAYERED.load(Ordering::SeqCst) {
+            if hyprland() {
                 hypr::set_blur(rest == "on");
-            }
-        }
-        // a layer moves by its margins, the page tells how far the pointer went
-        "overlay-move" => {
-            #[cfg(target_os = "linux")]
-            {
-                let Some((dx, dy)) = rest.split_once(' ').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { return };
-                let Some(w) = app.get_webview_window(OVERLAY).filter(|_| LAYERED.load(Ordering::SeqCst)) else { return };
-                let (x, y) = {
-                    let mut at = OVERLAY_AT.lock().unwrap_or_else(|e| e.into_inner());
-                    let (x, y) = at.unwrap_or((0.0, 0.0));
-                    let moved = ((x + dx).max(0.0), (y + dy).max(0.0));
-                    *at = Some(moved);
-                    moved
-                };
-                if let Ok(gw) = w.gtk_window() {
-                    layer::place(&gw, (x as i32, y as i32));
-                }
-                tell(&format!("overlay-place {x},{y}"));
             }
         }
         // while a map is played, clicks go to the game

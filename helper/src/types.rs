@@ -9,9 +9,6 @@ pub struct Config {
     pub key: Option<Key>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<Settings>,
-    // the last tosu seen running, it can be anywhere
-    #[serde(default, rename = "tosuPath", skip_serializing_if = "Option::is_none")]
-    pub tosu_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -174,7 +171,7 @@ pub struct Play {
     pub cover: Option<Cover>,
     #[serde(default)]
     pub chart_file: Option<String>,
-    // the song, where tosu said it was when the play finished: lazer keeps it under a hash
+    // the song, where the reader said it was when the play finished: lazer keeps it under a hash
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_file: Option<String>,
     #[serde(default)]

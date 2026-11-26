@@ -1,6 +1,4 @@
-// osu!'s memory, read by the hashi-reader program next to this one, in place of tosu. it's a program of
-// its own so that on linux only it needs cap_sys_ptrace, not the app with its webview. its frames go
-// to tosu.rs as tosu's websocket's did
+// osu!'s memory, read by the hashi-reader program next to this one. it's a program of its own so that on linux only it needs cap_sys_ptrace, not the app with its webview
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -19,7 +17,7 @@ const NAME: &str = if cfg!(windows) { "hashi-reader.exe" } else { "hashi-reader"
 // the one next to the app, or OSU_READER for development. an AppImage's files are in a read-only
 // mount that can't carry a capability, so from one it runs a copy in the data folder, rewritten
 // only when the app brings a different one, so the capability given to it stays
-pub(crate) fn reader_exe(data_dir: &Path) -> Option<PathBuf> {
+fn reader_exe(data_dir: &Path) -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("OSU_READER").filter(|p| !p.is_empty()) {
         return Some(p.into());
     }
@@ -83,13 +81,11 @@ pub(crate) fn start(b: &Arc<Bridge>) {
                         let mut lines = BufReader::new(out).lines();
                         while let Ok(Some(line)) = lines.next_line().await {
                             let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-                            let blocked = on_line(&b, &exe, msg);
                             // a capability only counts from a program's start, so a fresh one picks up
                             // the fix as soon as it's run
-                            let since = *blocked_since.get_or_insert_with(Instant::now);
-                            if !blocked {
+                            if !on_line(&b, &exe, msg) {
                                 blocked_since = None;
-                            } else if since.elapsed() >= RETRY_BLOCKED {
+                            } else if blocked_since.get_or_insert_with(Instant::now).elapsed() >= RETRY_BLOCKED {
                                 break;
                             }
                         }
@@ -108,15 +104,23 @@ pub(crate) fn start(b: &Arc<Bridge>) {
 }
 
 // { phase, reason, pid, frame }. true while linux keeps it out
-fn on_line(b: &Arc<Bridge>, exe: &std::path::Path, msg: Value) -> bool {
+fn on_line(b: &Arc<Bridge>, exe: &Path, msg: Value) -> bool {
     let denied = msg.get("reason").and_then(Value::as_str) == Some("access-denied");
-    let blocked = (denied && cfg!(target_os = "linux")).then(|| format!("sudo setcap cap_sys_ptrace=eip {}", tosu::shell_quote(&exe.display().to_string())));
+    let blocked = (denied && cfg!(target_os = "linux")).then(|| format!("sudo setcap cap_sys_ptrace=eip {}", shell_quote(&exe.display().to_string())));
     tosu::set_blocked(b, blocked);
     match msg.get("frame").filter(|f| f.is_object()) {
         Some(frame) => tosu::on_tosu_message(b, frame.clone()),
         None => tosu::osu_gone(b),
     }
     denied
+}
+
+// for a command that gets copied into a terminal
+fn shell_quote(s: &str) -> String {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%,=".contains(c)) {
+        return s.into();
+    }
+    format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 #[cfg(test)]
@@ -141,5 +145,12 @@ mod tests {
         copied_out(&bundled, &data).unwrap();
         assert_eq!(std::fs::read(&copy).unwrap(), b"two");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quoting() {
+        assert_eq!(shell_quote("/home/a/.local/bin/hashi-reader"), "/home/a/.local/bin/hashi-reader");
+        assert_eq!(shell_quote("/home/a/My Apps/hashi-reader"), "'/home/a/My Apps/hashi-reader'");
+        assert_eq!(shell_quote("/x/it's/$hashi-reader"), r"'/x/it'\''s/$hashi-reader'");
     }
 }

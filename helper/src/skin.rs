@@ -61,7 +61,7 @@ fn ini_name(dir: &Path) -> Option<String> {
     })
 }
 
-// with osu! closed tosu reports nothing, stable keeps its settings in osu!.<user>.cfg
+// with osu! closed the reader reports nothing, stable keeps its settings in osu!.<user>.cfg
 fn cfg_text(game: &Path) -> Option<String> {
     let cfg = std::fs::read_dir(game)
         .ok()?
@@ -270,7 +270,7 @@ pub(crate) enum GameSize {
     Screen,
 }
 
-// the size osu! draws at: lazer's framework.ini says, stable's settings come through tosu
+// the size osu! draws at: lazer's framework.ini says, stable's settings come through the reader
 pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
     let (lazer, lazer_dir, resolution, game) = {
         let s = b.st();

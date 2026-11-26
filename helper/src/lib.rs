@@ -266,8 +266,7 @@ fn regex_local(origin: &str) -> bool {
     (host == "localhost" || host == "127.0.0.1") && port_ok && !rest.contains('/')
 }
 
-// what the window wants from the helper: hide | minimize | close | drag | resize | on-top on|off |
-// overlay on|off | overlay-through on|off | overlay-blur on|off | overlay-size <w> <h> | overlay-zoom <percent>
+// what the window wants from the helper: a line like "hide", "on-top on" or "overlay-size <w> <h>"
 pub type WindowHandler = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Default)]
@@ -443,7 +442,7 @@ impl Bridge {
         })
     }
 
-    // where tosu says stable is, it can be installed anywhere
+    // where the reader says stable is, it can be installed anywhere
     pub(crate) fn replay_dir(&self) -> PathBuf {
         self.st().tosu.stable_dirs.as_ref().map(|(game, _)| game.join("Data").join("r")).unwrap_or_else(|| self.env.replay_dir.clone())
     }
@@ -718,7 +717,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
     let old = env.old_data_dirs.iter().find(|d| d.exists()).cloned();
     if let Some(old) = old.filter(|_| !env.data_dir.exists()) {
         if let Err(e) = tokio::fs::rename(&old, &env.data_dir).await {
-            // windows won't move it while something in it is open, e.g. a tosu it downloaded. next start tries again
+            // windows won't move it while something in it is open, e.g. a tosu an older version downloaded. next start tries again
             not_moved = Some(format!("could not move {} to {}: {e}", old.display(), env.data_dir.display()));
             env = env.with_data_dir(old);
         }

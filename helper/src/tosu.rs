@@ -4,12 +4,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::types::{truthy, Binding, Cover, Item, Play};
+use crate::types::{Binding, Cover, Item, Play};
 use crate::{iso_now, log, now_ms, replays, Bridge, AUTOMATED_MODS};
 
 // lazer showed song select for ~300ms between a score's results and its replay
 const FROM_RESULTS_MS: i64 = 3000;
-const SCORE_DATE_SLACK_MS: i64 = 60_000;
 // song time this far before a finished play's last note means a new attempt or song select's preview
 const RESTART_GAP_MS: f64 = 5000.0;
 
@@ -26,12 +25,9 @@ pub(crate) struct Beatmap {
 #[derive(Clone)]
 pub(crate) struct LastPlay {
     client: String,
-    mode: Value,
-    // play.mode and resultsScreen.mode can say osu on a mania map, beatmap.mode doesn't
     beatmap_mode: Value,
     mods: Value,
-    player_name: Value,
-    // "playing", or someone else's play / a replay, which aren't sent
+    // "playing" or "watching_replay"
     whose: &'static str,
     beatmap: Beatmap,
     // lazer gives paths relative to files/, by hash
@@ -39,10 +35,8 @@ pub(crate) struct LastPlay {
     audio_file: Option<String>,
     // relative to Songs (or files/ on lazer), for the cover in the ui
     cover: Option<Cover>,
-    // past the last note and not failed: quitting partway saves no score
+    // past the last note: quitting partway saves no score
     completed: bool,
-    // whose says watching_replay only from where it started, a new score's date overrules that
-    from_results: bool,
     started_at: i64,
     // the play's accuracy by column and hand so far
     live: Option<Value>,
@@ -55,7 +49,6 @@ pub(crate) struct PendingFinish {
     stale: Option<String>,
 }
 
-// tosu keeps the socket open without osu!, it just stops sending
 // blocked: { fix } when osu! runs but linux won't let hashi-reader read it
 pub(crate) struct TosuState {
     pub connected: bool,
@@ -76,7 +69,7 @@ pub(crate) struct TosuState {
     pub stable_dirs: Option<(PathBuf, PathBuf)>,
     // the skin's folder name, stable's
     pub skin: Option<String>,
-    // as tosu last reported them, a wine drive other than Z: is looked up on disk
+    // as the reader last reported them, a wine drive other than Z: is looked up on disk
     stable_folders: Option<(String, String)>,
     pub last_frame_at: i64,
     pub last_frame: Option<Value>,
@@ -85,7 +78,7 @@ pub(crate) struct TosuState {
     last_result_shown: Option<String>,
     viewed_result: Option<String>,
     // the results up are from a play finished here, a retry starts from those. not by result_key,
-    // what tosu reads for them can change while they're up
+    // what's read for them can change while they're up
     own_results: bool,
     // started from the results of some other score: stable's local scores open there first
     pub replay: bool,
@@ -157,7 +150,7 @@ impl TosuState {
     }
 }
 
-// a path tosu sees. stable runs under wine on linux, where only Z: is the real filesystem
+// a path as osu! sees it. stable runs under wine on linux, where only Z: is the real filesystem
 fn local_path(p: &str) -> Option<PathBuf> {
     if p.is_empty() {
         return None;
@@ -168,7 +161,7 @@ fn local_path(p: &str) -> Option<PathBuf> {
     wine_path(p, &wine_prefixes())
 }
 
-// osu!.cfg's BeatmapDirectory can be relative to the game folder, and tosu passes that on as is
+// osu!.cfg's BeatmapDirectory can be relative to the game folder, and the reader passes that on as is
 fn songs_path(game: &Path, p: &str) -> Option<PathBuf> {
     if p.is_empty() {
         return None;
@@ -193,7 +186,7 @@ fn wine_path(p: &str, prefixes: &[PathBuf]) -> Option<PathBuf> {
     prefixes.iter().map(|w| w.join("dosdevices").join(format!("{drive}:")).join(&rest)).find(|f| f.exists())
 }
 
-// tosu runs in osu!'s prefix, which isn't ours to ask about
+// osu! runs in a prefix that isn't ours to ask about
 fn wine_prefixes() -> Vec<PathBuf> {
     let home = crate::home();
     let data = crate::var("XDG_DATA_HOME").map(PathBuf::from).unwrap_or(home.join(".local").join("share"));
@@ -220,16 +213,11 @@ fn is_mania(mode: &Value) -> bool {
 }
 
 fn result_key(rs: &Value) -> String {
-    let g = |k: &str| rs.get(k).cloned().unwrap_or(Value::Null);
-    json!([g("createdAt"), g("score"), g("hits"), g("playerName")]).to_string()
+    rs.get("hits").unwrap_or(&Value::Null).to_string()
 }
 
-// tosu filled in who and when, the reader only the judgements
 fn populated(rs: &Value) -> bool {
     rs.get("hits").and_then(Value::as_object).is_some_and(|h| h.values().any(|n| n.as_u64().is_some_and(|n| n > 0)))
-        || rs.get("playerName").is_some_and(|v| !v.is_null())
-        || rs.get("createdAt").is_some_and(|v| !v.is_null())
-        || rs.get("score").and_then(Value::as_f64).is_some_and(|s| s > 0.0)
 }
 
 fn str_of(v: Option<&Value>) -> Option<String> {
@@ -323,7 +311,6 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
     let mut finished = None;
     {
         let mut s = b.st();
-        let account = s.config.connection.as_ref().map(|c| crate::types::text(&c.username));
         let live = live_accuracy(&raw, s.config.settings.as_ref());
         let t = &mut s.tosu;
         t.last_frame_at = now_ms();
@@ -401,11 +388,10 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             let bm = raw.get("beatmap").unwrap_or(&null);
             let g = |v: &Value, k: &str| v.get(k).cloned().unwrap_or(Value::Null);
             let files = raw.get("files").unwrap_or(&null);
-            let background = str_of(files.get("background")).filter(|x| !x.is_empty());
             let at = |k: &str| bm.pointer(&format!("/time/{k}")).and_then(Value::as_f64).unwrap_or(0.0);
             let at_start = at("live") <= at("firstObject");
             t.saw_start |= at_start;
-            // where tosu said it was, lazer's by hash under files/
+            // where the reader said it was, lazer's by hash under files/
             let map_file = |k: &str| match (str_of(files.get(k)).filter(|x| !x.is_empty()), client == "lazer") {
                 (Some(f), true) => Some(t.lazer_files_dir.join(f).to_string_lossy().into_owned()),
                 (Some(f), false) => match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), &t.stable_dirs) {
@@ -416,15 +402,9 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             };
             let play = LastPlay {
                 client: client.into(),
-                mode: raw.pointer("/play/mode").cloned().unwrap_or(Value::Null),
                 beatmap_mode: g(bm, "mode"),
                 mods: raw.pointer("/play/mods").cloned().unwrap_or(Value::Null),
-                player_name: raw.pointer("/play/playerName").cloned().unwrap_or(Value::Null),
-                whose: match raw.pointer("/play/playerName").and_then(Value::as_str).filter(|x| !x.is_empty()) {
-                    _ if t.replay || raw.get("replay").and_then(Value::as_bool) == Some(true) => "watching_replay",
-                    Some(who) => crate::presence::whose_play(&raw, who, account.as_deref()),
-                    None => "playing",
-                },
+                whose: if t.replay || raw.get("replay").and_then(Value::as_bool) == Some(true) { "watching_replay" } else { "playing" },
                 beatmap: Beatmap {
                     md5: str_of(bm.get("checksum")).map(|c| c.to_lowercase()),
                     artist: g(bm, "artist"),
@@ -440,19 +420,8 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                 },
                 chart_file: map_file("beatmap"),
                 audio_file: map_file("audio"),
-                cover: if client == "lazer" {
-                    background.map(|file| Cover { lazer: Some(true), folder: None, file })
-                } else {
-                    match (str_of(raw.pointer("/folders/beatmap")).filter(|x| !x.is_empty()), background) {
-                        (Some(folder), Some(file)) => Some(Cover { lazer: None, folder: Some(folder), file }),
-                        _ => None,
-                    }
-                },
-                completed: at("lastObject") > 0.0
-                    && at("live") >= at("lastObject")
-                    && raw.pointer("/play/failed").and_then(Value::as_bool) != Some(true)
-                    && (t.saw_start || client != "lazer"),
-                from_results: t.replay,
+                cover: map_cover(&raw, client),
+                completed: at("lastObject") > 0.0 && at("live") >= at("lastObject") && (t.saw_start || client != "lazer"),
                 started_at: t.play_started_at,
                 // the most judged so far: a play's end can reset the reader's counts on its last frames
                 live: {
@@ -476,8 +445,8 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             }
         }
 
-        // multiplayer results aren't resultScreen: stable has its own ranking screens, and to tosu
-        // lazer goes straight back to the room (or the playlist)
+        // multiplayer results aren't resultScreen: stable has its own ranking screens, and to the
+        // reader lazer goes straight back to the room (or the playlist)
         let room_results = if client == "lazer" {
             !["play", "resultScreen"].contains(&state.as_str())
         } else {
@@ -525,22 +494,12 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
     let PendingFinish { play, viewed, stale, .. } = finish;
     let bm = &play.beatmap;
     let label = format!("{} - {} [{}]", crate::types::text(&bm.artist), crate::types::text(&bm.title), crate::types::text(&bm.version));
-    // a replay's results keep the date of the play it recorded
-    let new_score = rs
-        .as_ref()
-        .and_then(|r| r.get("createdAt"))
-        .and_then(Value::as_str)
-        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-        .map(|at| at.timestamp_millis() >= play.started_at - SCORE_DATE_SLACK_MS);
-    if new_score == Some(false) {
-        return log!("skip (watched replay, an older score): {label}");
-    }
     // the reader tells a replay by its results: lazer's ReplayPlayer, stable's name that isn't this computer's
     if rs.as_ref().and_then(|r| r.get("replay")).and_then(Value::as_bool) == Some(true) {
         return log!("skip (watched replay): {label}");
     }
-    if play.whose != "playing" && !(play.from_results && new_score == Some(true)) {
-        return log!("skip ({}, {}): {label}", play.whose.replace('_', " "), crate::types::text(&play.player_name));
+    if play.whose != "playing" {
+        return log!("skip ({}): {label}", play.whose.replace('_', " "));
     }
     // same results as before = watched the replay
     if rs.is_none() && viewed.is_some() && viewed == stale {
@@ -549,7 +508,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
     let rs = rs.unwrap_or(json!({}));
     let g = |k: &str| rs.get(k).cloned().unwrap_or(Value::Null);
     // the .osr header decides for real before anything is sent
-    if ![g("mode"), play.mode.clone(), play.beatmap_mode.clone()].iter().any(is_mania) {
+    if !is_mania(&play.beatmap_mode) {
         return log!("skip (not mania): {label}");
     }
     let mods = rs.get("mods").filter(|m| !m.is_null()).cloned().unwrap_or(play.mods.clone());
@@ -557,9 +516,8 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
         return log!("skip (automated mods {}): {label}", mods_name(&mods));
     }
     let Some(md5) = bm.md5.clone() else {
-        return log!("skip (tosu gave no beatmap checksum): {label}");
+        return log!("skip (no beatmap checksum): {label}");
     };
-    let created = g("createdAt");
     let practice = crate::practice::is_practice(b, &md5, &crate::types::text(&bm.version));
 
     let item = {
@@ -569,11 +527,6 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             drop(s);
             return log!("skip (sending plays is off): {label}");
         }
-        // watch replay right after playing
-        if truthy(&created) && s.queue.items.iter().any(|i| i.play.beatmap_md5 == md5 && i.play.result_created_at == created) {
-            drop(s);
-            return log!("skip (results already captured): {label}");
-        }
         let status = s.connection.status.clone();
         let binding = s.config.connection.as_ref().filter(|c| c.refresh_token.is_some() && ["connected", "offline", "not_in_beta"].contains(&status.as_str())).map(|c| Binding {
             issuer: c.issuer.clone(),
@@ -581,7 +534,6 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             user_id: c.user_id.clone(),
             installation_id: c.installation_id.clone(),
         });
-        let or = |v: Value, w: Value| if v.is_null() { w } else { v };
         let item = Item {
             id: format!("cbt-{}", uuid::Uuid::new_v4()),
             session_id: b.session_id.clone(),
@@ -601,10 +553,10 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
                 audio_file: play.audio_file.clone(),
                 mods: mods_name(&mods),
                 rate: None,
-                player_name: or(g("playerName"), play.player_name.clone()),
-                score: g("score"),
+                player_name: Value::Null,
+                score: Value::Null,
                 accuracy: g("accuracy"),
-                result_created_at: created,
+                result_created_at: Value::Null,
             },
             phase: "waiting_replay".into(),
             replay: None,
@@ -678,6 +630,7 @@ pub(crate) fn set_blocked(b: &Arc<Bridge>, blocked: Option<String>) {
     }
 }
 
+// the reader says something at least once a second, a quiet one is stuck
 pub(crate) fn watch_osu_frames(b: &Arc<Bridge>) {
     let b2 = b.clone();
     b.spawn(async move {
@@ -695,17 +648,8 @@ pub(crate) fn watch_osu_frames(b: &Arc<Bridge>) {
             if stopped {
                 b2.broadcast();
             }
-
         }
     });
-}
-
-// for a command that gets copied into a terminal
-pub(crate) fn shell_quote(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@%,=".contains(c)) {
-        return s.into();
-    }
-    format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 #[cfg(test)]
@@ -771,19 +715,11 @@ mod tests {
         assert_eq!(super::songs_path(game, ""), None);
     }
 
-    #[test]
-    fn quoting() {
-        assert_eq!(super::shell_quote("/home/a/.local/bin/tosu"), "/home/a/.local/bin/tosu");
-        assert_eq!(super::shell_quote("/home/a/My Apps/tosu"), "'/home/a/My Apps/tosu'");
-        assert_eq!(super::shell_quote("/x/it's/$tosu"), r"'/x/it'\''s/$tosu'");
-    }
-
     fn frame(client: &str, state: &str, live: f64) -> Value {
         json!({
             "client": client,
             "state": { "name": state },
-            "profile": { "name": "someone", "userStatus": { "name": "online" } },
-            "play": { "playerName": "someone", "mode": { "number": 3 }, "mods": { "number": 0, "name": "" }, "failed": false },
+            "play": { "mods": { "number": 0, "name": "" } },
             "beatmap": {
                 "checksum": "0123456789abcdef0123456789abcdef",
                 "mode": { "number": 3 },

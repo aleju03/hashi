@@ -456,18 +456,19 @@ impl<'a> Builder<'a> {
             });
             let tap_color = p.tap_colors.get(col).copied().flatten().unwrap_or(p.tap_color);
             let paint = |asset: Option<&Asset>| image(asset).and_then(|t| t.paint_color());
+            let tail = a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref());
             let paint_colors = [
                 paint(a.tap.as_ref()).or(Some(tap_color)),
                 paint(a.head.as_ref()),
                 paint(a.body.as_ref()),
-                paint(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref())),
+                paint(tail),
             ];
             columns.push(Column {
                 x,
                 w,
                 tap: self.frames(a.tap.as_ref(), false),
                 head: self.frames(a.head.as_ref(), false),
-                tail: self.frames(a.tail.as_ref().or(a.head.as_ref()).or(a.tap.as_ref()), true),
+                tail: self.frames(tail, true),
                 body,
                 tap_color,
                 paint_colors,

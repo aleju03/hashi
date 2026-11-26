@@ -73,7 +73,7 @@ fn scan_replay_dir(b: &Arc<Bridge>, initial: bool) {
     // a new file bumps the folder's mtime. a second one in the same tick wouldn't, so a fresh
     // mtime gets looked at again
     let path = b.replay_dir();
-    // once tosu says where stable is, what's already in there is old
+    // once the reader says where stable is, what's already in there is old
     let initial = {
         let mut s = b.st();
         let moved = s.replays.dir.as_ref() != Some(&path);
@@ -341,7 +341,7 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
     chart.source = Some(chart_file.to_string_lossy().into_owned());
     log!("chart {} matched", chart_file.file_name().unwrap_or_default().to_string_lossy());
 
-    // tosu's mods can be off, a lazer play's speed is only in the replay
+    // the reader's mods can be off, a lazer play's speed is only in the replay
     let mods = osr::parse_replay(&bytes).ok().map(|r| crate::analysis::replay_mods(&r, lazer));
     update(b, id, |i| {
         i.replay = Some(replay);
@@ -381,7 +381,7 @@ fn update(b: &Arc<Bridge>, id: &str, f: impl FnOnce(&mut Item)) {
     }
 }
 
-// tosu's path first, then the set folder, then everything. md5s cached by size+mtime
+// the reader's path first, then the set folder, then everything. md5s cached by size+mtime
 async fn find_chart(b: &Arc<Bridge>, md5: &str, hint: Option<PathBuf>, set: Option<i64>, title: Option<String>) -> Result<Option<PathBuf>, String> {
     let cached = b.st().chart_index.take();
     let index = match cached {
@@ -672,7 +672,7 @@ mod tests {
         }
         let md5 = md5_hex(b"the chart");
         let want = songs.join("odd name").join("x.osu");
-        // tosu's path, the folder name doesn't matter
+        // the reader's path, the folder name doesn't matter
         let (found, index, _) = search_songs(&songs, &md5, Some(want.clone()), Some(1), Some("Pack".into()), Default::default()).unwrap();
         assert_eq!(found.as_ref(), Some(&want));
         assert_eq!(index.len(), 1);

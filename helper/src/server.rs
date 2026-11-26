@@ -387,20 +387,19 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             return empty(if state.is_some_and(|s| crate::skin::set_live(b, &s)) { 204 } else { 400 });
         }
         // overlay/on|off, overlay-through/on|off (clicks go to the game), overlay-blur/on|off,
-        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>, overlay-move/<dx>,<dy> for a layer
+        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>
         if let Some((what, value)) = path.strip_prefix("/window/").and_then(|p| p.split_once('/')).filter(|(w, _)| w.starts_with("overlay")) {
             let px = |n: &str, max: u16| n.parse::<u16>().ok().filter(|n| (1..=max).contains(n));
             let ok = match what {
                 "overlay" | "overlay-through" | "overlay-blur" => matches!(value, "on" | "off"),
                 "overlay-size" => value.split_once('x').is_some_and(|(w, h)| px(w, 4000).is_some() && px(h, 4000).is_some()),
                 "overlay-zoom" => px(value, 400).is_some_and(|z| z >= 50),
-                "overlay-move" => value.split_once(',').is_some_and(|(x, y)| [x, y].iter().all(|n| n.parse::<i32>().is_ok_and(|n| n.abs() <= 4000))),
                 _ => false,
             };
             if !ok {
                 return empty(400);
             }
-            b.window_action(&format!("{what} {}", value.replace(['x', ','], " ")));
+            b.window_action(&format!("{what} {}", value.replace('x', " ")));
             return empty(204);
         }
         if let Some(name) = path.strip_prefix("/window/") {
