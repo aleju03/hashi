@@ -414,8 +414,15 @@ pub(crate) fn on_frame(b: &Arc<Bridge>, raw: Value) {
             let play = LastPlay {
                 client: client.into(),
                 beatmap_mode: g(bm, "mode"),
-                mods: raw.pointer("/play/mods").cloned().unwrap_or(Value::Null),
-                whose: if t.replay || raw.get("replay").and_then(Value::as_bool) == Some(true) { "watching_replay" } else { "playing" },
+                // a play's mods can't change. stable's last frames can read its score as it's
+                // taken down, so they're the first ones read; lazer's settings can come a moment later
+                mods: t
+                    .last_play
+                    .as_ref()
+                    .filter(|p| client == "stable" && p.started_at == t.play_started_at && !p.mods.is_null())
+                    .map(|p| p.mods.clone())
+                    .unwrap_or_else(|| raw.pointer("/play/mods").cloned().unwrap_or(Value::Null)),
+                whose: if t.replay || raw.pointer("/play/replay").and_then(Value::as_bool) == Some(true) { "watching_replay" } else { "playing" },
                 beatmap: Beatmap {
                     md5: str_of(bm.get("checksum")).map(|c| c.to_lowercase()),
                     artist: g(bm, "artist"),
