@@ -236,22 +236,27 @@ const badArt = new Set();
 // the badges' fine hatching turns to a moire pattern when drawn straight at this size, so each is
 // drawn at four times its size and halved twice, smoothing it, then kept and copied where it shows
 const fineArts = new Map();
+// how much larger than its CSS size the page is drawn, the overlay's zoom on top of the screen's.
+// in quarter steps, so dragging the overlay's size doesn't redraw every badge at every step
+let artZoom = 1;
+const artScale = () => Math.ceil((devicePixelRatio || 1) * artZoom * 4) / 4;
 
 function fineArt(at) {
-  const key = `${at.src}@${at.h}@${devicePixelRatio}`;
+  const scale = artScale();
+  const key = `${at.src}@${at.h}@${scale}`;
   const got = fineArts.get(key);
   if (got !== undefined) return got;
   fineArts.set(key, null);
-  drawFine(at).then((c) => { fineArts.set(key, c); render(); }, () => {});
+  drawFine(at, scale).then((c) => { fineArts.set(key, c); render(); }, () => {});
   return null;
 }
 
-async function drawFine(at) {
+async function drawFine(at, scale) {
   const img = new Image();
   img.src = at.src;
   await img.decode();
   const cssWidth = Math.round((at.h * img.naturalWidth) / img.naturalHeight);
-  const [w, h] = [Math.round(cssWidth * devicePixelRatio), Math.round(at.h * devicePixelRatio)];
+  const [w, h] = [Math.round(cssWidth * scale), Math.round(at.h * scale)];
   let c = document.createElement("canvas");
   [c.width, c.height] = [w * 4, h * 4];
   c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
@@ -271,8 +276,9 @@ async function drawFine(at) {
 function drawnBadges(data) {
   const ats = [data.dan, data.other].filter(Boolean).map((x) => danLayout(x, data.keys)).filter(Boolean);
   return Promise.all(ats.map(async (at) => {
-    const key = `${at.src}@${at.h}@${devicePixelRatio}`;
-    if (!fineArts.get(key)) fineArts.set(key, await drawFine(at).catch(() => null));
+    const scale = artScale();
+    const key = `${at.src}@${at.h}@${scale}`;
+    if (!fineArts.get(key)) fineArts.set(key, await drawFine(at, scale).catch(() => null));
   }));
 }
 

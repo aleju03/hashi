@@ -353,6 +353,7 @@ function drawOverlay() {
   if (STREAM) document.documentElement.classList.add("overlay-stream");
   // a redraw mid-drag would drop the slider under the pointer
   if (ov.holding) return;
+  artZoom = STREAM ? innerWidth / OV_WIDTH : ov.set.zoom / 100;
   const card = overlayCard();
   if (app.firstChild !== card) app.replaceChildren(card);
   if (STREAM) card.style.zoom = innerWidth / OV_WIDTH;
