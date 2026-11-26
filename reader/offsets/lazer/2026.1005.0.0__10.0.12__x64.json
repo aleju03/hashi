@@ -122,6 +122,9 @@
     },
     "osu.Game.Screens.OsuScreenStack": {
       "stack": 800
+    },
+    "osu.Game.Screens.OnlinePlay.OnlinePlayScreen": {
+      "screenStack": 0
     }
   },
   "runtime": {

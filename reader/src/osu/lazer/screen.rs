@@ -1,6 +1,6 @@
 use crate::osu::model::OBSERVED_STATE_NAMES;
 use crate::osu::offsets::{LookupError, OffsetTable};
-use super::fields::{screen_state_for, GAME_TYPE_ANY, SCREEN_STACK_MAX};
+use super::fields::{screen_state_for, GAME_TYPE_ANY, ONLINE_PLAY_SCREEN, ONLINE_PLAY_SCREENS, SCREEN_STACK_MAX};
 use super::resolve::plausible_ptr;
 use super::source::{field_addr, read_i32, read_ptr_field, read_u32, read_u64, Source};
 use super::types::{ChainAddrs, Resolved};
@@ -230,7 +230,27 @@ pub fn read_screen_state(
     chain.screen_top_vtable = Some(read.method_table);
     chain.screen_top_module = Some(read.module);
     chain.screen_top_image_base = Some(read.image_base);
-    let type_name = read.type_name.clone().unwrap_or_default();
+    let mut type_name = read.type_name.clone().unwrap_or_default();
+    if ONLINE_PLAY_SCREENS.contains(&type_name.as_str()) {
+        let inner = (|| {
+            let offset = table.offset(ONLINE_PLAY_SCREEN, "screenStack").filter(|o| *o > 0)?;
+            let sub = read_ptr_field(source, element, offset)?;
+            let list = read_ptr_field(source, sub, list_offset)?;
+            let array = read_ptr_field(source, list, array_offset)?;
+            let size = read_i32(source, field_addr(list, size_offset)?)?;
+            if size <= 0 || size > SCREEN_STACK_MAX {
+                return None;
+            }
+            let top = read_u64(source, field_addr(array, array_entry.offset + (size as i64 - 1).saturating_mul(stride))?)?;
+            plausible_ptr(top).then_some(top)
+        })();
+        if let Some(top) = inner {
+            if let Ok(read) = read_eetype(source, table, top, modules) {
+                chain.screen_top = Some(top);
+                type_name = read.type_name.unwrap_or_default();
+            }
+        }
+    }
     let mapped_state = table
         .screen_state_for(&type_name)
         .or_else(|| screen_state_for(&type_name));

@@ -40,11 +40,19 @@ pub const SCREEN_STATE_MAP: &[(&str, &str)] = &[
     ("osu.Game.Screens.Play.SoloPlayer", "play"),
     ("osu.Game.Screens.Play.ReplayPlayer", "play"),
     ("osu.Game.Screens.Play.PlayerLoader", "play"),
+    // a room's player is on the room's own screen stack, see ONLINE_PLAY_SCREENS
+    ("osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayer", "play"),
+    ("osu.Game.Screens.OnlinePlay.Multiplayer.MultiplayerPlayerLoader", "play"),
+    ("osu.Game.Screens.OnlinePlay.Playlists.PlaylistsPlayer", "play"),
     ("osu.Game.Screens.Ranking.ResultsScreen", "resultScreen"),
     ("osu.Game.Screens.Ranking.SoloResultsScreen", "resultScreen"),
     ("osu.Game.Screens.Edit.Editor", "edit"),
     ("osu.Game.Screens.Edit.EditorLoader", "selectEdit"),
 ];
+
+// multiplayer and playlists keep their screens on a stack of their own
+pub const ONLINE_PLAY_SCREENS: &[&str] = &["osu.Game.Screens.OnlinePlay.Multiplayer.Multiplayer", "osu.Game.Screens.OnlinePlay.Playlists.Playlists"];
+pub const ONLINE_PLAY_SCREEN: &str = "osu.Game.Screens.OnlinePlay.OnlinePlayScreen";
 
 pub fn screen_state_for(type_name: &str) -> Option<&'static str> {
     SCREEN_STATE_MAP
