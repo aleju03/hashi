@@ -108,7 +108,7 @@ button {
   color: var(--osu-f1);
 }
 
-.me::after,
+.home > .me::after,
 .play + .play::before,
 .setting::before,
 .settings .about::before,
