@@ -2,15 +2,20 @@
 // OBS browser source, set up by its link, never touching the window, scaled to the source's width
 const OVERLAY = new URLSearchParams(location.search).has("overlay");
 const STREAM = new URLSearchParams(location.search).get("overlay") === "stream";
-// a wayland layer: the compositor can't move or resize it, the page does through the app
-const LAYER = new URLSearchParams(location.search).has("layer");
 const PIP = `<rect x=".5" y="1.5" width="9" height="7" rx="1"/><rect x="5" y="5" width="3" height="2" fill="currentColor" stroke="none"/>`;
 const DISC = `<circle cx="5" cy="5" r="4.5"/><circle cx="5" cy="5" r="1.3"/>`;
 const GRIP = `<path d="M9.5 4.5l-5 5M9.5 7.5l-2 2" stroke-linecap="round"/>`;
 const OV_KEY = "hashi-overlay";
 // the card is laid out this wide, and made bigger or smaller as a whole
 const OV_WIDTH = 340;
+// .ov-standing's height in overlay.css
 const OV_ROW_PX = 30;
+// below this the card is mostly see-through: nothing blurred behind it, a shadow under the text instead
+const OV_THIN_SEE = 45;
+const OV_ZOOM_RANGE = [60, 300];
+const OV_ROWS_RANGE = [3, 30];
+const OV_PLAYING = [["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]];
+const OV_ROWS = [[5, "5"], [8, "8"], [10, "10"], [15, "15"]];
 // a play stays up front this long after it's done
 const OV_FRESH_MS = 3 * 60_000;
 
@@ -27,10 +32,9 @@ function streamSettings() {
     view: q.get("view") === "board" ? "board" : "now",
     see: num("bg", 0, 100),
     art: num("art", 0, 1) === 1,
-    playing: ["show", "fade", "hide"].includes(q.get("playing")) ? q.get("playing") : STREAM_DEFAULTS.playing,
-    rows: Math.round(num("rows", 3, 30)),
+    playing: OV_PLAYING.some(([k]) => k === q.get("playing")) ? q.get("playing") : STREAM_DEFAULTS.playing,
+    rows: Math.round(num("rows", ...OV_ROWS_RANGE)),
     live: num("live", 0, 1) === 1,
-    zoom: 100,
   };
 }
 
@@ -60,7 +64,7 @@ function overlayButton() {
   return el("button", { class: "overlay-go", title: "Overlay mode", onclick: () => windowAction("overlay/on") }, icon(PIP));
 }
 
-function ovSave(change) {
+function ovSave(change = () => {}) {
   change(ov.set);
   if (!STREAM) store(OV_KEY, ov.set);
   render();
@@ -105,7 +109,7 @@ const ovFresh = (p) => p && (playStatus(p).kind === "spin" || Date.now() - new D
 // the play just passed, up front: how it went, then where it landed once Mania Tracker has it
 function ovResult(p, map) {
   const status = playStatus(p);
-  const acc = typeof p.play.accuracy === "number" && p.play.accuracy > 0 ? `${accText(p.play.accuracy)}%` : null;
+  const acc = playAcc(p.play);
   const mods = modList(p.play.mods);
   const r = p.rating;
   const elsewhere = !map || map.md5 !== p.md5;
@@ -128,7 +132,7 @@ function ovResult(p, map) {
 
 function ovLast(p) {
   const status = playStatus(p);
-  const acc = typeof p.play.accuracy === "number" && p.play.accuracy > 0 ? `${accText(p.play.accuracy)}%` : null;
+  const acc = playAcc(p.play);
   const mods = modList(p.play.mods);
   return el("div", { class: "ov-last" },
     el("span", { class: "label" }, "Last"),
@@ -140,7 +144,6 @@ function ovLast(p) {
 
 const FINGER_SHORT = { thumb: "th", index: "ix", middle: "md", ring: "rg", pinky: "pk" };
 
-// the play so far: each hand, then each column with the hands apart
 function ovLive(live) {
   const hand = (side, title) => el("span", { class: "hand" },
     el("span", { class: "label" }, title),
@@ -166,7 +169,7 @@ function ovNow(map) {
   const fresh = !playing && ovFresh(last);
   const live = playing && ov.set.live && snapshot.tosu.live;
   return [
-    map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.tosu.osu ? "Select a mania map in osu!" : "Open osu! to see your map here."),
+    map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.tosu.osu ? "Select a mania map in osu! to see it here." : "Open osu! to see your map here."),
     live ? ovLive(live) : fresh ? ovResult(last, map) : last && !playing && ovLast(last),
   ];
 }
@@ -184,7 +187,7 @@ function ovStanding(e, mine) {
 
 function ovBoard(map) {
   if (!map) return el("p", { class: "ov-empty" }, "Select a mania map in osu! to see its leaderboard.");
-  if (!board || boardKey(board) !== boardKey(map)) openBoard(map, true);
+  if (!board || boardKey(board) !== boardKey(map)) setBoard(map, true);
   else boardChanged();
   const { data } = board;
   const head = el("div", { class: "ov-board-head" },
@@ -200,9 +203,17 @@ function ovBoard(map) {
     const room = Math.max(1, ov.set.rows - (data.self && mine < 0 ? 1 : 0));
     const last = Math.max(0, data.entries.length - room);
     board.from = Math.max(0, Math.min(board.from, last));
+    // a row per row's height of wheel, so a trackpad's small steps add up
     const wheel = (e) => {
       e.preventDefault();
-      board.from = Math.max(0, Math.min(board.from + Math.sign(e.deltaY), last));
+      if (!e.deltaY) return;
+      if (Math.sign(e.deltaY) !== Math.sign(board.wheel)) board.wheel = 0;
+      board.wheel += e.deltaY;
+      const rows = Math.trunc(board.wheel / OV_ROW_PX);
+      board.wheel -= rows * OV_ROW_PX;
+      const to = Math.max(0, Math.min(board.from + rows, last));
+      if (to === board.from) return;
+      board.from = to;
       render();
     };
     body = el("ol", { class: "ov-standings", onwheel: wheel },
@@ -224,24 +235,15 @@ function ovSettings() {
       e.target.style.setProperty("--at", `${s.see}%`);
       document.querySelector(".ov")?.style.setProperty("--see", s.see / 100);
     },
-    onchange: () => ovSave(() => {}),
+    onchange: () => ovSave(),
   });
   return el("div", { class: "ov-settings" },
     row("Background", see),
-    row("Status line", el("button", {
-      class: `switch${s.status ? " on" : ""}`, role: "switch", "aria-checked": String(s.status), "aria-label": "Status line",
-      onclick: () => ovSave((x) => (x.status = !x.status)),
-    }, el("i"))),
-    row("Map art", el("button", {
-      class: `switch${s.art ? " on" : ""}`, role: "switch", "aria-checked": String(s.art), "aria-label": "Map art",
-      onclick: () => ovSave((x) => (x.art = !x.art)),
-    }, el("i"))),
-    row("While playing", segs([["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]], s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
-    row("Live accuracy", el("button", {
-      class: `switch${s.live ? " on" : ""}`, role: "switch", "aria-checked": String(s.live), "aria-label": "Live accuracy",
-      onclick: () => ovSave((x) => (x.live = !x.live)),
-    }, el("i"))),
-    row("Leaderboard rows", segs([[5, "5"], [8, "8"], [10, "10"], [15, "15"]], s.rows, (r) => ovSave((x) => (x.rows = r)), "Leaderboard rows")),
+    row("Status line", switchButton(s.status, "Status line", () => ovSave((x) => (x.status = !x.status)))),
+    row("Map art", switchButton(s.art, "Map art", () => ovSave((x) => (x.art = !x.art)))),
+    row("While playing", segs(OV_PLAYING, s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
+    row("Live accuracy", switchButton(s.live, "Live accuracy", () => ovSave((x) => (x.live = !x.live)))),
+    row("Leaderboard rows", segs(OV_ROWS, s.rows, (r) => ovSave((x) => (x.rows = r)), "Leaderboard rows")),
     el("p", { class: "ov-hint" }, "Drag the corner to make it bigger or smaller."),
     el("button", { class: "link", onclick: () => ((ov.open = false), render()) }, "Done"));
 }
@@ -272,8 +274,7 @@ function ovShell() {
     // the whole card moves it, as a title bar would
     onmousedown: (e) => {
       if (STREAM || e.button !== 0 || e.target.closest("button, a, input")) return;
-      if (LAYER) layerDrag(e, "move");
-      else windowAction("drag");
+      windowAction("drag");
     },
   });
   return ov.card;
@@ -295,7 +296,7 @@ function overlayCard() {
   const playing = ovPlaying();
   // on stream, nothing at all rather than a card saying there's nothing
   const empty = STREAM && (view === "board" ? !map : !map && !(ovFresh(snapshot.plays[0]) && !playing));
-  card.className = `ov view-${view}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < 45 ? " thin" : ""}${empty ? " empty" : ""}${ov.set.status || ov.open ? "" : " quiet"}${card.classList.contains("flash") ? " flash" : ""}`;
+  card.className = `ov view-${view}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < OV_THIN_SEE ? " thin" : ""}${empty ? " empty" : ""}${ov.set.status || ov.open ? "" : " quiet"}${card.classList.contains("flash") ? " flash" : ""}`;
   card.style.setProperty("--see", ov.set.see / 100);
   if (art) card.style.setProperty("--art", `url("${art}")`);
   else card.style.removeProperty("--art");
@@ -313,18 +314,13 @@ function overlayCard() {
       class: "grip",
       title: "Resize",
       "aria-label": "Resize",
-      onmousedown: (e) => {
-        if (e.button !== 0) return;
-        if (LAYER) layerDrag(e, "scale");
-        else windowAction("resize");
-      },
+      onmousedown: (e) => e.button === 0 && windowAction("resize"),
     }, icon(GRIP))];
   card.replaceChildren(...parts.flat(Infinity).filter((c) => c != null && c !== false));
   return card;
 }
 
-// the window takes the card's size at its scale: as tall as what it shows, the leaderboard as many
-// rows as it was dragged to
+// the window is sized to the card at its zoom, as tall as what it shows
 function ovFit(card) {
   const s = ov.set;
   if (ov.dragging) return;
@@ -340,7 +336,7 @@ function ovFit(card) {
     ov.askedAt = Date.now();
     windowAction(`overlay-size/${size}`);
   }
-  const blur = s.see >= 45;
+  const blur = s.see >= OV_THIN_SEE;
   if (blur !== ov.sent.blur) {
     ov.sent.blur = blur;
     windowAction(`overlay-blur/${blur ? "on" : "off"}`);
@@ -354,7 +350,7 @@ function ovFit(card) {
 
 function drawOverlay() {
   document.documentElement.classList.add("alone", "overlay");
-  if (STREAM) document.documentElement.classList.add("stream");
+  if (STREAM) document.documentElement.classList.add("overlay-stream");
   // a redraw mid-drag would drop the slider under the pointer
   if (ov.holding) return;
   const card = overlayCard();
@@ -365,45 +361,9 @@ function drawOverlay() {
 
 if (STREAM) addEventListener("resize", () => render());
 
-// a layer, moved or scaled by the pointer. its own pixels shift under the pointer once the app has
-// moved it, so each step asks for where the pointer is now against where it was held, and the next
-// waits until that's been done
-function layerDrag(e, how) {
-  e.preventDefault();
-  const held = [e.clientX, e.clientY];
-  const card = ov.card.getBoundingClientRect();
-  const grip = card.right - e.clientX;
-  let busy = false;
-  const step = (ev) => {
-    if (busy) return;
-    const zoom = ov.set.zoom / 100;
-    let ask;
-    if (how === "move") {
-      const [dx, dy] = [Math.round((ev.clientX - held[0]) * zoom), Math.round((ev.clientY - held[1]) * zoom)];
-      if (!dx && !dy) return;
-      ask = `overlay-move/${dx},${dy}`;
-    } else {
-      const next = Math.max(60, Math.min(300, Math.round(((ev.clientX + grip) * zoom / OV_WIDTH) * 100)));
-      if (next === ov.set.zoom) return;
-      ov.set.zoom = ov.sent.zoom = next;
-      ask = `overlay-zoom/${next}`;
-    }
-    busy = true;
-    fetch(`${BRIDGE}/window/${ask}`, { method: "POST" }).catch(() => {}).finally(() =>
-      requestAnimationFrame(() => requestAnimationFrame(() => (busy = false))));
-  };
-  const done = () => {
-    removeEventListener("pointermove", step);
-    removeEventListener("pointerup", done);
-    if (how === "scale") ovSave(() => {});
-  };
-  addEventListener("pointermove", step);
-  addEventListener("pointerup", done);
-}
-
 if (OVERLAY && !STREAM) addEventListener("pointerup", () => ov.holding && ((ov.holding = false), render()));
 
-if (OVERLAY && !STREAM && !LAYER) {
+if (OVERLAY && !STREAM) {
   // dragged bigger or smaller, from the corner or by the window manager: the width sets the scale
   // and, on the leaderboard, the height how many rows fit. the page's own pixels are the window's
   // over its zoom, so a window the size it was asked for is OV_WIDTH wide here
@@ -421,9 +381,9 @@ if (OVERLAY && !STREAM && !LAYER) {
       const list = card?.querySelector(".ov-standings");
       if (list && card.classList.contains("view-board")) {
         const rest = card.getBoundingClientRect().height - list.offsetHeight;
-        s.rows = Math.max(3, Math.min(30, Math.floor((innerHeight - rest) / OV_ROW_PX)));
+        s.rows = Math.max(OV_ROWS_RANGE[0], Math.min(OV_ROWS_RANGE[1], Math.floor((innerHeight - rest) / OV_ROW_PX)));
       }
-      s.zoom = Math.max(60, Math.min(300, Math.round(s.zoom * scale)));
+      s.zoom = Math.max(OV_ZOOM_RANGE[0], Math.min(OV_ZOOM_RANGE[1], Math.round(s.zoom * scale)));
       store(OV_KEY, s);
       ov.dragging = false;
       ov.sent.size = "";
@@ -476,22 +436,16 @@ function streamSection() {
   return [
     el("p", { class: "group" }, "Stream overlay"),
     row("Shows", null, segs([["now", "Map and plays"], ["board", "Leaderboard"]], p.view, (v) => setStream((x) => (x.view = v)), "What it shows")),
-    p.view === "board" && row("Rows", null, segs([[5, "5"], [8, "8"], [10, "10"], [15, "15"]], p.rows, (v) => setStream((x) => (x.rows = v)), "Rows"), " sub"),
+    p.view === "board" && row("Rows", null, segs(OV_ROWS, p.rows, (v) => setStream((x) => (x.rows = v)), "Rows"), " sub"),
     row("Background", null, segs([[0, "None"], [50, "See-through"], [85, "Solid"]], p.bg, (v) => setStream((x) => (x.bg = v)), "Background")),
-    row("Map art", null, el("button", {
-      class: `switch${p.art ? " on" : ""}`, role: "switch", "aria-checked": String(!!p.art), "aria-label": "Map art",
-      onclick: () => setStream((x) => (x.art = x.art ? 0 : 1)),
-    }, el("i"))),
-    row("While playing", null, segs([["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]], p.playing, (v) => setStream((x) => (x.playing = v)), "While playing")),
-    p.view === "now" && row("Live accuracy", "Each hand's and column's accuracy during a play.", el("button", {
-      class: `switch${p.live ? " on" : ""}`, role: "switch", "aria-checked": String(!!p.live), "aria-label": "Live accuracy",
-      onclick: () => setStream((x) => (x.live = x.live ? 0 : 1)),
-    }, el("i"))),
+    row("Map art", null, switchButton(!!p.art, "Map art", () => setStream((x) => (x.art = x.art ? 0 : 1)))),
+    row("While playing", null, segs(OV_PLAYING, p.playing, (v) => setStream((x) => (x.playing = v)), "While playing")),
+    p.view === "now" && row("Live accuracy", "Each hand's and column's accuracy during a play.", switchButton(!!p.live, "Live accuracy", () => setStream((x) => (x.live = x.live ? 0 : 1)))),
     el("div", { class: "setting stream-link" },
       el("div", { class: "text" },
         el("span", { class: "title" }, "Link"),
         el("span", { class: "line" },
-          "Add it in OBS as a Browser Source. Its width sets how big the card is, 400 is a good start. It keeps working with Hashi in the tray. ",
+          "Add it in OBS as a Browser Source. Its width sets how big the card is, 400 is a good start. It keeps working while the window is in the tray. ",
           el("a", { class: "link", href: link, target: "_blank", rel: "noreferrer" }, "Preview"))),
       el("div", { class: "stream-copy" },
         input,

@@ -38,6 +38,12 @@ function openBoard(map, follow = false, mine = false, variant = map) {
   dropCutter();
   rater = null;
   skinPage = profilePage = null;
+  setBoard(map, follow, mine, variant);
+  render();
+}
+
+// the board alone, nothing else closed and no redraw: the overlay sets it up while drawing
+function setBoard(map, follow = false, mine = false, variant = map) {
   clearTimeout(boardTimer);
   // the country or friends picked last time stay picked
   board = {
@@ -47,7 +53,6 @@ function openBoard(map, follow = false, mine = false, variant = map) {
     countries: board?.countries ?? null, selfCountry: board?.selfCountry ?? null,
   };
   loadBoard();
-  render();
 }
 
 function closeBoard() {

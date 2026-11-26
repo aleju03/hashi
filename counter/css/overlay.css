@@ -29,7 +29,7 @@
   transition: opacity 300ms;
 }
 
-/* its own layer, a see-through color isn't drawn everywhere */
+/* the background on its own layer, so --see fades it and not the text */
 .ov::before {
   content: "";
   position: absolute;
@@ -160,7 +160,7 @@
   display: grid;
 }
 
-.ov .status, .ov .blocked, .ov .pinned {
+.ov .status, .ov .blocked {
   margin: 6px 0 0;
   font-size: 12px;
 }
@@ -476,6 +476,10 @@
   font-variant-numeric: tabular-nums;
 }
 
+.ov-result .ov-live .hand b {
+  font-size: 15px;
+}
+
 .ov-live .cols {
   display: flex;
   gap: 12px;
@@ -695,7 +699,7 @@
 }
 
 /* no bar on top on stream */
-.stream .ov {
+.overlay-stream .ov {
   padding-top: 12px;
 }
 
@@ -707,8 +711,4 @@
   .ov.flash, .ov-result, .ov-result .where, .ov-last .dot.spin {
     animation: none;
   }
-}
-
-.ov-result .ov-live .hand b {
-  font-size: 15px;
 }
