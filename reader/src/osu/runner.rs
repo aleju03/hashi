@@ -1126,6 +1126,11 @@ pub fn read_frame(
                     snapshot.hits_candidates = in_game.hits_candidates.clone();
                     snapshot.hits_candidates_complete = in_game.hits_candidates_complete;
                     snapshot.retries = in_game.retries;
+                    snapshot.health = in_game.gameplay_base.zip(topo.and_then(|t| t.hp.as_ref())).and_then(|(gameplay, hp)| {
+                        let bar = win::read_u32(target, gameplay.wrapping_add(hp.hp_bar)).ok().filter(|b| *b != 0)?;
+                        let value = win::read_f64(target, bar.wrapping_add(hp.current)).ok()?;
+                        (0.0..=200.0).contains(&value).then_some(value / 200.0)
+                    });
                     snapshot.plays = in_game.plays;
                     if in_game.gameplay_base.is_none() {
                         degraded.push("play.mods".to_string());

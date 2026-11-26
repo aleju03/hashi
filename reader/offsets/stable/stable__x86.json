@@ -88,6 +88,11 @@
       [4, "katu"],
       [5, "miss"]
     ],
+    "hp": {
+      "hp_bar": 64,
+      "current": 28,
+      "witness": "2026-11-26 live: [gameplay+0x40]+0x1c is a double that starts at 200, steps down on each miss and up on hits, and is the first to reach 0 when the play fails; +0x24 trails it by a step and +0x14 is the bar's smoothed display"
+    },
     "replay": {
       "score_frames": 52,
       "list_items": 4,

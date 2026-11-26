@@ -44,6 +44,15 @@ pub struct StableReplaySection {
     pub witness: String,
 }
 
+/// the play's health bar: `[gameplay + hp_bar] + current`, a double from 0 to 200
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct StableHpSection {
+    pub hp_bar: u32,
+    pub current: u32,
+    #[serde(default)]
+    pub witness: String,
+}
+
 /// `gameplay + note_list_from_gameplay` 的 `List<Note>` 段（可选；per-note 判定直读）。
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct StableNotesSection {
@@ -135,6 +144,8 @@ pub struct StableTopology {
     /// per-note judgement 直读段；旧表缺段 = 回退 V1 状态机/占位。
     #[serde(default)]
     pub notes: Option<StableNotesSection>,
+    #[serde(default)]
+    pub hp: Option<StableHpSection>,
     #[serde(default = "default_beatmap_md5")]
     pub beatmap_md5: u32,
     #[serde(default = "default_beatmap_filename")]
@@ -228,6 +239,7 @@ impl Default for StableTopology {
             hits_slot_mapping: default_hits_slot_mapping(),
             replay: None,
             notes: None,
+            hp: None,
             beatmap_md5: default_beatmap_md5(),
             beatmap_filename: default_beatmap_filename(),
             beatmap_folder: default_beatmap_folder(),
