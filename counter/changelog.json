@@ -1,5 +1,24 @@
 [
   {
+    "version": "1.0.0",
+    "date": "2026-11-25",
+    "changes": [
+      { "kind": "new", "text": "osu! is read directly now, tosu isn't needed anymore." },
+      { "kind": "new", "text": "Added overlay mode, a small card over the game with the selected map, your last play and the map's leaderboard." },
+      { "kind": "new", "text": "Added a stream overlay, a link for an OBS browser source that keeps working with the app in the tray." },
+      { "kind": "new", "text": "Added live accuracy for each hand and column while you play, on the overlay." },
+      { "kind": "new", "text": "The selected map links to its Mania Tracker page." },
+      { "kind": "new", "text": "Added picking skin parts in the preview or a grid to color and swap them." },
+      { "kind": "changed", "text": "osu! is picked up within a second of opening." },
+      { "kind": "changed", "text": "6K to 8K ratings say Prism instead of MSD." },
+      { "kind": "fixed", "text": "Plays could show the wrong mods or speed." },
+      { "kind": "fixed", "text": "A lazer play could be counted twice around its results." },
+      { "kind": "fixed", "text": "Clicks in the skin editor's preview could pick a stage picture where it's see-through." },
+      { "kind": "fixed", "text": "Colors in the skin editor didn't keep the art's own tone." },
+      { "kind": "fixed", "text": "Edits already on a skin didn't show in the editor's first preview." }
+    ]
+  },
+  {
     "version": "0.2.0",
     "date": "2026-11-20",
     "changes": [
