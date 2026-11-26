@@ -205,7 +205,7 @@
   outline: none;
 }
 
-.standing .player:hover, .standing .player:focus-visible, .board .map a.title:hover {
+.board .map a.title:hover {
   text-decoration: underline wavy var(--accent) 1.5px;
   text-underline-offset: 1px;
 }
@@ -472,8 +472,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.score-detail .link {
-  display: inline-block;
+.score-detail .links {
+  display: flex;
+  gap: 14px;
   margin-top: 6px;
   font-size: 12px;
 }

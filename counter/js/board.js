@@ -171,7 +171,9 @@ function scoreDetail(e) {
   return el("div", { class: "score-detail" },
     el("div", { class: "facts" }, facts.map((f) => el("span", {}, f))),
     e.counts && el("ul", { class: "counts" }, e.counts.map((c, i) => el("li", { class: `j${i + 1}` }, el("small", {}, names[i]), el("b", {}, num(c))))),
-    e.replayUrl && el("a", { class: "link", href: e.replayUrl, target: "_blank", rel: "noreferrer" }, "Watch the replay"));
+    el("div", { class: "links" },
+      e.replayUrl && el("a", { class: "link", href: e.replayUrl, target: "_blank", rel: "noreferrer" }, "Watch the replay"),
+      el("a", { class: "link", href: `${snapshot.connection.origin}/player/${encodeURIComponent(e.username)}`, target: "_blank", rel: "noreferrer" }, "Open their profile")));
 }
 
 function standing(e, mine) {
@@ -182,14 +184,7 @@ function standing(e, mine) {
     el("span", { class: "pos" }, `#${e.position ?? "?"}`),
     grade && el("span", { class: `grade ${tone}` }, grade),
     el("span", { class: "avatar" }, e.avatarUrl && rowImg(`avatar ${e.userId ?? e.username}`, { src: e.avatarUrl, alt: "", loading: "lazy" })),
-    el("a", {
-      class: "player",
-      style: e.avatarAccent && `--name: ${e.avatarAccent}`,
-      href: `${snapshot.connection.origin}/player/${encodeURIComponent(e.username)}`,
-      target: "_blank",
-      rel: "noreferrer",
-      title: `Open ${e.username}'s profile on Mania Tracker`,
-    }, e.username),
+    el("span", { class: "player", style: e.avatarAccent && `--name: ${e.avatarAccent}` }, e.username),
     e.app === "mania-bridge" && rowImg(`app ${e.userId ?? e.username}`, { class: "app", src: "images/app.svg", alt: "", title: "Sent with Hashi" }),
     el("span", { class: "mods" }, e.mods.filter((m) => m !== "CL").map((m) => modBadge(m, { rate: e.rate }))),
     el("span", { class: "acc" }, typeof e.accuracy === "number" ? `${accText(e.accuracy)}%` : ""),
