@@ -138,7 +138,7 @@ pub(crate) fn mod_rate(mods: &Value, acronyms: &[String]) -> f64 {
     (rate.clamp(0.5, 2.0) * 100.0).round() / 100.0
 }
 
-fn presence_body(s: &mut State) -> Option<Value> {
+pub(crate) fn presence_body(s: &mut State) -> Option<Value> {
     let raw = s.reader.last_frame.as_ref()?;
     if !s.reader.osu {
         return None;

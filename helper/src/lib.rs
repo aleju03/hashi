@@ -8,6 +8,7 @@ mod goals;
 mod judge;
 pub mod lazer;
 mod leaderboard;
+mod live;
 mod looks;
 mod osr;
 pub mod player;
@@ -49,6 +50,7 @@ const CALLBACK_PATH: &str = "/mania-bridge/callback";
 // sites from before /bridge/authorize only take this one
 const OLD_CALLBACK_PATH: &str = "/companella/callback";
 const PRESENCE_SCOPE: &str = "companella:presence:write";
+const LIVE_SCOPE: &str = "companella:live:write";
 const SCOPES: [&str; 4] = [
     "companella:scores:submit",
     "companella:submissions:read",
@@ -319,6 +321,7 @@ pub(crate) struct State {
     pub chart_index: Option<HashMap<String, replays::ChartEntry>>,
     pub pump: queue::PumpState,
     pub presence: presence::PresenceState,
+    pub live: live::LiveState,
     pub boards: leaderboard::Boards,
     pub looks: looks::Looks,
     pub dans: dan::Dans,
@@ -414,6 +417,13 @@ impl Bridge {
                 "enabled": s.config.settings.as_ref().is_some_and(|x| x.presence),
                 "status": s.presence.status,
                 "message": s.presence.message,
+            },
+            "live": {
+                "enabled": s.config.settings.as_ref().is_some_and(|x| x.live),
+                "status": s.live.status,
+                "message": s.live.message,
+                "viewers": s.live.viewers,
+                "watchUrl": s.live.watch_url,
             },
             "theme": { "hue": theme.0, "sat": theme.1 },
             "update": s.update.public(update::can_install(self)),
@@ -611,6 +621,7 @@ impl Bridge {
         if self.st().presence.sent.is_some() {
             let _ = tokio::time::timeout(Duration::from_millis(1500), presence::clear_presence(self)).await;
         }
+        let _ = tokio::time::timeout(Duration::from_millis(1500), live::stop(self)).await;
         let _turn = self.queue_write.lock().await;
     }
 }
@@ -809,6 +820,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
             chart_index: None,
             pump: queue::PumpState::default(),
             presence: presence::PresenceState::default(),
+            live: Default::default(),
             boards: Default::default(),
             looks: Default::default(),
             dans: Default::default(),
@@ -901,8 +913,9 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
                     b.clone().spawn(async move { replays::match_replays(&b).await });
                 }
                 _ = tick.tick() => {
-                    let b = b.clone();
-                    b.clone().spawn(async move { presence::presence_tick(&b).await });
+                    let (b1, b2) = (b.clone(), b.clone());
+                    b.clone().spawn(async move { presence::presence_tick(&b1).await });
+                    b.clone().spawn(async move { live::live_tick(&b2).await });
                 }
             }
         }
@@ -963,6 +976,7 @@ pub(crate) mod tests {
             chart_index: None,
             pump: Default::default(),
             presence: Default::default(),
+            live: Default::default(),
             boards: Default::default(),
             looks: Default::default(),
             dans: Default::default(),

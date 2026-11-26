@@ -105,6 +105,10 @@ pub(crate) fn start(b: &Arc<Bridge>) {
 
 // { phase, reason, pid, frame }. true while linux keeps it out
 fn on_line(b: &Arc<Bridge>, exe: &Path, msg: Value) -> bool {
+    if let Some(keys) = msg.get("keys") {
+        crate::live::on_keys(b, keys);
+        return false;
+    }
     let denied = msg.get("reason").and_then(Value::as_str) == Some("access-denied");
     let blocked = (denied && cfg!(target_os = "linux")).then(|| format!("sudo setcap cap_sys_ptrace=eip {}", shell_quote(&exe.display().to_string())));
     game::set_blocked(b, blocked);

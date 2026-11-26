@@ -409,6 +409,10 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             b.window_action(name);
             return empty(204);
         }
+        if path == "/live/on" || path == "/live/off" {
+            let ok = crate::live::set_live_setting(b, path == "/live/on").await;
+            return saved(b, ok);
+        }
         if path == "/looks/mine" {
             crate::looks::refresh_mine(b, false);
             return empty(204);

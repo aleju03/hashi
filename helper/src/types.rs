@@ -58,6 +58,9 @@ pub struct Settings {
     // only the live status, finished plays aren't sent
     #[serde(default, rename = "presenceOnly")]
     pub presence_only: bool,
+    // anyone can watch the plays live from the profile
+    #[serde(default, rename = "liveWatch", skip_serializing_if = "std::ops::Not::not")]
+    pub live: bool,
     // dans are rough, some would rather not see them
     #[serde(default, rename = "hideDans", skip_serializing_if = "std::ops::Not::not")]
     pub hide_dans: bool,

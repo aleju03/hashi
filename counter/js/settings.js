@@ -6,6 +6,17 @@ const PRESENCE_NOTES = {
   paused: "Shown on your profile once osu! is open.",
 };
 
+const WATCH_NOTES = {
+  unsupported: "Mania Tracker doesn't support this yet.",
+  needs_reconnect: "Connect again to give Mania Tracker your OK.",
+};
+
+function watchNote(l) {
+  if (l.status === "error") return l.message;
+  if (l.status === "live" && l.viewers > 0) return `${l.viewers} spectating now.`;
+  return WATCH_NOTES[l.status] ?? "Streams your plays on Mania Tracker for anyone to spectate.";
+}
+
 // cached so the page opens in the right color before the helper answers
 const DEFAULT_THEME = { hue: 333, sat: 100 };
 const THEME_KEY = "mania-bridge-theme";
@@ -133,10 +144,18 @@ function sharing() {
       el("span", { class: "title" }, title),
       line && el("span", { class: "line" }, line)),
     switchButton(on, title, () => action(`sharing/${next}`), slow || (!on && !can)));
+  const l = snapshot.live;
   return [
     row("Send my plays", plays, true, choice(!plays, live), !plays && `Off. The maps you finish aren't sent${snapshot.analysis ? ", only analyzed here" : ""}.`, ""),
     row("Share my live status", live, liveAvailable, choice(plays, !live),
       live ? liveNote : p.status === "unsupported" && liveNote, live ? ` is-${p.status}` : ""),
+    l && el("div", { class: `setting${l.enabled ? ` is-${l.status}` : ""}` },
+      el("div", { class: "text" },
+        el("span", { class: "title" }, "Liveplay mode"),
+        el("span", { class: "line" }, watchNote(l))),
+      l.enabled && l.status === "needs_reconnect"
+        ? el("button", { class: "key go", disabled: slow, onclick: () => action("connect") }, "Connect again")
+        : switchButton(l.enabled, "Liveplay mode", () => action(`live/${l.enabled ? "off" : "on"}`), slow || (!l.enabled && l.status === "unsupported"))),
   ];
 }
 

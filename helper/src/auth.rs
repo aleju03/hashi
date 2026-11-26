@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
 use crate::types::{Connection, Jwk, Key};
-use crate::{iso_now, log, now_ms, queue, Bridge, Env, State, APP_NAME, CALLBACK_PATH, CLIENT_ID, OLD_CALLBACK_PATH, COUNTER_PATH, PRESENCE_SCOPE, SCOPES, VERSION};
+use crate::{iso_now, log, now_ms, queue, Bridge, Env, State, APP_NAME, CALLBACK_PATH, CLIENT_ID, OLD_CALLBACK_PATH, COUNTER_PATH, LIVE_SCOPE, PRESENCE_SCOPE, SCOPES, VERSION};
 
 pub(crate) enum Fail {
     // ConnectionProblem: the connection itself is in trouble, uploads stop
@@ -172,7 +172,7 @@ pub(crate) fn api_base(caps: &Value) -> String {
 }
 
 // the backend's own host, so a stuck site doesn't hold up plays
-fn direct_base(caps: &Value) -> Option<String> {
+pub(crate) fn direct_base(caps: &Value) -> Option<String> {
     let raw = caps.get("api_base_url").and_then(Value::as_str)?;
     let u = url::Url::parse(raw).ok()?;
     let fine = matches!(u.scheme(), "https" | "http") && u.host().is_some() && u.query().is_none() && u.fragment().is_none();
@@ -338,6 +338,21 @@ pub(crate) async fn api(b: &Arc<Bridge>, path: &str, req: Req) -> Result<Resp, F
         b.st().access_token = None;
         refresh_access(b).await?;
         res = send_routed(b, &route(), &req, true).await?;
+    }
+    Ok(res)
+}
+
+// the backend's own host only, for what the site doesn't pass on (the live stream)
+pub(crate) async fn api_direct(b: &Arc<Bridge>, path: &str, req: Req) -> Result<Resp, Fail> {
+    ensure_access(b).await?;
+    let caps = caps(b).await?;
+    let Some(base) = direct_base(&caps) else { return Err(Fail::Other("Mania Tracker has no API host to send this to.".into())) };
+    let url = format!("{base}{path}");
+    let mut res = send(b, &url, &req, true).await?;
+    if res.status == 401 && res.json().pointer("/error/code").and_then(Value::as_str) == Some("token_expired") {
+        b.st().access_token = None;
+        refresh_access(b).await?;
+        res = send(b, &url, &req, true).await?;
     }
     Ok(res)
 }
@@ -513,6 +528,9 @@ pub(crate) async fn start_connect(b: &Arc<Bridge>) -> Result<(), Fail> {
         let mut scopes: Vec<&str> = SCOPES.to_vec();
         if presence_supported(&s) {
             scopes.push(PRESENCE_SCOPE);
+        }
+        if crate::live::live_supported(&s) {
+            scopes.push(LIVE_SCOPE);
         }
         (scopes.join(" "), s.config.key.as_ref().map(|k| k.thumbprint.clone()).unwrap_or_default())
     };
