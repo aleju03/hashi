@@ -3,23 +3,13 @@
     "version": "1.0.0",
     "date": "2026-11-25",
     "changes": [
-      { "kind": "new", "text": "osu! is read directly now, tosu isn't needed anymore." },
-      { "kind": "new", "text": "Added overlay mode, a small card over the game with the selected map, your last play and the map's leaderboard." },
-      { "kind": "new", "text": "Added a stream overlay, a link for an OBS browser source that keeps working with the app in the tray." },
-      { "kind": "new", "text": "Added live accuracy for each hand and column while you play, on the overlay." },
-      { "kind": "new", "text": "The selected map links to its Mania Tracker page." },
-      { "kind": "new", "text": "Names on leaderboards show in each player's color, like on Mania Tracker." },
-      { "kind": "new", "text": "Supporters' avatar frames and name styles show on leaderboards, and yours on your profile." },
-      { "kind": "new", "text": "Click a player on a leaderboard to see their score, with its replay when there is one." },
-      { "kind": "new", "text": "Added picking skin parts in the preview or a grid to color and swap them." },
-      { "kind": "changed", "text": "osu! is picked up within a second of opening." },
-      { "kind": "changed", "text": "6K to 8K ratings say Prism instead of MSD." },
-      { "kind": "changed", "text": "The boat under the settings leads to Mania Tracker's supporter page." },
-      { "kind": "fixed", "text": "Plays could show the wrong mods or speed." },
-      { "kind": "fixed", "text": "A lazer play could be counted twice around its results." },
-      { "kind": "fixed", "text": "Clicks in the skin editor's preview could pick a stage picture where it's see-through." },
-      { "kind": "fixed", "text": "Colors in the skin editor didn't keep the art's own tone." },
-      { "kind": "fixed", "text": "Edits already on a skin didn't show in the editor's first preview." }
+      { "kind": "new", "text": "Tosu is no longer required" },
+      { "kind": "new", "text": "Added overlay mode" },
+      { "kind": "new", "text": "Added a stream overlay option" },
+      { "kind": "new", "text": "Added a liveplay mode to stream your plays to Mania Tracker if you want a friend to spectate without opening osu!" },
+      { "kind": "new", "text": "You can now click a player on a leaderboard to see their score" },
+      { "kind": "new", "text": "Improved skin editor" },
+      { "kind": "fixed", "text": "Bugfixes" }
     ]
   },
   {
