@@ -44,6 +44,8 @@ pub(crate) struct LastPlay {
     // whose says watching_replay only from where it started, a new score's date overrules that
     from_results: bool,
     started_at: i64,
+    // the play's accuracy by column and hand so far
+    live: Option<Value>,
 }
 
 pub(crate) struct PendingFinish {
@@ -66,6 +68,9 @@ pub(crate) struct TosuState {
     // its background, for the overlay
     pub map_cover: Option<Cover>,
     pub blocked: Option<String>,
+    // the play's accuracy so far by column, finger and hand
+    live: Option<Value>,
+    live_sent_at: i64,
     pub lazer_files_dir: PathBuf,
     // stable's folder and its Songs, wherever it's installed
     pub stable_dirs: Option<(PathBuf, PathBuf)>,
@@ -106,6 +111,8 @@ impl TosuState {
             map: None,
             map_cover: None,
             blocked: None,
+            live: None,
+            live_sent_at: 0,
             lazer_files_dir,
             stable_dirs: None,
             skin: None,
@@ -135,6 +142,7 @@ impl TosuState {
             "player": self.player,
             "map": self.map,
             "blocked": self.blocked.as_ref().map(|fix| json!({ "fix": fix })),
+            "live": self.live,
         })
     }
 
@@ -145,6 +153,7 @@ impl TosuState {
         self.player = None;
         self.map = None;
         self.map_cover = None;
+        self.live = None;
     }
 }
 
@@ -263,11 +272,59 @@ fn map_cover(raw: &Value, client: &str) -> Option<Cover> {
     Some(Cover { lazer: None, folder: Some(folder), file })
 }
 
+const LIVE_EVERY_MS: i64 = 250;
+// ScoreV2's bit in osu!'s mods
+const SCORE_V2: u64 = 1 << 29;
+
+// from the reader's judgements so far by column: [perfect, great, good, ok, meh, miss]
+fn live_accuracy(raw: &Value, settings: Option<&crate::types::Settings>) -> Option<Value> {
+    if raw.pointer("/state/name").and_then(Value::as_str) != Some("play") {
+        return None;
+    }
+    let columns: Vec<[u32; 6]> = serde_json::from_value(raw.pointer("/play/columns")?.clone()).ok()?;
+    let keys = columns.len();
+    if !(1..=18).contains(&keys) {
+        return None;
+    }
+    let mode = if raw.get("client").and_then(Value::as_str) == Some("lazer") {
+        crate::judge::Mode::Lazer
+    } else if raw.pointer("/play/mods/number").and_then(Value::as_u64).is_some_and(|m| m & SCORE_V2 != 0) {
+        crate::judge::Mode::StableV2
+    } else {
+        crate::judge::Mode::Stable
+    };
+    let thumb_left = !settings.is_some_and(|s| s.thumb_right);
+    let own = settings.and_then(|s| s.fingers.get(&keys.to_string())).map(Vec::as_slice);
+    let fingers = crate::analysis::column_fingers(keys, thumb_left, own);
+    let acc = |units: &[u32; 7]| (units[1..].iter().sum::<u32>() > 0).then(|| (crate::judge::accuracy(units, mode) * 100.0).round() / 100.0);
+    let units = |c: &[u32; 6]| {
+        let mut u = [0; 7];
+        u[1..].copy_from_slice(c);
+        u
+    };
+    let mut hands = [[0u32; 7]; 2];
+    let columns: Vec<Value> = columns
+        .iter()
+        .zip(&fingers)
+        .map(|(c, (hand, finger))| {
+            let u = units(c);
+            let side = &mut hands[usize::from(*hand == "right")];
+            for (sum, n) in side.iter_mut().zip(u) {
+                *sum += n;
+            }
+            json!({ "hand": hand, "finger": finger, "acc": acc(&u), "misses": c[5] })
+        })
+        .collect();
+    let judged: u32 = hands.iter().map(|h| h[1..].iter().sum::<u32>()).sum();
+    Some(json!({ "columns": columns, "hands": { "left": acc(&hands[0]), "right": acc(&hands[1]) }, "judged": judged }))
+}
+
 pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
     let mut finished = None;
     {
         let mut s = b.st();
         let account = s.config.connection.as_ref().map(|c| crate::types::text(&c.username));
+        let live = live_accuracy(&raw, s.config.settings.as_ref());
         let t = &mut s.tosu;
         t.last_frame_at = now_ms();
         if !t.osu {
@@ -308,6 +365,15 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
             t.player = player;
             t.client = Some(client.into());
             b.broadcast();
+        }
+
+        // a few times a second is enough to watch, each one redraws the page
+        if t.live != live {
+            if live.is_none() || t.live.is_none() || now_ms() - t.live_sent_at >= LIVE_EVERY_MS {
+                t.live_sent_at = now_ms();
+                b.broadcast();
+            }
+            t.live = live.clone();
         }
 
         let map = selected_map(&raw);
@@ -388,6 +454,12 @@ pub(crate) fn on_tosu_message(b: &Arc<Bridge>, raw: Value) {
                     && (t.saw_start || client != "lazer"),
                 from_results: t.replay,
                 started_at: t.play_started_at,
+                // the most judged so far: a play's end can reset the reader's counts on its last frames
+                live: {
+                    let judged = |l: &Option<Value>| l.as_ref().and_then(|l| l["judged"].as_u64()).unwrap_or(0);
+                    let before = t.last_play.as_ref().filter(|p| p.started_at == t.play_started_at).and_then(|p| p.live.clone());
+                    if judged(&live) >= judged(&before) { live.clone() } else { before }
+                },
             };
             // a finished torii play is kept as it ended: tosu-torii reports torii's results as play, so
             // play again or going back to song select can come while it still says play
@@ -549,6 +621,7 @@ fn on_play_finished(b: &Arc<Bridge>, finish: PendingFinish, rs: Option<Value>) {
             on_hold: false,
             practice,
             kept,
+            live: play.live.clone(),
         };
         s.queue.items.push(item.clone());
         item
@@ -638,6 +711,27 @@ pub(crate) fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
+
+    #[test]
+    fn live_accuracy_by_column_and_hand() {
+        let raw = json!({
+            "client": "lazer",
+            "state": { "name": "play" },
+            "play": { "columns": [[10, 0, 0, 0, 0, 0], [0, 10, 0, 0, 0, 0], [5, 5, 0, 0, 0, 10], [0, 0, 0, 0, 0, 0]] },
+        });
+        let live = super::live_accuracy(&raw, None).unwrap();
+        let col = |i: usize| &live["columns"][i];
+        assert_eq!((col(0)["hand"].as_str(), col(0)["finger"].as_str()), (Some("left"), Some("middle")));
+        assert_eq!((col(2)["hand"].as_str(), col(2)["finger"].as_str()), (Some("right"), Some("index")));
+        assert_eq!(col(0)["acc"], 100.0);
+        assert_eq!(col(2)["misses"], 10);
+        assert!(col(3)["acc"].is_null(), "a column with nothing judged yet has no accuracy");
+        // lazer weighs a perfect 305 and a great 300
+        assert_eq!(live["hands"]["left"], 99.18);
+        assert_eq!(live["hands"]["right"], 49.59);
+        let menu = json!({ "state": { "name": "selectPlay" }, "play": { "columns": [[1, 0, 0, 0, 0, 0]] } });
+        assert!(super::live_accuracy(&menu, None).is_none());
+    }
 
     #[test]
     fn paths() {

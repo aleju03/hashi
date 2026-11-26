@@ -136,6 +136,9 @@ pub struct Item {
     // finished while sending was off: kept here for its analysis, never sent
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub kept: bool,
+    // its accuracy by column and hand as the game counted it, at the end
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]

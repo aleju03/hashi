@@ -21,16 +21,27 @@ fn main() {
         for _ in std::io::stdin().lock().lines() {}
         std::process::exit(0);
     });
-    let reader = osu_reader::spawn_osu_reader(Arc::new(HitEventLog::new()), Arc::new(ReplayFrameLog::default()));
+    let hits = Arc::new(HitEventLog::new());
+    let reader = osu_reader::spawn_osu_reader(hits.clone(), Arc::new(ReplayFrameLog::default()));
     let mut last = String::new();
     let mut said = Instant::now() - HEARTBEAT;
     let mut config = Config::default();
+    let mut columns = Columns::default();
+    let mut was_playing = false;
     loop {
         let state = reader.state();
+        // a new play: the last one's counts go, before its own come in
+        let playing = state.snapshot.as_ref().and_then(|s| s.state_name.as_deref()) == Some("play");
+        if playing && !was_playing {
+            columns.0.clear();
+        }
+        was_playing = playing;
+        columns.take(&hits);
         let frame = match (state.phase.as_str(), state.snapshot, state.packet) {
             ("healthy", Some(snapshot), Some(packet)) => {
                 let mut raw = frame(&snapshot, packet);
                 config.fill(&snapshot, &mut raw);
+                columns.fill(&mut raw);
                 Some(raw)
             }
             _ => None,
@@ -78,6 +89,44 @@ fn frame(snapshot: &Snapshot, mut raw: Value) -> Value {
         }
     }
     raw
+}
+
+// the play's judgements so far, by column: [perfect, great, good, ok, meh, miss]
+#[derive(Default)]
+struct Columns(Vec<[u32; 6]>);
+
+const MAX_COLUMNS: usize = 18;
+
+impl Columns {
+    fn take(&mut self, hits: &HitEventLog) {
+        let batch = hits.drain();
+        if batch.reset {
+            self.0.clear();
+        }
+        for event in batch.events {
+            // the game's own judgement numbers, 6 for a perfect down to 1 for a miss
+            let (Ok(column), Ok(result)) = (usize::try_from(event.col), usize::try_from(event.result)) else { continue };
+            if column >= MAX_COLUMNS || !(1..=6).contains(&result) {
+                continue;
+            }
+            if self.0.len() <= column {
+                self.0.resize(column + 1, [0; 6]);
+            }
+            self.0[column][6 - result] += 1;
+        }
+    }
+
+    fn fill(&self, raw: &mut Value) {
+        if raw.pointer("/state/name").and_then(Value::as_str) != Some("play") || self.0.is_empty() {
+            return;
+        }
+        let keys = raw.pointer("/beatmap/stats/cs/converted").and_then(Value::as_f64).map_or(0, |k| k as usize);
+        let mut columns = self.0.clone();
+        if (1..=MAX_COLUMNS).contains(&keys) && columns.len() < keys {
+            columns.resize(keys, [0; 6]);
+        }
+        raw["play"]["columns"] = json!(columns);
+    }
 }
 
 // what the game keeps in its own settings rather than where the reader looks: stable's skin, and

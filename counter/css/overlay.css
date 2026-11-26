@@ -448,6 +448,90 @@
   }
 }
 
+/* the play so far, live */
+.ov-live {
+  margin-top: 10px;
+}
+
+.ov-live .hands {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ov-live .hand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ov-live .hand + .hand {
+  align-items: flex-end;
+}
+
+.ov-live .hand b {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-live .cols {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.ov-live .group {
+  display: flex;
+  flex: 1;
+  gap: 3px;
+}
+
+.ov-live .col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ov-live .col b {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-live .col i {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.12);
+}
+
+.ov-live .col i::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--fill) * 100%);
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.ov-live .col small {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--osu-f1);
+}
+
+.ov-live .col.none b {
+  color: var(--osu-f1);
+}
+
 /* the leaderboard */
 .ov-board-head {
   display: flex;
@@ -623,4 +707,8 @@
   .ov.flash, .ov-result, .ov-result .where, .ov-last .dot.spin {
     animation: none;
   }
+}
+
+.ov-result .ov-live .hand b {
+  font-size: 15px;
 }

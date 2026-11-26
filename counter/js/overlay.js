@@ -15,7 +15,7 @@ const OV_ROW_PX = 30;
 const OV_FRESH_MS = 3 * 60_000;
 
 // what a stream link can say, and what it means when it doesn't
-const STREAM_DEFAULTS = { view: "now", bg: 85, art: 1, playing: "show", rows: 8 };
+const STREAM_DEFAULTS = { view: "now", bg: 85, art: 1, playing: "show", rows: 8, live: 1 };
 
 function streamSettings() {
   const q = new URLSearchParams(location.search);
@@ -29,12 +29,13 @@ function streamSettings() {
     art: num("art", 0, 1) === 1,
     playing: ["show", "fade", "hide"].includes(q.get("playing")) ? q.get("playing") : STREAM_DEFAULTS.playing,
     rows: Math.round(num("rows", 3, 30)),
+    live: num("live", 0, 1) === 1,
     zoom: 100,
   };
 }
 
 const ov = {
-  set: STREAM ? streamSettings() : { see: 90, zoom: 100, rows: 8, art: true, status: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
+  set: STREAM ? streamSettings() : { see: 90, zoom: 100, rows: 8, art: true, status: true, live: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
   sent: { size: "", zoom: 0, through: null, blur: null },
@@ -121,6 +122,7 @@ function ovResult(p, map) {
         `#${p.rank.position}`, p.rank.total && el("small", {}, ` of ${p.rank.total}`)),
       typeof r?.msd === "number" && el("span", { class: "msd" }, el("b", {}, r.msd.toFixed(2)), ` ${ratingName(p.play.keys)}`),
       r?.dan && snapshot.showDans !== false && danText(r.dan)),
+    p.live && ov.set.live && ovLive(p.live),
     ["fail", "wait"].includes(status.kind) && status.detail && el("p", { class: "why" }, status.detail));
 }
 
@@ -136,12 +138,36 @@ function ovLast(p) {
     el("span", { class: `dot ${status.kind}`, title: status.label }));
 }
 
+const FINGER_SHORT = { thumb: "th", index: "ix", middle: "md", ring: "rg", pinky: "pk" };
+
+// the play so far: each hand, then each column with the hands apart
+function ovLive(live) {
+  const hand = (side, title) => el("span", { class: "hand" },
+    el("span", { class: "label" }, title),
+    el("b", {}, live.hands[side] == null ? "–" : `${accText(live.hands[side])}%`));
+  const column = (c, i) => el("span", { class: `col${c.acc == null ? " none" : ""}`, title: `Column ${i + 1}, ${c.hand} ${c.finger}${c.misses ? `, ${c.misses} ${c.misses === 1 ? "miss" : "misses"}` : ""}` },
+    el("b", {}, c.acc == null ? "–" : accText(c.acc, 1)),
+    // full from 90% up
+    el("i", { style: `--fill: ${c.acc == null ? 0 : Math.max(0, Math.min(1, (c.acc - 90) / 10))}` }),
+    el("small", {}, FINGER_SHORT[c.finger] ?? ""));
+  const groups = [];
+  live.columns.forEach((c, i) => {
+    if (!groups.length || groups.at(-1)[0].c.hand !== c.hand) groups.push([]);
+    groups.at(-1).push({ c, i });
+  });
+  return el("div", { class: "ov-live" },
+    el("div", { class: "hands" }, hand("left", "Left hand"), hand("right", "Right hand")),
+    el("div", { class: "cols" }, groups.map((g) => el("span", { class: "group", style: `flex: ${g.length}` }, g.map(({ c, i }) => column(c, i))))));
+}
+
 function ovNow(map) {
   const last = snapshot.plays[0];
-  const fresh = !ovPlaying() && ovFresh(last);
+  const playing = ovPlaying();
+  const fresh = !playing && ovFresh(last);
+  const live = playing && ov.set.live && snapshot.tosu.live;
   return [
     map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.tosu.osu ? "Select a mania map in osu!" : "Open osu! to see your map here."),
-    fresh ? ovResult(last, map) : last && !ovPlaying() && ovLast(last),
+    live ? ovLive(live) : fresh ? ovResult(last, map) : last && !playing && ovLast(last),
   ];
 }
 
@@ -211,6 +237,10 @@ function ovSettings() {
       onclick: () => ovSave((x) => (x.art = !x.art)),
     }, el("i"))),
     row("While playing", segs([["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]], s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
+    row("Live accuracy", el("button", {
+      class: `switch${s.live ? " on" : ""}`, role: "switch", "aria-checked": String(s.live), "aria-label": "Live accuracy",
+      onclick: () => ovSave((x) => (x.live = !x.live)),
+    }, el("i"))),
     row("Leaderboard rows", segs([[5, "5"], [8, "8"], [10, "10"], [15, "15"]], s.rows, (r) => ovSave((x) => (x.rows = r)), "Leaderboard rows")),
     el("p", { class: "ov-hint" }, "Drag the corner to make it bigger or smaller."),
     el("button", { class: "link", onclick: () => ((ov.open = false), render()) }, "Done"));
@@ -453,6 +483,10 @@ function streamSection() {
       onclick: () => setStream((x) => (x.art = x.art ? 0 : 1)),
     }, el("i"))),
     row("While playing", null, segs([["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]], p.playing, (v) => setStream((x) => (x.playing = v)), "While playing")),
+    p.view === "now" && row("Live accuracy", "Each hand's and column's accuracy during a play.", el("button", {
+      class: `switch${p.live ? " on" : ""}`, role: "switch", "aria-checked": String(!!p.live), "aria-label": "Live accuracy",
+      onclick: () => setStream((x) => (x.live = x.live ? 0 : 1)),
+    }, el("i"))),
     el("div", { class: "setting stream-link" },
       el("div", { class: "text" },
         el("span", { class: "title" }, "Link"),
