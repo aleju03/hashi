@@ -141,7 +141,8 @@ function ovLast(p) {
     el("span", { class: "title", title: `${p.play.artist ?? ""} - ${chartName(p.play)}` }, p.play.title ?? "Unknown"),
     mods.length > 0 && el("span", { class: "mods" }, mods.map((m) => modBadge(m, { rate: p.play.rate }))),
     acc && el("b", {}, acc),
-    el("span", { class: `dot ${status.kind}`, title: status.label }));
+    // whether it was sent is the player's business, not the stream's
+    !STREAM && el("span", { class: `dot ${status.kind}`, title: status.label }));
 }
 
 const FINGER_SHORT = { thumb: "th", index: "ix", middle: "md", ring: "rg", pinky: "pk" };
