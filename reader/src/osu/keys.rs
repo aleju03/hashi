@@ -657,30 +657,30 @@ pub fn mods_name_from_mask(mask: u32) -> String {
 
 /// 位掩码 → v2 形状的 mods 对象（`{checksum, number, name, array, rate}`）。
 ///
-/// `checksum = md5(JSON.stringify(array))`（参照实现 `osuMods.ts` 的 `textMD5(JSON.stringify(array))`）；
-/// `array = name.match(/.{1,2}/g).map(r => ({acronym: r}))`——**按 2 字符切分**，所以三字母的
-/// `SV2` 会变成 `[{acronym:"SV"},{acronym:"2"}]`（这是参照实现自身的形状怪癖：`name` 才是
-/// 权威，`number` 是位掩码本体）。页面**不读** `checksum`/`array`，但保持同形让 §3.3 的
-/// "逐字节同形"可检验、也让 `modSignature` 的计算路径完全一致（`SV2` 的判定走 `number` 位）。
+/// `checksum = md5(JSON.stringify(array))`；`array` 每个 mod 一项（`SV2`、`10K` 不拆开）。
+// "HRRDSV2" -> HR, RD, SV2: the longest known code first at each place
+fn name_codes(name: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut rest = name;
+    while !rest.is_empty() {
+        let len = KNOWN_MOD_CODES.iter().find(|c| rest.starts_with(**c)).map_or(rest.len().min(2), |c| c.len());
+        let len = (1..=len).rev().find(|l| rest.is_char_boundary(*l)).unwrap_or(rest.len());
+        out.push(rest[..len].to_string());
+        rest = &rest[len..];
+    }
+    out
+}
+
 pub fn menu_mods_value(mask: u32) -> Value {
     let name = mods_name_from_mask(mask);
-    let array: Vec<Value> = name
-        .as_bytes()
-        .chunks(2)
-        .map(|pair| {
-            json!({
-                "acronym": String::from_utf8_lossy(pair).to_string()
-            })
-        })
-        .collect();
+    let array: Vec<Value> = name_codes(&name).into_iter().map(|code| json!({ "acronym": code })).collect();
     let array_value = Value::Array(array);
     let checksum = crate::server::md5_hex(&array_value.to_string());
     let number = mask as i64;
     let rate = if mask & ((1 << 6) | (1 << 9)) != 0 {
         1.5
-    } else if mask & ((1 << 10) | (1 << 8)) != 0 {
-        // HT(1<<8) | DC(1<<10)：注意 DC 在 stable 位表里没有独立位，
-        // 参照实现对 HT/DC 的统一判断在这里落到 HT 位上。
+    } else if mask & (1 << 8) != 0 {
+        // HT. 1 << 10 is Flashlight, stable has no bit of its own for DC
         0.75
     } else {
         1.0
@@ -692,4 +692,19 @@ pub fn menu_mods_value(mask: u32) -> Value {
         "array": array_value,
         "rate": rate,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn three_letter_codes_stay_whole() {
+        assert_eq!(name_codes("HRRDSV2"), ["HR", "RD", "SV2"]);
+        assert_eq!(name_codes("10KMR"), ["10K", "MR"]);
+        assert_eq!(name_codes("NM"), ["NM"]);
+        let mods = menu_mods_value((1 << 29) | (1 << 21));
+        assert_eq!(mods["array"], json!([{ "acronym": "RD" }, { "acronym": "SV2" }]));
+        assert_eq!(menu_mods_value(1 << 10)["rate"], json!(1.0));
+    }
 }
