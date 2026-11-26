@@ -161,19 +161,23 @@ function toggleBoardRow(e, ev) {
 function scoreDetail(e) {
   const num = (x) => (typeof x === "number" ? x.toLocaleString("en-US") : null);
   const names = JUDGE_NAMES[e.lazer ? "lazer" : "stable"];
-  const facts = [
-    num(e.score),
-    typeof e.maxCombo === "number" && `${num(e.maxCombo)}x`,
-    typeof e.pp === "number" && `${Math.round(e.pp)}pp`,
-    e.lazer ? "lazer" : "stable",
-    e.playedAt && new Date(e.playedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
-  ].filter(Boolean);
+  const stat = (label, value) => value && el("span", { class: "stat" }, el("small", {}, label), el("b", {}, value));
+  const when = e.playedAt && new Date(e.playedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const judged = e.counts?.reduce((a, b) => a + b, 0);
   return el("div", { class: "score-detail" },
-    el("div", { class: "facts" }, facts.map((f) => el("span", {}, f))),
-    e.counts && el("ul", { class: "counts" }, e.counts.map((c, i) => el("li", { class: `j${i + 1}` }, el("small", {}, names[i]), el("b", {}, num(c))))),
+    el("div", { class: "stats" },
+      stat("Score", num(e.score)),
+      stat("Combo", typeof e.maxCombo === "number" && `${num(e.maxCombo)}x`),
+      stat("pp", typeof e.pp === "number" && String(Math.round(e.pp))),
+      el("span", { class: "where" }, [e.lazer ? "lazer" : "stable", when].filter(Boolean).join(" · "))),
+    judged > 0 && [
+      // how the judgements split, a thin bar to read before the numbers
+      el("div", { class: "spread" }, e.counts.map((c, i) => c > 0 && el("i", { class: `j${i + 1}`, style: `flex-grow: ${c}` }))),
+      el("ul", { class: "counts" }, e.counts.map((c, i) => el("li", { class: `j${i + 1}${c ? "" : " none"}` }, el("small", {}, names[i]), el("b", {}, num(c))))),
+    ],
     el("div", { class: "links" },
-      e.replayUrl && el("a", { class: "link", href: e.replayUrl, target: "_blank", rel: "noreferrer" }, "Watch the replay"),
-      el("a", { class: "link", href: `${snapshot.connection.origin}/player/${encodeURIComponent(e.username)}`, target: "_blank", rel: "noreferrer" }, "Open their profile")));
+      e.replayUrl && el("a", { href: e.replayUrl, target: "_blank", rel: "noreferrer" }, "Watch replay"),
+      el("a", { href: `${snapshot.connection.origin}/player/${encodeURIComponent(e.username)}`, target: "_blank", rel: "noreferrer" }, "Profile")));
 }
 
 function standing(e, mine) {

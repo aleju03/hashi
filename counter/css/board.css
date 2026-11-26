@@ -419,8 +419,9 @@
   cursor: default;
 }
 
+/* the row and its score as one block */
 .standing.open, .ov-standing.open {
-  border-radius: 7px;
+  border-radius: 10px 10px 0 0;
   background: rgb(255 255 255 / 0.06);
 }
 
@@ -429,28 +430,67 @@
 }
 
 .standing-detail {
-  padding: 4px 6px 12px 44px;
+  padding: 0 0 10px;
 }
 
-.score-detail .facts {
+.score-detail {
+  padding: 6px 12px 11px;
+  border-radius: 0 0 10px 10px;
+  background: rgb(255 255 255 / 0.06);
+}
+
+.score-detail .stats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 12px;
-  font-size: 12px;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.score-detail .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.score-detail .stat small, .score-detail .counts small {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--osu-f1);
 }
 
-.score-detail .facts span:first-child {
-  font-weight: 700;
+.score-detail .stat b {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
-  color: #fff;
+}
+
+.score-detail .where {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--osu-f1);
+}
+
+.score-detail .spread {
+  display: flex;
+  height: 5px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 9999px;
+}
+
+.score-detail .spread i {
+  min-width: 2px;
+  background: var(--j);
 }
 
 .score-detail .counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  margin: 6px 0 0;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+  margin: 7px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -461,8 +501,6 @@
 }
 
 .score-detail .counts small {
-  font-size: 10px;
-  font-weight: 800;
   letter-spacing: 0.04em;
   color: var(--j);
 }
@@ -472,9 +510,26 @@
   font-variant-numeric: tabular-nums;
 }
 
+.score-detail .counts .none {
+  opacity: 0.35;
+}
+
 .score-detail .links {
   display: flex;
-  gap: 14px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.score-detail .links a {
+  padding: 4px 11px;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.08);
   font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  text-decoration: none;
+}
+
+.score-detail .links a:hover {
+  background: rgb(255 255 255 / 0.14);
 }
