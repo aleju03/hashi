@@ -9,6 +9,7 @@
       { "kind": "new", "text": "Added live accuracy for each hand and column while you play, on the overlay." },
       { "kind": "new", "text": "The selected map links to its Mania Tracker page." },
       { "kind": "new", "text": "Names on leaderboards show in each player's color, like on Mania Tracker." },
+      { "kind": "new", "text": "Click a player on a leaderboard to see their score, with its replay when there is one." },
       { "kind": "new", "text": "Added picking skin parts in the preview or a grid to color and swap them." },
       { "kind": "changed", "text": "osu! is picked up within a second of opening." },
       { "kind": "changed", "text": "6K to 8K ratings say Prism instead of MSD." },
