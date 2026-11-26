@@ -1,6 +1,7 @@
 // the reader as a program of its own, which Hashi runs. it prints a JSON line each time what osu!
 // shows changes, and one a second while nothing does: { phase, reason, pid, frame }, frame in the
-// shape tosu's websocket sent. it leaves once its stdin closes. on linux only this file needs
+// shape tosu's websocket sent. the play's key presses go on lines of their own, { keys: { reset,
+// frames: [[time, keys], ...] } }, reset when they start over. it leaves once its stdin closes. on linux only this file needs
 // cap_sys_ptrace, not the app with its webview
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -22,7 +23,8 @@ fn main() {
         std::process::exit(0);
     });
     let hits = Arc::new(HitEventLog::new());
-    let reader = osu_reader::spawn_osu_reader(hits.clone(), Arc::new(ReplayFrameLog::default()));
+    let presses = Arc::new(ReplayFrameLog::new());
+    let reader = osu_reader::spawn_osu_reader(hits.clone(), presses.clone());
     let mut last = String::new();
     let mut said = Instant::now() - HEARTBEAT;
     let mut config = Config::default();
@@ -42,18 +44,32 @@ fn main() {
                 let mut raw = frame(&snapshot, packet);
                 config.fill(&snapshot, &mut raw);
                 columns.fill(&mut raw);
+                // when the song's time was read, for following it live. only in play, it changes with every read
+                if playing && raw.pointer("/beatmap/time").is_some_and(Value::is_object) {
+                    raw["beatmap"]["time"]["readAt"] = json!(state.frame_at_ms);
+                }
                 Some(raw)
             }
             _ => None,
         };
         let line = json!({ "phase": state.phase, "reason": state.reason, "pid": state.pid, "frame": frame }).to_string();
-        if line != last || said.elapsed() >= HEARTBEAT {
+        let keys = presses.drain();
+        let keys = (keys.reset || !keys.frames.is_empty()).then(|| {
+            let frames: Vec<_> = keys.frames.iter().map(|f| json!([f.time, f.keys])).collect();
+            json!({ "keys": { "reset": keys.reset, "frames": frames } }).to_string()
+        });
+        let changed = line != last || said.elapsed() >= HEARTBEAT;
+        if changed || keys.is_some() {
             let mut out = std::io::stdout().lock();
-            if writeln!(out, "{line}").and_then(|_| out.flush()).is_err() {
+            let mut write = |l: &str| writeln!(out, "{l}");
+            let sent = (if changed { write(&line) } else { Ok(()) }).and_then(|_| keys.as_deref().map_or(Ok(()), &mut write));
+            if sent.and_then(|_| out.flush()).is_err() {
                 return;
             }
-            last = line;
-            said = Instant::now();
+            if changed {
+                last = line;
+                said = Instant::now();
+            }
         }
         std::thread::sleep(TICK);
     }
@@ -78,6 +94,15 @@ fn frame(snapshot: &Snapshot, mut raw: Value) -> Value {
         if snapshot.replay {
             raw["resultsScreen"]["replay"] = json!(true);
         }
+    }
+    if let Some(menu) = snapshot.pause_menu {
+        raw["game"]["pauseMenu"] = json!(menu);
+    }
+    if let Some(health) = snapshot.health {
+        raw["game"]["health"] = json!((health * 1000.0).round() / 1000.0);
+    }
+    if snapshot.failed == Some(true) {
+        raw["game"]["failed"] = json!(true);
     }
     if !cfg!(windows) {
         for key in ["/files/beatmap", "/files/background", "/files/audio"] {

@@ -470,14 +470,19 @@ pub fn run(
                     // 新一局/重试：Score 对象变化 ⇒ 清空两条 Stable 日志，重新发全量。
                     if stable_score.is_some() && stable_score != previous_stable_score {
                         stable_note_state = stable::NoteJudgementPollState::default();
-                        stable_replay_state = stable::StableReplayPollState::default();
                         hit_log.clear();
-                        replay_log.clear();
+                        // the garbage collector moves the Score too: the frames tell a new play
+                        // by what's in them, they only start over here when a play begins
+                        if previous_stable_score.is_none() {
+                            stable_replay_state = stable::StableReplayPollState::default();
+                            replay_log.clear();
+                        }
                     }
                     // 回放 seek/倒带：时钟回退 ⇒ 同样重发全量。
+                    // a second or more: stable's audio clock also steps back a few ms on its own
                     let rewound = matches!(
                         (previous_live, frame.snapshot.play_time),
-                        (Some(previous), Some(current)) if current + 1 < previous
+                        (Some(previous), Some(current)) if current + 1000 < previous
                     );
                     if rewound {
                         stable_note_state = stable::NoteJudgementPollState::default();
@@ -792,6 +797,9 @@ pub fn frozen_copy(snapshot: &Snapshot) -> Snapshot {
     copy.result_seed = None;
     copy.play_time = None;
     copy.paused = None;
+    copy.pause_menu = None;
+    copy.failed = None;
+    copy.health = None;
     copy.checksum = None;
     copy.map_id = None;
     copy.set_id = None;

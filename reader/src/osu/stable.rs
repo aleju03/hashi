@@ -418,12 +418,12 @@ pub const REPLAY_MAX_FAILURES: u32 = 50;
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(not(windows), allow(dead_code))]
 pub struct StableReplayPollState {
-    score: u32,
-    list: u32,
-    items: u32,
     size: usize,
     len: usize,
-    version: i32,
+    // the times of the first frame and the last one read: the same at the same places means the
+    // list was only added to. not the objects' addresses, the garbage collector moves them
+    head: i32,
+    tail: i32,
     failures: u32,
     last_time: i32,
 }
@@ -735,19 +735,21 @@ mod win_io {
             return Err("replay-size-invalid");
         }
         let size = size as usize;
-        let version = match section.list_version {
-            Some(offset) => win::read_i32(target, list.wrapping_add(offset)).unwrap_or(0),
-            None => 0,
+        let frame_at = |index: usize| win::read_u32(target, items.wrapping_add(section.array_data).wrapping_add((index as u32).wrapping_mul(4)));
+        let time_at = |index: usize| {
+            let frame = frame_at(index).ok().filter(|f| *f != 0)?;
+            win::read_i32(target, frame.wrapping_add(section.frame_time)).ok()
         };
-        let mut reset = state.score != score
-            || state.list != list
-            || state.items != items
-            || size < state.len;
-        if !reset && state.len > 0 && section.list_version.is_some() {
-            let size_delta = size as i64 - state.size as i64;
-            let version_delta = version as i64 - state.version as i64;
-            if size_delta != version_delta {
-                reset = true;
+        if size == 0 {
+            return Ok(0);
+        }
+        // nothing read yet is a start: a fresh state's last time would turn the lead-in's
+        // negative times away
+        let mut reset = state.len == 0 || size < state.len;
+        if !reset {
+            match (time_at(0), time_at(state.len - 1)) {
+                (Some(head), Some(tail)) => reset = head != state.head || tail != state.tail,
+                _ => return Err("replay-frame-unreadable"),
             }
         }
         if reset {
@@ -758,14 +760,11 @@ mod win_io {
         let end = (start + REPLAY_FRAMES_PER_TICK).min(size);
         let mut frames = Vec::new();
         let mut index = start;
+        let mut tail = if reset { i32::MIN } else { state.tail };
+        let mut head = if reset { i32::MIN } else { state.head };
         let mut failed = false;
         while index < end {
-            let frame = match win::read_u32(
-                target,
-                items
-                    .wrapping_add(section.array_data)
-                    .wrapping_add((index as u32).wrapping_mul(4)),
-            ) {
+            let frame = match frame_at(index) {
                 Ok(frame) if frame != 0 => frame,
                 _ => {
                     failed = true;
@@ -779,10 +778,14 @@ mod win_io {
                     break;
                 }
             };
+            if index == 0 {
+                head = time;
+            }
             let buttons = win::read_u32(target, frame.wrapping_add(section.frame_buttons)).unwrap_or(0);
             let y = f32::from_bits(win::read_u32(target, frame.wrapping_add(section.frame_y)).unwrap_or(0));
             // 加载期光标帧：y=-500、x=256；mania 帧 y 为列宽常量（>0）。
             if buttons != 0 || !(y > 0.0) {
+                tail = time;
                 index += 1;
                 continue;
             }
@@ -804,6 +807,7 @@ mod win_io {
                 keys: x as u32,
             });
             state.last_time = time;
+            tail = time;
             index += 1;
         }
         if reset || !frames.is_empty() {
@@ -811,6 +815,8 @@ mod win_io {
         }
         if failed {
             state.len = index;
+            state.tail = tail;
+            state.head = head;
             state.failures = state.failures.saturating_add(1);
             if state.failures >= REPLAY_MAX_FAILURES {
                 log.clear();
@@ -818,11 +824,9 @@ mod win_io {
             }
             return Err("replay-frame-invalid");
         }
-        state.score = score;
-        state.list = list;
-        state.items = items;
         state.size = size;
-        state.version = version;
+        state.tail = tail;
+        state.head = head;
         state.len = index;
         state.failures = 0;
         Ok(frames.len())

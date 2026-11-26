@@ -264,6 +264,12 @@ pub struct Snapshot {
     /// `game.paused`：停滞推导（`previousPlayTime == playTime`，镜像 tosu
     /// `states/global.ts:68`）。`None` = 尚未有前一帧（首发帧恒 false）。
     pub paused: Option<bool>,
+    /// lazer: whether the pause menu shows. paused with it gone is the countdown back into the play
+    pub pause_menu: Option<bool>,
+    /// lazer: the fail screen shows
+    pub failed: Option<bool>,
+    /// lazer: the play's health, 0 to 1
+    pub health: Option<f64>,
     /// 局内 hits（`score_base` 链的 u16 槽）。
     pub play_hits: Option<Hits>,
     /// 局内 RD seed（stable/ppysb `Score.Seed`；None = 表缺段/读失败）。

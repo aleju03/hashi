@@ -232,6 +232,23 @@ pub struct ScoreSection {
     /// `ScoreInfo` 对象上 `<Hash>` 的位移（同 `ResultsSection.score_hash`）。
     #[serde(default)]
     pub score_hash: Option<i64>,
+    /// the Player's pause menu, and a Drawable's alpha: the menu fades out as lazer counts down to resume
+    #[serde(default)]
+    pub pause_overlay: Option<i64>,
+    #[serde(default)]
+    pub drawable_alpha: Option<i64>,
+    #[serde(default)]
+    pub fail_overlay: Option<i64>,
+    /// Player -> HealthProcessor -> its Health, a BindableDouble -> the value
+    #[serde(default)]
+    pub health_processor: Option<i64>,
+    #[serde(default)]
+    pub health: Option<i64>,
+    #[serde(default)]
+    pub bindable_double_value: Option<i64>,
+    /// HealthProcessor's HasFailed: set the moment the play fails, before the fail screen
+    #[serde(default)]
+    pub has_failed: Option<i64>,
     #[serde(default)]
     pub witness: String,
 }

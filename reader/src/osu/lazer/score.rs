@@ -574,6 +574,13 @@ mod tests {
             score_result_counts: None,
             score_info: None,
             score_hash: None,
+            pause_overlay: None,
+            drawable_alpha: None,
+            fail_overlay: None,
+            health_processor: None,
+            health: None,
+            bindable_double_value: None,
+            has_failed: None,
             witness: String::new(),
         }
     }

@@ -527,6 +527,13 @@ pub fn live_table(
             score_result_counts: l.field(PROCESSOR, "ScoreResultCounts"),
             score_info: l.field(SCORE, "ScoreInfo"),
             score_hash: l.field(SCORE_INFO, "<Hash>k__BackingField"),
+            pause_overlay: l.field(PLAYER, "<PauseOverlay>k__BackingField"),
+            drawable_alpha: l.field("osu.Framework.Graphics.Drawable", "alpha"),
+            fail_overlay: l.field(PLAYER, "<FailOverlay>k__BackingField"),
+            health_processor: l.field(PLAYER, "<HealthProcessor>k__BackingField"),
+            health: l.field("osu.Game.Rulesets.Scoring.HealthProcessor", "Health"),
+            bindable_double_value: l.field("osu.Framework.Bindables.BindableDouble", "value"),
+            has_failed: l.field("osu.Game.Rulesets.Scoring.HealthProcessor", "<HasFailed>k__BackingField"),
             witness: "read from the running game".into(),
         })
     })();

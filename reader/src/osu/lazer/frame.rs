@@ -422,6 +422,34 @@ pub fn read_frame(input: FrameInput<'_>) -> Result<LazerFrame, Reason> {
 
     // ⑦ 播放时钟
     snapshot.play_time = read_live_time(source, game_base, &resolved, &mut chain, &mut gaps);
+    if snapshot.is_play_state() {
+        let shows = |overlay: Option<i64>| -> Option<bool> {
+            let player = chain.screen_top?;
+            let section = table.score()?;
+            let menu = read_ptr_field(source, player, overlay?)?;
+            let alpha = read_f32(source, menu.checked_add_signed(section.drawable_alpha?)?)?;
+            alpha.is_finite().then_some(alpha > 0.01)
+        };
+        let section = table.score();
+        snapshot.pause_menu = shows(section.and_then(|s| s.pause_overlay));
+        let has_failed = (|| {
+            let section = section?;
+            let processor = read_ptr_field(source, chain.screen_top?, section.health_processor?)?;
+            let byte = source.read(processor.checked_add_signed(section.has_failed?)?, 1)?;
+            Some(byte[0] != 0)
+        })();
+        snapshot.failed = match (has_failed, shows(section.and_then(|s| s.fail_overlay))) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (a, b) => a.or(b),
+        };
+        snapshot.health = (|| {
+            let section = section?;
+            let processor = read_ptr_field(source, chain.screen_top?, section.health_processor?)?;
+            let bindable = read_ptr_field(source, processor, section.health?)?;
+            let value = read_f64(source, bindable.checked_add_signed(section.bindable_double_value?)?)?;
+            (0.0..=1.0).contains(&value).then_some(value)
+        })();
+    }
     // 结算态由 ⑥b 负责：读到了就不该再报"offsets-missing"；读不到时它已经写了逐字的 gap。
     if !snapshot.is_result_state() {
         gaps.push(GAP_RESULTS_HITS.to_string());
