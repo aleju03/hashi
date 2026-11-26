@@ -48,6 +48,7 @@ struct Play {
     // lazer holds the song at 0 while a play loads, that isn't a pause
     started: bool,
     opened_at: i64,
+    had_health: bool,
     stats: Option<Value>,
 }
 
@@ -286,7 +287,7 @@ fn follow(s: &mut State) {
         s.live.failed_attempt = false;
     }
     // a retry's first moments can still show the last attempt's fail screen
-    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true);
+    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true) || stable_out_of_health(s, &raw);
     if failed && s.live.play.as_ref().is_some_and(|p| now_ms() - p.opened_at >= 1000) {
         // where it failed: lazer slows the song to a stop after, so as read, not carried forward
         let at = raw.pointer("/beatmap/time/live").and_then(Value::as_f64).map(|t| t.round() as i64);
@@ -308,7 +309,7 @@ fn follow(s: &mut State) {
     let convert = raw.pointer("/beatmap/mode/number").and_then(Value::as_u64).is_some_and(|m| m != 3);
     if s.live.play.is_none() {
         let Some(start) = play_start(s, &raw, &beatmap, &md5, &body, convert) else { return };
-        s.live.play = Some(Play { id: start["play_id"].as_str().unwrap_or("").into(), md5, start: start.clone(), sent: 0, clock: None, moved_at: now_ms(), started: false, opened_at: now_ms(), stats: None });
+        s.live.play = Some(Play { id: start["play_id"].as_str().unwrap_or("").into(), md5, start: start.clone(), sent: 0, clock: None, moved_at: now_ms(), started: false, opened_at: now_ms(), had_health: false, stats: None });
         push(s, start);
     }
     if convert {
@@ -323,14 +324,23 @@ fn follow(s: &mut State) {
     let read_at = raw.pointer("/beatmap/time/readAt").and_then(Value::as_i64).unwrap_or(s.reader.last_frame_at);
     let age = now - read_at;
     let rate = play_rate(&s.live.play);
-    let lead_in = s.live.last_raw.filter(|(t, _)| *t < 0.0).map(|(t, at)| (now - at <= 500).then(|| (t + (now - at) as f64 * rate).round() as i64));
+    // lazer's song clock stays at 0 through the lead-in, its presses carry the play's own time
+    // (stable's clock counts the lead-in itself). lazer records frames all the time, none coming
+    // in is a pause: held at the last one
+    let lazer = raw.get("client").and_then(Value::as_str) == Some("lazer");
+    let lead_in = s.live.last_raw.filter(|(t, _)| lazer && *t < 0.0).map(|(t, at)| {
+        let paused = menu == Some(true) || now - at > 500;
+        let time = if paused { t } else { t + (now - at) as f64 * rate };
+        (time.round() as i64, paused)
+    });
     let health = raw.pointer("/game/health").and_then(Value::as_f64);
     let play = s.live.play.as_mut().expect("just set");
     let id = play.id.clone();
     let mut out = vec![];
-    if let Some(lead_in) = lead_in {
-        if let Some(at) = lead_in {
-            out.push(clock_event(&id, at, false, false, 0, rate, health));
+    if let Some((at, paused)) = lead_in {
+        if play.clock != Some((at, paused, false)) {
+            play.clock = Some((at, paused, false));
+            out.push(clock_event(&id, at, paused, false, 0, rate, health));
         }
     } else if let Some(time) = time {
         let last = play.clock.map(|(t, ..)| t);
@@ -411,7 +421,8 @@ fn clock_event(id: &str, time: i64, paused: bool, resuming: bool, age: i64, rate
 // tick: spectators count down to the resume from when it arrives, and stop where it failed
 pub(crate) fn on_game(b: &Arc<Bridge>, raw: &Value) {
     let menu = raw.pointer("/game/pauseMenu").and_then(Value::as_bool);
-    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true);
+    let stable_empty = raw.get("client").and_then(Value::as_str) == Some("stable") && raw.pointer("/game/health").and_then(Value::as_f64).is_some_and(|h| h <= 0.0);
+    let failed = raw.pointer("/game/failed").and_then(Value::as_bool) == Some(true) || stable_empty;
     let still = stable_still(raw);
     let changed = {
         let mut s = b.st();
@@ -439,6 +450,19 @@ pub(crate) fn on_game(b: &Arc<Bridge>, raw: &Value) {
 // of its reads, a quarter second apart
 fn stable_still(raw: &Value) -> bool {
     raw.get("client").and_then(Value::as_str) == Some("stable") && raw.pointer("/game/paused").and_then(Value::as_bool) == Some(true)
+}
+
+// stable fails the moment health runs out, unless No Fail or Easy's extra lives keep it going.
+// only once the bar was seen above 0, it can start empty while the play loads
+fn stable_out_of_health(s: &mut State, raw: &Value) -> bool {
+    let Some(play) = s.live.play.as_mut() else { return false };
+    let Some(health) = raw.pointer("/game/health").and_then(Value::as_f64) else { return false };
+    if raw.get("client").and_then(Value::as_str) != Some("stable") {
+        return false;
+    }
+    play.had_health |= health > 0.0;
+    let kept_alive = play.start["mods"].as_array().is_some_and(|m| m.iter().any(|x| matches!(x.as_str(), Some("NF" | "EZ"))));
+    play.had_health && health <= 0.0 && !kept_alive
 }
 
 fn play_rate(play: &Option<Play>) -> f64 {
