@@ -12,11 +12,10 @@ use serde_json::{json, Value};
 /// 壳侧 reason 闭集（唯一权威）。形状照 `malody4/model.rs`：enum + `as_str()` 返回
 /// `String`，因为部分分支带参数（`signature-miss:<key>` / `invariant-failed:<field>`）。
 ///
-/// C2 起**整集**都在册（§3.4 的 11 个字面量）：前七条是 stable 读取路径真正会发的；
+/// C2 起**整集**都在册（§3.4 的字面量）：前七条是 stable 读取路径真正会发的；
 /// `unsupported-build:<hash>` 是**人工诊断标签**（不是自动门，消解与 DEC-05 的冲突——
 /// 没有任何哈希白名单会让它自动触发）；`lazer-offsets-missing:<ver>` 与
-/// `platform-unsupported` 属 E 步（lazer/非 Windows）；`shadow-mismatch:<field>` 是 L3
-/// 影子比对的升级出口（默认只记录，配置升级后回落时用）。在册即被单测钉住字面量。
+/// `platform-unsupported` 属 E 步（lazer/非 Windows）。在册即被单测钉住字面量。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Reason {
     ProcessNotFound,
@@ -34,8 +33,6 @@ pub enum Reason {
     ReadError,
     /// L1/L2 校验不过：`invariant-failed:<field>`。
     InvariantFailed(&'static str),
-    /// L3 影子比对连续不一致（升级后回落时用）：`shadow-mismatch:<field>`。
-    ShadowMismatch(&'static str),
 }
 
 impl Reason {
@@ -51,7 +48,6 @@ impl Reason {
             Reason::PlatformUnsupported => "platform-unsupported".to_string(),
             Reason::ReadError => "read-error".to_string(),
             Reason::InvariantFailed(field) => format!("invariant-failed:{field}"),
-            Reason::ShadowMismatch(field) => format!("shadow-mismatch:{field}"),
         }
     }
 
@@ -68,7 +64,6 @@ impl Reason {
             Reason::PlatformUnsupported.as_str(),
             Reason::ReadError.as_str(),
             Reason::InvariantFailed("state.name").as_str(),
-            Reason::ShadowMismatch("identity").as_str(),
         ]
     }
 
@@ -385,41 +380,6 @@ impl Snapshot {
 
     pub fn is_result_state(&self) -> bool {
         self.state_name.as_deref() == Some("resultScreen")
-    }
-
-    /// 对拍记录用的紧凑形态（`identity`/`mod_signature` 由 `keys.rs` 现算）。
-    pub fn to_compare_json(&self) -> Value {
-        let keys = crate::osu::keys::derive(self);
-        json!({
-            "client": self.client.map(|c| c.as_str()),
-            "state_number": self.state_number,
-            "state_name": self.state_name,
-            "checksum": self.checksum,
-            "id": self.map_id,
-            "set": self.set_id,
-            "filename": self.filename,
-            "folder": self.folder,
-            "version": self.version,
-            "mapID_bits": self.map_id_bits,
-            "menu_mods_mask": self.menu_mods_mask,
-            "play_mods_mask": self.play_mods_mask,
-            "result_mods_mask": self.result_mods_mask,
-            "play_time": self.play_time,
-            "paused": self.paused,
-            "play_hits": self.play_hits.map(|h| h.canonical()),
-            "play_seed": self.play_seed,
-            "result_hits": self.result_hits.map(|h| h.canonical()),
-            "result_seed": self.result_seed,
-            "hits_candidates": self.hits_candidates,
-            "retries": self.retries,
-            "plays": self.plays,
-            "songs_cfg_value": self.songs_cfg_value,
-            "songs_folder": self.songs_folder,
-            "first_object": self.first_object(),
-            "last_object": self.last_object(),
-            "identity": keys.identity,
-            "mod_signature": keys.mod_signature,
-        })
     }
 }
 

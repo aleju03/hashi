@@ -93,8 +93,12 @@ pub fn read_eetype(
 // it's one pointer further). the tables' offset is windows coreclr's, linux's lays the Module out
 // differently, so there it's looked for once: the field holding a loaded module's base
 static IMAGE_BASE_AT: std::sync::Mutex<Option<(u64, Option<u64>)>> = std::sync::Mutex::new(None);
-const MODULE_SPAN: usize = 0x400;
+pub(crate) const MODULE_SPAN: usize = 0x400;
 const INNER_SPAN: usize = 0x100;
+
+pub(crate) fn forget_image_base() {
+    *IMAGE_BASE_AT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
 
 pub(crate) fn found_image_base(source: &dyn Source, module: u64, modules: &[(u64, String)]) -> Option<(u64, String)> {
     let known = |value: u64| modules.iter().find(|(base, _)| *base == value).cloned();

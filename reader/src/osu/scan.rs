@@ -202,8 +202,6 @@ fn read_chunk(handle: win::Handle, addr: usize, want: usize) -> Option<Vec<u8>> 
 /// 分块读时携带 `pattern.len() - 1` 字节的尾接（overlap），保证跨块边界的签名不被漏掉；
 /// 读失败的块**推进 `CHUNK_MAX` 并丢弃尾接**（不能拿上一块的尾巴去接下一块的头冒充连续内存）。
 ///
-/// The pattern's longest run of fixed bytes is searched for with memmem, the whole pattern checked
-/// only where it turns up.
 #[cfg(any(windows, target_os = "linux"))]
 pub fn find_in_regions(
     handle: win::Handle,
@@ -223,7 +221,10 @@ pub fn find_in_regions(
 
 /// 64 位目标的同一份扫描（Step 10B）：命中的地址是 `u64`（lazer 的对象地址可以 >4 GiB）。
 ///
-/// 与 32 位版的**唯一**差别是地址宽度：分块/尾接/首字节快筛/失败处置全部逐字相同。
+/// 与 32 位版的**唯一**差别是地址宽度：分块/尾接/失败处置全部逐字相同。
+///
+/// The pattern's longest run of fixed bytes is searched for with memmem, the whole pattern checked
+/// only where it turns up.
 #[cfg(any(windows, target_os = "linux"))]
 pub fn find_in_regions64(
     handle: win::Handle,
@@ -268,7 +269,10 @@ pub fn find_in_regions64(
                             let mut from = 0;
                             while let Some(found) = finder.find(&window[from..]).map(|i| from + i) {
                                 from = found + 1;
-                                let Some(at) = found.checked_sub(anchor_at).filter(|at| *at <= last) else { continue };
+                                let Some(at) = found.checked_sub(anchor_at) else { continue };
+                                if at > last {
+                                    break;
+                                }
                                 if pattern.matches_at(&window, at) && push(at) {
                                     break 'regions;
                                 }

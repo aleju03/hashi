@@ -8,7 +8,6 @@
 
 pub mod anchor_cache;
 pub mod beatmap_file;
-pub mod compare;
 pub mod discovery;
 pub mod invariants;
 pub mod keys;
@@ -19,7 +18,6 @@ pub mod packet;
 pub mod patterns;
 pub mod runner;
 pub mod scan;
-pub mod shadow;
 pub mod stable;
 pub mod win;
 

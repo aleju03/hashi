@@ -15,24 +15,18 @@
 //
 // 本文件是准备工作，不改变现有读取行为：
 // 1. `lazer_mods_from_mods_json`：JSON → `Vec<LazerMod>`（单元测试覆盖）；
-// 2. `probe_once`：`MMA_LAZER_MODS_PROBE=1` 时，从屏幕栈顶（Player）扫出
-//    `<Score>` → `<ScoreInfo>` → `ModsJson`，把结果写进壳日志。只读、只记日志，
-//    找不到就静默返回，不参与载荷。
 //
 // 下一步（拿到一次真机日志后）：把 Score/ScoreInfo 的位移固化进偏移表的 `play` 段
 // （与 `results` 段同形），让 `read_lazer_mods` 优先读 `ModsJson`，`SelectedMods`
 // 的启发式降为兜底。
 
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::osu::model::LazerMod;
 use crate::osu::offsets::OffsetTable;
 
 use super::screen::read_eetype;
-use super::source::{read_f32, read_f64, read_ptr_field, read_string, read_u8, Source, StringLayout};
+use super::source::{read_ptr_field, read_string, Source, StringLayout};
 
 /// `APIMod[]` 的 JSON 形状：
 /// `[{"acronym":"DT","settings":{"speed_change":1.2}}, {"acronym":"DA","settings":{"overall_difficulty":8.5}}]`
@@ -87,59 +81,6 @@ const SCAN_START: u64 = 0x8;
 const SCREEN_SCAN_END: u64 = 0x800;
 const SCORE_SCAN_END: u64 = 0x40;
 const SCOREINFO_SCAN_END: u64 = 0x400;
-const PROBE_INTERVAL_MS: u64 = 1000;
-
-static LAST_ATTEMPT_MS: AtomicU64 = AtomicU64::new(0);
-static LAST_DONE_SCREEN: AtomicU64 = AtomicU64::new(0);
-static LAST_REPORTED_SCREEN: AtomicU64 = AtomicU64::new(0);
-
-/// 探针入口：只在 `MMA_LAZER_MODS_PROBE` 设置时工作；每个屏幕对象最多每秒尝试一次。
-/// 成功后不再重复；失败时每个屏幕对象只报一次（仍会节流重试，等 `Player` 加载完）。
-pub fn probe_once(
-    source: &dyn Source,
-    table: &OffsetTable,
-    screen_top: u64,
-    layout: Option<StringLayout>,
-    modules: &[(u64, String)],
-) {
-    if std::env::var_os("MMA_LAZER_MODS_PROBE").is_none() || screen_top == 0 {
-        return;
-    }
-    if LAST_DONE_SCREEN.load(Ordering::Relaxed) == screen_top {
-        return;
-    }
-    let now = now_ms();
-    let previous = LAST_ATTEMPT_MS.load(Ordering::Relaxed);
-    if now.saturating_sub(previous) < PROBE_INTERVAL_MS {
-        return;
-    }
-    LAST_ATTEMPT_MS.store(now, Ordering::Relaxed);
-
-    match read_play_mods_json(source, table, screen_top, layout, modules) {
-        Some(read) => {
-            LAST_DONE_SCREEN.store(screen_top, Ordering::Relaxed);
-            crate::server::log::log_at(
-                "info",
-                &format!("[osu] lazer mods probe: {}", read.summary),
-            );
-        }
-        None => {
-            if LAST_REPORTED_SCREEN.swap(screen_top, Ordering::Relaxed) != screen_top {
-                crate::server::log::log_at(
-                    "info",
-                    &format!(
-                        "[osu] lazer mods probe: no ScoreInfo.ModsJson under screen=0x{screen_top:016X} (will retry)"
-                    ),
-                );
-            }
-        }
-    }
-}
-
-struct ProbeRead {
-    summary: String,
-    mods: Vec<LazerMod>,
-}
 
 static LAST_MODS_JSON: Mutex<Option<(u64, Vec<LazerMod>)>> = Mutex::new(None);
 
@@ -158,11 +99,11 @@ pub fn read_play_mods(
             }
         }
     }
-    let read = read_play_mods_json(source, table, screen_top, layout, modules)?;
+    let mods = read_play_mods_json(source, table, screen_top, layout, modules)?;
     if let Ok(mut cache) = LAST_MODS_JSON.lock() {
-        *cache = Some((screen_top, read.mods.clone()));
+        *cache = Some((screen_top, mods.clone()));
     }
-    Some(read.mods)
+    Some(mods)
 }
 
 /// 结算屏直接从 `ResultsScreen.Score` 的 `ScoreInfo.ModsJson` 读 mods。
@@ -183,76 +124,15 @@ pub fn read_results_mods(
     lazer_mods_from_mods_json(&json)
 }
 
-static PROBED_MODS: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
-pub fn probe_enabled() -> bool {
-    std::env::var_os("MMA_LAZER_MODS_PROBE").is_some()
-}
-
-/// 逐个 mod 对象打印候选引用字段与三种解码（u8 / f32 / f64），用于确认
-/// `SpeedChange`（double）与 `DifficultyBindable`（可空 float）的真实布局。
-/// 每个对象只打印一次；只在 `MMA_LAZER_MODS_PROBE` 设置时工作。
-pub fn probe_mod_object(
-    source: &dyn Source,
-    table: &OffsetTable,
-    object: u64,
-    type_name: &str,
-    acronym: &str,
-    modules: &[(u64, String)],
-) {
-    if !probe_enabled() {
-        return;
-    }
-    {
-        let mut guard = PROBED_MODS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let set = guard.get_or_insert_with(HashSet::new);
-        if !set.insert(object) {
-            return;
-        }
-    }
-
-    let mut fields = Vec::new();
-    for offset in [0x10u64, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40] {
-        let Some(pointer) = read_ptr_field(source, object, offset as i64) else {
-            continue;
-        };
-        let bindable_type = read_eetype(source, table, pointer, modules)
-            .ok()
-            .and_then(|info| info.type_name)
-            .unwrap_or_else(|| "?".to_string());
-        let u8_value = read_u8(source, pointer.saturating_add(0x40))
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "-".to_string());
-        let f32_value = read_f32(source, pointer.saturating_add(0x40))
-            .map(|value| format!("{value:?}"))
-            .unwrap_or_else(|| "-".to_string());
-        let f64_value = read_f64(source, pointer.saturating_add(0x40))
-            .map(|value| format!("{value:?}"))
-            .unwrap_or_else(|| "-".to_string());
-        fields.push(format!(
-            "+0x{offset:X} -> 0x{pointer:016X} type={bindable_type} \
-             u8@0x40={u8_value} f32@0x40={f32_value} f64@0x40={f64_value}"
-        ));
-    }
-    crate::server::log::log_at(
-        "info",
-        &format!(
-            "[osu] lazer mod probe: type={type_name} acronym={acronym} fields: {}",
-            fields.join("; ")
-        ),
-    );
-}
-
 fn read_play_mods_json(
     source: &dyn Source,
     table: &OffsetTable,
     screen_top: u64,
     layout: Option<StringLayout>,
     modules: &[(u64, String)],
-) -> Option<ProbeRead> {
+) -> Option<Vec<LazerMod>> {
     let layout = layout?;
-    let (score_offset, score) = find_object_of_type(
+    let (_, score) = find_object_of_type(
         source,
         table,
         screen_top,
@@ -261,7 +141,7 @@ fn read_play_mods_json(
         "osu.Game.Scoring.Score",
         modules,
     )?;
-    let (score_info_offset, score_info) = find_object_of_type(
+    let (_, score_info) = find_object_of_type(
         source,
         table,
         score,
@@ -271,14 +151,7 @@ fn read_play_mods_json(
         modules,
     )?;
     let json = find_mods_json(source, layout, score_info, SCOREINFO_SCAN_END)?;
-    let mods = lazer_mods_from_mods_json(&json)?;
-    let summary = format!(
-        "screen=0x{screen_top:016X} score_offset=0x{score_offset:X} score=0x{score:016X} \
-         scoreinfo_offset=0x{score_info_offset:X} scoreinfo=0x{score_info:016X} mods=[{}] mods_json={}",
-        summarize(&mods),
-        truncate(&json, 600)
-    );
-    Some(ProbeRead { summary, mods })
+    lazer_mods_from_mods_json(&json)
 }
 
 fn find_object_of_type(
@@ -333,31 +206,6 @@ fn find_mods_json(
         }
     }
     None
-}
-
-fn summarize(mods: &[LazerMod]) -> String {
-    mods.iter()
-        .map(|mod_| match (mod_.speed_change, mod_.overall_difficulty) {
-            (Some(rate), _) => format!("{}:{rate:.2}x", mod_.acronym),
-            (_, Some(od)) => format!("{}:OD{od}", mod_.acronym),
-            _ => mod_.acronym.clone(),
-        })
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    text.chars().take(max_chars).collect::<String>() + "…"
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

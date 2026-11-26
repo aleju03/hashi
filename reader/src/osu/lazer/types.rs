@@ -76,9 +76,10 @@ pub struct Attach {
     /// `SelectedMods`，反馈签名需要沿用这局 play 的 mods；没有 play 帧就保持 `None`，
     /// 由签名层 fail-closed。
     pub last_lazer_mods: Option<(Vec<LazerMod>, bool)>,
-    /// how many fields the table read from the game still lacks (0 for a bundled table)
-    pub live_missing: usize,
+    // what the table read from the game still lacks (nothing for a bundled table)
+    pub live_missing: Vec<String>,
     pub live_checked: Option<std::time::Instant>,
+    pub live_wait: std::time::Duration,
 }
 
 /// 逐帧诊断。

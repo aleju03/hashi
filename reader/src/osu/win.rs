@@ -300,14 +300,17 @@ mod linux {
         text.lines()
             .filter_map(|line| {
                 // start-end perms offset dev inode path, the path can have spaces in it
-                let fields: Vec<&str> = line.split_whitespace().collect();
-                let (start, end) = fields.first()?.split_once('-')?;
+                let mut fields = line.splitn(6, ' ');
+                let (start, end) = fields.next()?.split_once('-')?;
+                let perms = fields.next()?.to_string();
+                let offset = u64::from_str_radix(fields.next()?, 16).ok()?;
+                let path = fields.nth(2).unwrap_or_default().trim_start();
                 Some(Mapping {
                     start: u64::from_str_radix(start, 16).ok()?,
                     end: u64::from_str_radix(end, 16).ok()?,
-                    perms: fields.get(1)?.to_string(),
-                    offset: u64::from_str_radix(fields.get(2)?, 16).ok()?,
-                    path: fields.get(5..).map(|p| p.join(" ")).unwrap_or_default(),
+                    perms,
+                    offset,
+                    path: path.strip_suffix(" (deleted)").unwrap_or(path).to_string(),
                 })
             })
             .collect()
@@ -704,53 +707,6 @@ mod win32 {
         String::from_utf16_lossy(&wide[..len])
     }
 
-    /// 诊断开关：`MMA_OSU_DEBUG=1` 时把发现阶段的细节打到 stderr（默认关，避免刷屏）。
-    pub fn debug_enabled() -> bool {
-        matches!(std::env::var("MMA_OSU_DEBUG"), Ok(v) if v.trim() != "0" && !v.trim().is_empty())
-    }
-
-    /// 诊断用：原始 Toolhelp32 枚举结果（句柄有效性 / 首项调用返回值 / 总数 / osu! 名）。
-    ///
-    /// 存在的理由：`list_osu_processes` 在"快照句柄无效"与"枚举为空"两种情况下都返回
-    /// 空表，产品侧不打日志（免刷屏），于是真机上无法区分。本函数只在 dev 诊断工具里调。
-    pub fn diag_toolhelp() {
-        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        let valid = snap != 0 && snap != INVALID_HANDLE_VALUE;
-        println!(
-            "diag: CreateToolhelp32Snapshot handle=0x{:X} valid={} GetLastError={}",
-            snap,
-            valid,
-            unsafe { GetLastError() }
-        );
-        if !valid {
-            return;
-        }
-        let mut entry: ProcessEntry32W = unsafe { std::mem::zeroed() };
-        entry.dwSize = std::mem::size_of::<ProcessEntry32W>() as u32;
-        let first = unsafe { Process32FirstW(snap, &mut entry) };
-        println!(
-            "diag: Process32FirstW -> {first} GetLastError={} dwSize={} size_of={}",
-            unsafe { GetLastError() },
-            entry.dwSize,
-            std::mem::size_of::<ProcessEntry32W>()
-        );
-        let mut total = 0u32;
-        let mut osu_names: Vec<String> = Vec::new();
-        let mut more = first != 0;
-        while more {
-            total += 1;
-            let name = wide_to_string(&entry.szExeFile);
-            if name.to_lowercase().contains("osu") {
-                osu_names.push(format!("{}(pid={})", name, entry.th32ProcessID));
-            }
-            entry.dwSize = std::mem::size_of::<ProcessEntry32W>() as u32;
-            more = unsafe { Process32NextW(snap, &mut entry) } != 0;
-        }
-        println!("diag: total processes seen = {total}");
-        println!("diag: names containing 'osu' = {:?}", osu_names);
-        unsafe { CloseHandle(snap) };
-    }
-
     /// Toolhelp32 进程枚举 → `(pid, exe 文件名)`。
     pub fn list_osu_processes() -> Result<Vec<(u32, String)>, Reason> {
         let snap = OwnedHandle(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) });
@@ -963,6 +919,12 @@ mod win32 {
             );
             return finish_selection(found);
         }
+        // the process list is looked at every second, the slow sweep only every so often
+        if LAST_SWEEP.with(|at| at.get()).is_some_and(|at| at.elapsed() < crate::osu::SWEEP_RETRY) {
+            SWEPT.with(|slot| slot.set(false));
+            return Err(Reason::ProcessNotFound);
+        }
+        LAST_SWEEP.with(|at| at.set(Some(std::time::Instant::now())));
         let swept = discover_by_pid_sweep();
         SWEPT.with(|slot| slot.set(true));
         eprintln!(
@@ -1175,24 +1137,14 @@ mod win32 {
     fn discover_by_pid_sweep() -> Candidates {
         let mut found_stable: Vec<(u32, PathBuf, u64, usize)> = Vec::new();
         let mut found_lazer: Vec<(u32, PathBuf, u64, usize)> = Vec::new();
-        let mut opened = 0u32;
         for pid in candidate_pids() {
             match see_pid(pid) {
                 Seen::Stable(path, private, regions) => {
                     found_stable.push((pid, path, private, regions))
                 }
                 Seen::Lazer(path, private, regions) => found_lazer.push((pid, path, private, regions)),
-                Seen::Unreadable => {}
-                Seen::Other => opened += 1,
+                Seen::Other | Seen::Unreadable => {}
             }
-        }
-        if debug_enabled() {
-            eprintln!(
-                "[osu] pid-sweep detail: readable-but-not-osu={} stable={:?} lazer={:?}",
-                opened,
-                describe_candidates(&found_stable),
-                describe_candidates(&found_lazer)
-            );
         }
         let (stable, lazer) = dedupe_rows(found_stable, found_lazer);
         // 只对**留下来的少量候选**查进程表（每次 `toolhelp_entry` 是一次全表枚举，
@@ -1216,15 +1168,6 @@ mod win32 {
             lazer,
             source: discovery::Source::PidSweep,
         }
-    }
-
-    /// 诊断行：候选的 `pid:映像:私有MB:区域数`（日志与证据用）。
-    fn describe_candidates(rows: &[(u32, PathBuf, u64, usize)]) -> Vec<String> {
-        rows.iter()
-            .map(|(pid, path, private, regions)| {
-                format!("{pid}:{}:{}MB:{regions}", path.display(), private / (1024 * 1024))
-            })
-            .collect()
     }
 
     /// 每个位数桶各自按坐标去重（幻觉坐标指向同一进程 ⇒ 与真候选同桶 ⇒ 同键）。
@@ -1364,6 +1307,7 @@ mod win32 {
     thread_local! {
         /// 上一次 `select_target()` 是否走了 PID 扫描兜底。
         static SWEPT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static LAST_SWEEP: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
         /// 上一次发现是否"还没定论、但很快会有"（`Decision::Retry`）⇒ 用短重试间隔。
         static RETRY_SOON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// **跨次扫描的候选集记忆**（进程选择的唯一状态；见 `osu::discovery::Stability`）。

@@ -80,27 +80,6 @@ pub fn run(
     let mut gate = Gate::new();
     let mut previous_live: Option<i32> = None;
 
-    let compare_on = compare::enabled();
-    let feed = if compare_on {
-        let feed = Arc::new(compare::TosuFeed::default());
-        compare::spawn_tosu_client(feed.clone());
-        Some(feed)
-    } else {
-        None
-    };
-    let mut writer = compare_on.then(|| compare::SampleWriter::new(compare::samples_path()));
-    let compare_interval = if compare_on {
-        compare::interval()
-    } else {
-        TICK
-    };
-    if compare_on {
-        eprintln!(
-            "[osu] compare: interval={}ms out={}",
-            compare_interval.as_millis(),
-            compare::samples_path().display()
-        );
-    }
     let mut osu_cache: Option<OsuFileCache> = None;
 
     loop {
@@ -180,8 +159,8 @@ pub fn run(
                     };
                     let retry_soon = win::retry_soon();
                     let used_sweep = win::last_discovery_used_sweep();
-                    // no game yet is only a look at the process list, cheap enough to do every second so
-                    // one that starts is seen at once; the backoff is for one that's there but won't attach
+                    // no game yet: looked for every second so one that starts is seen at once (windows'
+                    // slow sweep keeps its own pace); the backoff is for one that's there but won't attach
                     let delay = if reason == Reason::ProcessNotFound {
                         GAME_POLL
                     } else {
@@ -267,16 +246,6 @@ pub fn run(
                                     ..Default::default()
                                 }),
                                 extra,
-                            );
-                            write_record(
-                                writer.as_mut(),
-                                feed.as_ref(),
-                                &CompareInput {
-                                    snapshot: &Snapshot::default(),
-                                    outcome: &outcome,
-                                    probe: None,
-                                    result: None,
-                                },
                             );
                             scan_fail_attempt += 1;
                             attached = None;
@@ -367,21 +336,6 @@ pub fn run(
                             last_scan_fail = None;
                             scan_fail_attempt = 0;
                             gate.on_anchor_resolved(now_ms);
-                            if anchor_cache_selftest() {
-                                let started = std::time::Instant::now();
-                                match cached_anchors(target, &mut regions, &mut anchor_cache, stable_table.as_ref()) {
-                                    Some((entry, validated_ms)) => eprintln!(
-                                        "[osu] selftest: anchors from cache validated in {}ms ({}us): {} unresolved={:?}",
-                                        validated_ms,
-                                        started.elapsed().as_micros(),
-                                        entry.describe(),
-                                        entry.unresolved
-                                    ),
-                                    None => eprintln!(
-                                        "[osu] selftest: cache validation returned no table (reason above)"
-                                    ),
-                                }
-                            }
                         }
                         Err(reason) => {
                             let detail = reason.as_str();
@@ -400,16 +354,6 @@ pub fn run(
                             let outcome = gate.on_anchor_failure(reason.clone(), now_ms);
                             log_transition(&outcome);
                             publish_outcome(&reader, &gate, &outcome, None, None, Some(client));
-                            write_record(
-                                writer.as_mut(),
-                                feed.as_ref(),
-                                &CompareInput {
-                                    snapshot: &Snapshot::default(),
-                                    outcome: &outcome,
-                                    probe: None,
-                                    result: None,
-                                },
-                            );
                             scan_fail_attempt += 1;
                             attached = None;
                             regions = scan::RegionCache::new();
@@ -455,11 +399,7 @@ pub fn run(
                     if let Some(live) = snapshot.play_time {
                         snapshot.paused = Some(stable::paused_from_previous(previous_live, Some(live)));
                     }
-                    FrameRead {
-                        snapshot,
-                        probe: None,
-                        result: None,
-                    }
+                    FrameRead { snapshot }
                 }),
                 None => {
                     let table = anchors.as_ref().expect("anchors");
@@ -556,16 +496,6 @@ pub fn run(
                         anchors.as_ref().map(AnchorAddrs::from_table),
                         Some(client),
                     );
-                    write_record(
-                        writer.as_mut(),
-                        feed.as_ref(),
-                        &CompareInput {
-                            snapshot: &frame.snapshot,
-                            outcome: &outcome,
-                            probe: frame.probe.as_ref(),
-                            result: frame.result.as_ref(),
-                        },
-                    );
                     publish_phase(
                         &reader,
                         phase_for(
@@ -589,16 +519,6 @@ pub fn run(
                     let outcome = gate.on_anchor_failure(reason.clone(), now_ms);
                     log_transition(&outcome);
                     publish_outcome(&reader, &gate, &outcome, None, None, Some(client));
-                    write_record(
-                        writer.as_mut(),
-                        feed.as_ref(),
-                        &CompareInput {
-                            snapshot: &Snapshot::default(),
-                            outcome: &outcome,
-                            probe: None,
-                            result: None,
-                        },
-                    );
                     attached = None;
                     anchors = None;
                     lazer_attach = None;
@@ -623,7 +543,7 @@ pub fn run(
             }
         }
         // 全量帧 250ms；两次全量帧之间按 100ms 读逐判定事件。
-        let next_full = std::time::Instant::now() + compare_interval;
+        let next_full = std::time::Instant::now() + TICK;
         if let Some(target) = attached.as_ref() {
             loop {
                 if let (Some(player), Some(attach)) = (hit_player, lazer_attach.as_ref()) {
@@ -684,7 +604,7 @@ pub fn run(
                 thread::sleep(remaining.min(std::time::Duration::from_millis(100)));
             }
         } else {
-            thread::sleep(compare_interval);
+            thread::sleep(TICK);
         }
     }
 }
@@ -899,28 +819,6 @@ pub fn log_transition(outcome: &invariants::FrameOutcome) {
 }
 
 #[cfg(any(windows, target_os = "linux"))]
-pub struct CompareInput<'a> {
-    pub snapshot: &'a Snapshot,
-    pub outcome: &'a invariants::FrameOutcome,
-    pub probe: Option<&'a stable::ChainProbe>,
-    pub result: Option<&'a stable::ResultRead>,
-}
-
-#[cfg(any(windows, target_os = "linux"))]
-pub fn write_record(
-    writer: Option<&mut compare::SampleWriter>,
-    feed: Option<&Arc<compare::TosuFeed>>,
-    input: &CompareInput<'_>,
-) {
-    let Some(writer) = writer else {
-        return;
-    };
-    let tosu = feed.and_then(|f| f.latest());
-    let record = compare::record(input.snapshot, input.outcome, input.probe, input.result, tosu.as_ref());
-    writer.write(&record);
-}
-
-#[cfg(any(windows, target_os = "linux"))]
 pub fn resolve_anchors(
     target: &win::Target,
     regions: &mut scan::RegionCache,
@@ -1022,11 +920,6 @@ pub fn resolve_anchors(
 }
 
 #[cfg(any(windows, target_os = "linux"))]
-pub fn anchor_cache_selftest() -> bool {
-    matches!(std::env::var("MMA_OSU_ANCHOR_CACHE_SELFTEST"), Ok(value) if value.trim() == "1")
-}
-
-#[cfg(any(windows, target_os = "linux"))]
 pub fn cached_anchors(
     target: &win::Target,
     regions: &mut scan::RegionCache,
@@ -1116,8 +1009,6 @@ pub fn signature_still_matches(
 #[cfg(any(windows, target_os = "linux"))]
 pub struct FrameRead {
     pub snapshot: Snapshot,
-    pub probe: Option<stable::ChainProbe>,
-    pub result: Option<stable::ResultRead>,
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -1214,13 +1105,10 @@ pub fn read_frame(
         }
     }
 
-    let mut probe = None;
-    let mut result_read = None;
     if let Some(rulesets_addr) = table.rulesets_addr {
         match stable::resolve_ruleset_with_topo(target, rulesets_addr, topo) {
-            Ok((ruleset, chain_probe)) => {
+            Ok((ruleset, _)) => {
                 snapshot.ruleset_base = Some(ruleset);
-                probe = Some(chain_probe);
                 if let Some(base_addr) = table.base_addr {
                     let in_game = stable::read_in_game_with_topo(target, ruleset, base_addr, topo);
                     snapshot.gameplay_base = in_game.gameplay_base;
@@ -1262,7 +1150,6 @@ pub fn read_frame(
                         }
                     }
                 }
-                result_read = Some(result);
             }
             Err(reason) => {
                 eprintln!("[osu] ruleset chain failed: {}", reason.as_str());
@@ -1296,11 +1183,7 @@ pub fn read_frame(
     }
 
     snapshot.degraded_fields = degraded;
-    Ok(FrameRead {
-        snapshot,
-        probe,
-        result: result_read,
-    })
+    Ok(FrameRead { snapshot })
 }
 
 #[cfg(any(windows, target_os = "linux"))]

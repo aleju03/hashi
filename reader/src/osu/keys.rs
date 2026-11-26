@@ -232,7 +232,7 @@ impl PageMods {
 ///
 /// 已知**范围例外**（如实记录）：页面在锦标赛模式下还会读 `tourney.clients[].play.mods` 与
 /// `tourney.ipcClients[].gameplay.mods`（`modData.js:14-19`）。本装置不读它们——我们的载荷
-/// 不产出 `tourney` 块，且落盘投影默认丢弃它（`compare.rs::KEPT_TOP_LEVEL`），读它等于把
+/// 不产出 `tourney` 块，读它等于把
 /// "两个传输的差异"换成"锦标赛模式的差异"。
 pub fn page_mods(payload: &Value, client: Client) -> PageMods {
     let in_play_state = is_play_state_name(&normalize_client_state_name(

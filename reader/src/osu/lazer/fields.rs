@@ -5,7 +5,7 @@ use crate::osu::offsets::FieldLookup;
 pub const MARKER_PATTERN: &str = "01 01 00 00 00 00 80 44 00 00 40 44";
 pub const ANCHOR_SITE_DELTA: i64 = 0x24;
 pub const SITE_DELTAS: &[i64] = &[0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34];
-// (label, offset, the field it is): the offsets are 2026's, the field names find them in later builds
+// (label, offset, field name): the offset is used when the field can't be found by name in the running build
 pub const GAME_BASE_HOPS: &[(&str, u64, &str)] = &[
     ("external_link_opener", 0x0, ""),
     ("api_access", 0x218, "<api>k__BackingField"),

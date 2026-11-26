@@ -1011,12 +1011,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ct-codecs"
-version = "1.1.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fd9f3db6f2cfef61c10613071955154ffdc9e515daebff26de4b54e35038fdd"
-
-[[package]]
 name = "ctor"
 version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1364,16 +1358,6 @@ dependencies = [
  "rfc6979",
  "signature",
  "spki",
-]
-
-[[package]]
-name = "ed25519-compact"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9547879431a90e352a35863a54416d92898a787b9af09e6ae2e09a96bd78be80"
-dependencies = [
- "ct-codecs",
- "getrandom 0.4.3",
 ]
 
 [[package]]
@@ -3953,14 +3937,12 @@ dependencies = [
 name = "osu-reader"
 version = "0.2.0"
 dependencies = [
- "ed25519-compact",
  "libc",
  "lzma-rs",
  "md-5",
  "memchr",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "winreg",
 ]
 

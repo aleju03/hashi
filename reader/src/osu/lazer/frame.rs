@@ -318,15 +318,12 @@ pub fn read_frame(input: FrameInput<'_>) -> Result<LazerFrame, Reason> {
         }
     }
 
-    // ⑥c 预研探针：`MMA_LAZER_MODS_PROBE=1` 时从 Player 扫 `Score.ScoreInfo.ModsJson`。
-    //     只写壳日志，不参与载荷；读取链路固化前不动现有 `SelectedMods` 读取。
     let mut mods_json_mods = None;
     // 结算屏的 mods 是否来自该成绩自己的 `ScoreInfo.ModsJson`（含空数组）：
     // 是 ⇒ `read_tick` 不允许再用上一局 play 帧的 mods 覆盖（历史成绩可能属于别的 mod）。
     let mut mods_from_score = false;
     if snapshot.state_name.as_deref() == Some("play") {
         if let Some(screen_top) = chain.screen_top {
-            super::mods::probe_once(source, table, screen_top, layout, modules);
             // ModsJson 是 RD seed / 自定义设置最稳的来源；读不到时回退 SelectedMods。
             mods_json_mods = super::mods::read_play_mods(source, table, screen_top, layout, modules);
         }
@@ -591,40 +588,35 @@ pub fn scan_markers(
     Err(Reason::SignatureMiss(ANCHOR_KEY))
 }
 
-#[cfg(any(windows, target_os = "linux"))]
-fn live_template() -> Option<OffsetTable> {
-    OffsetTable::load(crate::osu::offsets::DEFAULT_LAZER_TABLE_JSON.as_bytes()).ok()
+fn live_template() -> Option<&'static OffsetTable> {
+    static TEMPLATE: std::sync::OnceLock<Option<OffsetTable>> = std::sync::OnceLock::new();
+    TEMPLATE.get_or_init(|| OffsetTable::load(crate::osu::offsets::DEFAULT_LAZER_TABLE_JSON.as_bytes()).ok()).as_ref()
 }
 
-// the table read from the game, with how many of its fields aren't there yet
-fn live_layout(source: &dyn Source, modules: &[(u64, String)], game_base: u64, info: &TargetInfo) -> Option<(OffsetTable, usize)> {
-    super::layout::forget();
-    let template = live_template()?;
-    let version = (info.lazer_version.as_str(), info.runtime_version.as_str(), info.arch.as_str());
-    let line = match super::layout::live_table(source, modules, game_base, &template, version) {
+// for checking a new lazer's offsets against other tables by hand
+fn write_table_out(table: &OffsetTable) {
+    if let Some(path) = std::env::var_os("OSU_READER_TABLE_OUT") {
+        let _ = std::fs::write(path, serde_json::to_vec_pretty(table).unwrap_or_default());
+    }
+}
+
+// the table read from the game, with what it doesn't have yet
+fn live_layout(source: &dyn Source, modules: &[(u64, String)], game_base: u64, info: &TargetInfo) -> Option<(OffsetTable, Vec<String>)> {
+    match super::layout::live_table(source, modules, game_base, live_template()?, info) {
         Ok(live) => {
             let mut line = format!("[osu] lazer offsets read from the game: {} type(s)", live.table.types.len());
             if !live.missing.is_empty() {
                 line += &format!(", missing {}", live.missing.join(", "));
             }
-            // a bundled table for this same build should agree to the byte
-            let build = |v: &str| v.split(['.', '-']).take(2).collect::<Vec<_>>().join(".");
-            if build(&template.lazer_version) == build(&info.lazer_version) {
-                let differ = super::layout::differences(&live.table, &template);
-                line += &format!("; against the bundled {}: {}", template.lazer_version, if differ.is_empty() { "same".to_string() } else { differ.join(", ") });
-            }
             crate::server::log::log_at("info", &line);
-            eprintln!("{line}");
-            if let Some(path) = std::env::var_os("OSU_READER_TABLE_OUT") {
-                let _ = std::fs::write(path, serde_json::to_vec_pretty(&live.table).unwrap_or_default());
-            }
-            return Some((live.table, live.missing.len()));
+            write_table_out(&live.table);
+            Some((live.table, live.missing))
         }
-        Err(why) => format!("[osu] lazer offsets can't be read from the game: {why}"),
-    };
-    crate::server::log::log_at("warn", &line);
-    eprintln!("{line}");
-    None
+        Err(why) => {
+            crate::server::log::log_at("warn", &format!("[osu] lazer offsets can't be read from the game: {why}"));
+            None
+        }
+    }
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -659,6 +651,7 @@ pub fn attach(
     eprintln!("{target_line}");
     crate::server::log::log_at("info", &target_line);
     let source: &dyn Source = target;
+    super::layout::forget();
     let modules = match crate::osu::win::module_list(target.pid) {
         Ok(list) => {
             eprintln!(
@@ -729,7 +722,7 @@ pub fn attach(
     let live = resolution.accepted().and_then(|candidate| live_layout(source, &modules, candidate.game_base?, &info));
     let (loaded, live_missing) = match live {
         Some((table, missing)) if prove(&table) => (LoadedTable { table, origin: TableOrigin::Live, path: PathBuf::from("<live>"), mismatch: None }, missing),
-        _ => (load_table(&files, env_path.as_deref(), &table_dir, &info, &prove)?, 0),
+        _ => (load_table(&files, env_path.as_deref(), &table_dir, &info, &prove)?, Vec::new()),
     };
     // 诊断：实际加载的是哪张表、有没有结算屏判定数（`results` 段）。页面只能看到
     // `degradedFields`，这一行让现场日志能区分"表没这一段"与"读失败"。
@@ -793,36 +786,40 @@ pub fn attach(
         last_lazer_mods: None,
         live_missing,
         live_checked: None,
+        live_wait: LIVE_RETRY,
     })
 }
 
 // .NET loads a type the first time the game uses it: a results screen's or a replay's aren't
-// there until one has been shown, so what the live table lacks is looked for again now and then
+// there until one has been shown, so what the live table lacks is looked for again, less often
+// each time nothing new turns up
 const LIVE_RETRY: std::time::Duration = std::time::Duration::from_millis(500);
+const LIVE_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[cfg(any(windows, target_os = "linux"))]
 fn fill_live(attach: &mut Attach, source: &dyn Source) {
-    if attach.live_missing == 0 || attach.live_checked.is_some_and(|at| at.elapsed() < LIVE_RETRY) {
+    if attach.live_missing.is_empty() || attach.live_checked.is_some_and(|at| at.elapsed() < attach.live_wait) {
         return;
     }
     attach.live_checked = Some(std::time::Instant::now());
     let Some(template) = live_template() else { return };
-    let info = &attach.target;
-    let version = (info.lazer_version.as_str(), info.runtime_version.as_str(), info.arch.as_str());
-    let Ok(live) = super::layout::live_table(source, &attach.modules, attach.game_base, &template, version) else { return };
-    if live.missing.len() < attach.live_missing {
-        let line = match live.missing.is_empty() {
+    let Ok(live) = super::layout::live_table(source, &attach.modules, attach.game_base, template, &attach.target) else { return };
+    let better = live.missing.len() < attach.live_missing.len() && live.missing.iter().all(|m| attach.live_missing.contains(m));
+    if !better || table_probe(source, &live.table, attach.game_base).is_err() {
+        attach.live_wait = (attach.live_wait * 2).min(LIVE_RETRY_MAX);
+        return;
+    }
+    crate::server::log::log_at(
+        "info",
+        &match live.missing.is_empty() {
             true => "[osu] lazer offsets read from the game: complete".to_string(),
             false => format!("[osu] lazer offsets read from the game: still missing {}", live.missing.join(", ")),
-        };
-        crate::server::log::log_at("info", &line);
-        eprintln!("{line}");
-        if let Some(path) = std::env::var_os("OSU_READER_TABLE_OUT") {
-            let _ = std::fs::write(path, serde_json::to_vec_pretty(&live.table).unwrap_or_default());
-        }
-        attach.live_missing = live.missing.len();
-        attach.table = live.table;
-    }
+        },
+    );
+    write_table_out(&live.table);
+    attach.live_missing = live.missing;
+    attach.live_wait = LIVE_RETRY;
+    attach.table = live.table;
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -1089,13 +1086,6 @@ pub fn read_lazer_mods(
                 String::new()
             }
         };
-
-        if super::mods::probe_enabled() {
-            let acronym = mod_acronym_from_type_name(&type_name)
-                .map(|(acronym, _)| acronym)
-                .unwrap_or("?");
-            super::mods::probe_mod_object(source, table, mod_obj, &type_name, acronym, modules);
-        }
 
         if let Some((acronym, default_speed)) = mod_acronym_from_type_name(&type_name) {
             let mut speed_change = default_speed;

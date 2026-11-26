@@ -33,7 +33,7 @@ pub(crate) mod server {
 pub(crate) mod config {
     use std::path::PathBuf;
 
-    // lazer's data folder when it isn't where lazer says, OSU_LAZER_DIR overrides
+    // lazer's data folder when it isn't where lazer says: LAZER_DIR, as the app has it
     pub fn lazer_storage_root() -> Option<PathBuf> {
         std::env::var_os("LAZER_DIR").filter(|v| !v.is_empty()).map(PathBuf::from)
     }

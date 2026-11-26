@@ -134,7 +134,8 @@ impl Columns {
 #[derive(Default)]
 struct Config {
     read_at: Option<Instant>,
-    from: Option<PathBuf>,
+    // the game's folder it was read for
+    from: Option<(Client, String)>,
     skin: Option<String>,
     name: Option<String>,
 }
@@ -143,13 +144,17 @@ const CONFIG_EVERY: Duration = Duration::from_secs(10);
 
 impl Config {
     fn fill(&mut self, snapshot: &Snapshot, raw: &mut Value) {
-        let file = match snapshot.client {
-            Some(Client::Stable) => snapshot.game_folder.as_deref().and_then(|dir| stable_cfg(Path::new(dir))),
-            Some(Client::Lazer) => snapshot.songs_folder.as_deref().and_then(|files| Path::new(files).parent()).map(|dir| dir.join("game.ini")),
+        let folder = match snapshot.client {
+            Some(Client::Stable) => snapshot.game_folder.clone().map(|dir| (Client::Stable, dir)),
+            Some(Client::Lazer) => snapshot.songs_folder.clone().map(|files| (Client::Lazer, files)),
             None => None,
         };
-        if file != self.from || self.read_at.is_none_or(|at| at.elapsed() >= CONFIG_EVERY) {
-            let text = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
+        if folder != self.from || self.read_at.is_none_or(|at| at.elapsed() >= CONFIG_EVERY) {
+            let file = folder.as_ref().and_then(|(client, dir)| match client {
+                Client::Stable => stable_cfg(Path::new(dir)),
+                Client::Lazer => Path::new(dir).parent().map(|dir| dir.join("game.ini")),
+            });
+            let text = file.and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
             let value = |key: &str| {
                 text.lines().find_map(|line| {
                     let (k, v) = line.split_once('=')?;
@@ -158,7 +163,7 @@ impl Config {
             };
             self.skin = value("Skin");
             self.name = value("Username");
-            self.from = file;
+            self.from = folder;
             self.read_at = Some(Instant::now());
         }
         if snapshot.client == Some(Client::Stable) {
@@ -188,11 +193,11 @@ fn stable_cfg(game: &Path) -> Option<PathBuf> {
 
 // in percent. stable's scores a 300 and a perfect alike, lazer and ScoreV2 a perfect a little higher
 fn accuracy(h: &Hits, perfect_counts_more: bool) -> f64 {
-    let total = h.geki + h.n300 + h.katu + h.n100 + h.n50 + h.miss;
-    if total == 0 {
+    let total: f64 = [h.geki, h.n300, h.katu, h.n100, h.n50, h.miss].into_iter().map(f64::from).sum();
+    if total == 0.0 {
         return 0.0;
     }
     let top = if perfect_counts_more { 305.0 } else { 300.0 };
     let points = top * f64::from(h.geki) + 300.0 * f64::from(h.n300) + 200.0 * f64::from(h.katu) + 100.0 * f64::from(h.n100) + 50.0 * f64::from(h.n50);
-    100.0 * points / (top * f64::from(total))
+    100.0 * points / (top * total)
 }

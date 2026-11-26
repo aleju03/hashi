@@ -25,20 +25,22 @@ const BOX_OVERHEAD: i64 = 16;
 const OBJECT_HEADER: i64 = 8;
 const MAX_FIELDS: u64 = 4096;
 const MAX_PARENTS: usize = 64;
-const MODULE_SPAN: usize = 0x400;
+const MODULE_SPAN: usize = super::screen::MODULE_SPAN;
 const MAX_DICT_ENTRIES: i32 = 64;
+// osu.Game's is about 3 MB
+const MAX_METADATA: usize = 64 << 20;
 
 const FIELD_LITERAL: u16 = 0x40;
 
-pub struct Field {
-    pub name: String,
-    pub offset: i64,
+struct Field {
+    name: String,
+    offset: i64,
 }
 
 pub struct Layout<'a> {
     source: &'a dyn Source,
     modules: &'a [(u64, String)],
-    metadata: HashMap<u64, Option<(String, Arc<Metadata>)>>,
+    metadata: HashMap<u64, Option<Arc<Metadata>>>,
     fields: HashMap<u64, Option<Arc<Vec<Field>>>>,
     // where a Module keeps its row -> MethodTable list for the types it defines
     typedef_map_at: Option<u64>,
@@ -68,31 +70,34 @@ impl<'a> Layout<'a> {
         Some(read_u32(self.source, mt + MT_TOKEN)? >> 8).filter(|row| *row != 0)
     }
 
-    pub fn module_of(&self, mt: u64) -> Option<u64> {
+    fn module_of(&self, mt: u64) -> Option<u64> {
         self.u64(mt + MT_MODULE).filter(|m| plausible_ptr(*m))
     }
 
-    fn metadata(&mut self, module: u64) -> Option<(String, Arc<Metadata>)> {
+    fn parent(&self, mt: u64) -> Option<u64> {
+        self.u64(mt + MT_PARENT).filter(|p| plausible_ptr(*p))
+    }
+
+    fn metadata(&mut self, module: u64) -> Option<Arc<Metadata>> {
         if let Some(known) = self.metadata.get(&module) {
             return known.clone();
         }
-        let found = found_image_base(self.source, module, self.modules).and_then(|(base, name)| Some((name, metadata_at(self.source, base)?)));
+        let found = found_image_base(self.source, module, self.modules).and_then(|(base, _)| metadata_at(self.source, base));
         self.metadata.insert(module, found.clone());
         found
     }
 
-    pub fn module_name(&mut self, module: u64) -> Option<String> {
-        self.metadata(module).map(|(name, _)| name)
-    }
-
-    pub fn type_name(&mut self, mt: u64) -> Option<String> {
+    fn type_name(&mut self, mt: u64) -> Option<String> {
         let (canonical, _) = self.canonical(mt)?;
-        let (_, metadata) = self.metadata(self.module_of(canonical)?)?;
+        let metadata = self.metadata(self.module_of(canonical)?)?;
         metadata.type_name(self.row(canonical)?)
     }
 
     // every instance field, the base type's first, offsets from the object's start
-    pub fn fields(&mut self, mt: u64) -> Option<Arc<Vec<Field>>> {
+    fn fields(&mut self, mt: u64) -> Option<Arc<Vec<Field>>> {
+        if !plausible_ptr(mt) {
+            return None;
+        }
         if let Some(known) = self.fields.get(&mt) {
             return known.clone();
         }
@@ -103,7 +108,7 @@ impl<'a> Layout<'a> {
 
     fn read_fields(&mut self, mt: u64) -> Option<Vec<Field>> {
         let mut chain = vec![mt];
-        while let Some(parent) = self.u64(*chain.last()? + MT_PARENT).filter(|p| *p != 0) {
+        while let Some(parent) = self.parent(*chain.last()?) {
             if chain.len() >= MAX_PARENTS {
                 return None;
             }
@@ -113,7 +118,7 @@ impl<'a> Layout<'a> {
         for mt in chain.into_iter().rev() {
             let (canonical, class) = self.canonical(mt)?;
             let row = self.row(canonical)?;
-            let (_, metadata) = self.metadata(self.module_of(canonical)?)?;
+            let metadata = self.metadata(self.module_of(canonical)?)?;
             let (first, end) = metadata.field_rows(row)?;
             // literals (consts) get no FieldDesc
             let count = (first..end).filter(|r| metadata.field(*r).is_some_and(|(flags, _)| flags & FIELD_LITERAL == 0)).count() as u64;
@@ -144,7 +149,7 @@ impl<'a> Layout<'a> {
     }
 
     // the most derived field of that name
-    pub fn offset(&mut self, mt: u64, name: &str) -> Option<i64> {
+    fn offset(&mut self, mt: u64, name: &str) -> Option<i64> {
         self.fields(mt)?.iter().rev().find(|f| f.name == name).map(|f| f.offset)
     }
 
@@ -153,26 +158,26 @@ impl<'a> Layout<'a> {
         self.offset(mt, name)
     }
 
-    pub fn follow(&mut self, object: u64, name: &str) -> Option<u64> {
+    fn follow(&mut self, object: u64, name: &str) -> Option<u64> {
         let offset = self.object_offset(object, name)?;
         self.u64(object.checked_add(offset as u64)?).filter(|p| plausible_ptr(*p))
     }
 
     // a value type's size inline, in an array or another object
-    pub fn value_size(&self, mt: u64) -> Option<i64> {
+    fn value_size(&self, mt: u64) -> Option<i64> {
         Some(i64::from(read_u32(self.source, mt + MT_BASE_SIZE)?) - BOX_OVERHEAD).filter(|s| *s > 0)
     }
 
     // the MethodTable of a type the module defines, if it's loaded
-    pub fn find_type(&mut self, module: u64, full_name: &str) -> Option<u64> {
-        let (_, metadata) = self.metadata(module)?;
+    fn find_type(&mut self, module: u64, full_name: &str) -> Option<u64> {
+        let metadata = self.metadata(module)?;
         let row = metadata.find_type(full_name)?;
         let map = self.u64(module + self.typedef_map_at?)?;
         self.u64(map + 8 * u64::from(row)).map(|mt| mt & !7).filter(|mt| plausible_ptr(*mt))
     }
 
     // found once from a type whose MethodTable is known: the Module word pointing at a list holding it at its row
-    pub fn learn_typedef_map(&mut self, mt: u64) -> bool {
+    fn learn_typedef_map(&mut self, mt: u64) -> bool {
         if self.typedef_map_at.is_some() {
             return true;
         }
@@ -197,8 +202,10 @@ pub fn metadata_at(source: &dyn Source, base: u64) -> Option<Arc<Metadata>> {
     cache.get_or_insert_with(HashMap::new).entry(base).or_insert_with(|| Metadata::read(source, base).map(Arc::new)).clone()
 }
 
+// also where Modules keep their image's base, learned on one game and maybe not another's
 pub fn forget() {
     *METADATA.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    super::screen::forget_image_base();
 }
 
 // the parts of an assembly's metadata needed here: type and field names, which fields a type declares
@@ -386,6 +393,9 @@ impl Metadata {
 // one read can only be so big
 fn read_large(source: &dyn Source, addr: u64, len: usize) -> Option<Vec<u8>> {
     const PIECE: usize = 1 << 16;
+    if len > MAX_METADATA {
+        return None;
+    }
     let mut out = Vec::with_capacity(len);
     while out.len() < len {
         let size = PIECE.min(len - out.len());
@@ -414,7 +424,7 @@ impl Lookup<'_, '_> {
     fn find(&mut self, name: &str) -> Option<u64> {
         let found = self.search.iter().find_map(|module| self.layout.find_type(*module, open_name(name)));
         if found.is_none() {
-            self.missing.push(format!("type {name}"));
+            self.miss(format!("type {name}"));
         }
         found
     }
@@ -423,9 +433,15 @@ impl Lookup<'_, '_> {
         let mt = self.find(type_name)?;
         let offset = self.layout.offset(mt, name);
         if offset.is_none() {
-            self.missing.push(format!("field {type_name}.{name}"));
+            self.miss(format!("field {type_name}.{name}"));
         }
         offset
+    }
+
+    fn miss(&mut self, what: String) {
+        if !self.missing.contains(&what) {
+            self.missing.push(what);
+        }
     }
 
     // a value type's field as it sits inline
@@ -441,7 +457,7 @@ pub fn live_table(
     modules: &[(u64, String)],
     game_base: u64,
     template: &OffsetTable,
-    version: (&str, &str, &str),
+    target: &super::table::TargetInfo,
 ) -> Result<LiveTable, String> {
     let mut layout = Layout::new(source, modules);
     let game = read_u64(source, game_base).filter(|mt| plausible_ptr(*mt)).ok_or("game object unreadable")?;
@@ -455,7 +471,7 @@ pub fn live_table(
     let mut mt = game;
     for _ in 0..MAX_PARENTS {
         search.extend(layout.module_of(mt));
-        match read_u64(source, mt + MT_PARENT).filter(|p| *p != 0) {
+        match layout.parent(mt) {
             Some(parent) => mt = parent,
             None => break,
         }
@@ -476,7 +492,7 @@ pub fn live_table(
                 Some(offset) => {
                     found.insert(name.clone(), offset);
                 }
-                None => l.missing.push(format!("field {key}.{name}")),
+                None => l.miss(format!("field {key}.{name}")),
             }
         }
         types.insert(key.clone(), found);
@@ -551,7 +567,7 @@ pub fn live_table(
         let value = l.field("osu.Framework.Bindables.BindableDouble", "value")?;
         for other in ["osu.Framework.Bindables.BindableFloat", "osu.Framework.Bindables.BindableBool"] {
             if l.field(other, "value")? != value {
-                l.missing.push(format!("{other}.value differs"));
+                l.miss(format!("{other}.value differs"));
                 return None;
             }
         }
@@ -574,7 +590,7 @@ pub fn live_table(
         runtime.observed.clear();
         runtime
     });
-    let (lazer_version, runtime_version, arch) = version;
+    let (lazer_version, runtime_version, arch) = (&target.lazer_version, &target.runtime_version, &target.arch);
     Ok(LiveTable {
         table: OffsetTable {
             lazer_version: lazer_version.to_string(),
@@ -622,34 +638,6 @@ fn ruleset_modules(layout: &mut Layout, game_base: u64) -> Vec<u64> {
             let handle = layout.follow(object, "m_handle");
             if let Some(module) = handle.and_then(|h| layout.module_of(h)) {
                 out.push(module);
-            }
-        }
-    }
-    out
-}
-
-// what the live table and a bundled one disagree on, for the log
-pub fn differences(live: &OffsetTable, bundled: &OffsetTable) -> Vec<String> {
-    let mut out = Vec::new();
-    for (key, fields) in &bundled.types {
-        for (name, offset) in fields {
-            let got = live.types.get(key).and_then(|f| f.get(name));
-            if got != Some(offset) {
-                out.push(format!("{key}.{name}: {offset} vs {got:?}"));
-            }
-        }
-    }
-    let json = |v: serde_json::Result<serde_json::Value>| v.unwrap_or_default();
-    for (name, a, b) in [
-        ("score", json(serde_json::to_value(&live.score)), json(serde_json::to_value(&bundled.score))),
-        ("results", json(serde_json::to_value(&live.results)), json(serde_json::to_value(&bundled.results))),
-        ("mods", json(serde_json::to_value(&live.mods)), json(serde_json::to_value(&bundled.mods))),
-    ] {
-        if let Some(b) = b.as_object() {
-            for (key, value) in b.iter().filter(|(k, _)| k.as_str() != "witness") {
-                if a.get(key) != Some(value) {
-                    out.push(format!("{name}.{key}: {value} vs {:?}", a.get(key)));
-                }
             }
         }
     }
