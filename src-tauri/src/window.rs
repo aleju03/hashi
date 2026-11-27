@@ -227,20 +227,25 @@ fn overlay(app: &AppHandle, on: bool) {
     }
 }
 
-// on screen, zoom and all
+// the box the player dragged it to. the page fits the card inside at its own zoom
 fn overlay_size() -> (f64, f64) {
     let (w, h) = get(&OVERLAY_SIZE);
-    let zoom = get(&OVERLAY_ZOOM);
-    ((w * zoom).round(), (h * zoom).round())
+    (w.round(), h.round())
 }
 
 fn size_overlay(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     if hyprland() {
-        return hypr::resize();
+        let (w, h) = overlay_size();
+        return hypr::resize(w, h);
     }
     if let Some(w) = app.get_webview_window(OVERLAY) {
         let (width, height) = overlay_size();
+        // a drag usually stops where the card already fits, and a resize can flash the see-through window
+        let now = w.inner_size().ok().zip(w.scale_factor().ok()).map(|(s, f)| s.to_logical::<f64>(f));
+        if now.is_some_and(|s| (s.width - width).abs() < 1.5 && (s.height - height).abs() < 1.5) {
+            return;
+        }
         let _ = w.set_size(tauri::LogicalSize::new(width, height));
     }
 }
@@ -396,11 +401,10 @@ mod hypr {
     }
 
     // it keeps a floating window's middle where it was, the card keeps its top
-    pub fn resize() {
+    pub fn resize(w: f64, h: f64) {
         if ADDRESS.lock().unwrap_or_else(|e| e.into_inner()).is_none() {
             return;
         }
-        let (w, h) = overlay_size();
         std::thread::spawn(move || {
             let Some((address, (x, y))) = find("Hashi overlay") else { return };
             let a = format!("address:{address}");
@@ -579,17 +583,11 @@ fn command(app: &AppHandle, line: &str) {
             }
         }
         "overlay-size" => {
-            let Some((w, h)) = rest.split_once(' ').and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))) else { return };
+            let mut n = rest.split(' ').map(str::parse::<f64>);
+            let (Some(Ok(w)), Some(Ok(h)), Some(Ok(percent))) = (n.next(), n.next(), n.next()) else { return };
             set(&OVERLAY_SIZE, (w, h));
-            size_overlay(app);
-        }
-        "overlay-zoom" => {
-            let Ok(percent) = rest.parse::<f64>() else { return };
-            let zoom = percent / 100.0;
-            set(&OVERLAY_ZOOM, zoom);
-            if let Some(w) = app.get_webview_window(OVERLAY) {
-                let _ = w.set_zoom(zoom);
-            }
+            // the card's, for hyprland's corners to match its own
+            set(&OVERLAY_ZOOM, percent / 100.0);
             size_overlay(app);
         }
         "overlay-blur" => {

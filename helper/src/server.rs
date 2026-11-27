@@ -387,13 +387,16 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             return empty(if state.is_some_and(|s| crate::skin::set_live(b, &s)) { 204 } else { 400 });
         }
         // overlay/on|off, overlay-through/on|off (clicks go to the game), overlay-blur/on|off,
-        // overlay-size/<w>x<h> in css px, overlay-zoom/<percent>
+        // overlay-size/<w>x<h>x<zoom percent>, the window in css px and the card's zoom in it
         if let Some((what, value)) = path.strip_prefix("/window/").and_then(|p| p.split_once('/')).filter(|(w, _)| w.starts_with("overlay")) {
             let px = |n: &str, max: u16| n.parse::<u16>().ok().filter(|n| (1..=max).contains(n));
             let ok = match what {
                 "overlay" | "overlay-through" | "overlay-blur" => matches!(value, "on" | "off"),
-                "overlay-size" => value.split_once('x').is_some_and(|(w, h)| px(w, 4000).is_some() && px(h, 4000).is_some()),
-                "overlay-zoom" => px(value, 400).is_some_and(|z| z >= 50),
+                "overlay-size" => {
+                    let mut n = value.split('x');
+                    matches!((n.next(), n.next(), n.next(), n.next()), (Some(w), Some(h), Some(z), None)
+                        if px(w, 4000).is_some() && px(h, 4000).is_some() && px(z, 400).is_some_and(|z| z >= 50))
+                }
                 _ => false,
             };
             if !ok {

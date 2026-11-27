@@ -17,6 +17,88 @@
   -webkit-user-drag: none;
 }
 
+/* OV_WIDTH_RANGE in overlay.js */
+.overlay .ov {
+  min-width: 240px;
+}
+
+/* the card fills the window. what it shows sits in the middle of any room left over */
+.overlay .ov:not(.view-settings, .side) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.overlay .ov.side {
+  align-content: center;
+}
+
+/* a window too small for the settings scrolls them, under the card's own top line */
+.overlay .ov.view-settings {
+  display: flex;
+  flex-direction: column;
+}
+
+.overlay .ov.view-settings .ov-settings {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* a wide window: what's under the map beside it, each in a column. OV_SIDE_WIDTH in overlay.js */
+.ov.side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 20px;
+}
+
+.ov.side > :not(.ov-art, .grip) {
+  grid-column: 1 / -1;
+}
+
+.ov.side > .ov-map {
+  grid-column: 1;
+  align-self: start;
+}
+
+.ov.side > .ov-map ~ :is(.ov-live, .ov-result, .ov-last) {
+  grid-column: 2;
+  align-self: start;
+  margin-top: 6px;
+}
+
+/* a tall window: each hand over its own columns */
+.ov.stack .ov-live {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ov.stack .ov-live .hands, .ov.stack .ov-live .cols {
+  display: contents;
+}
+
+.ov.stack .ov-live .hand:nth-child(1) {
+  order: 1;
+}
+
+.ov.stack .ov-live .group:nth-child(1) {
+  order: 2;
+  flex: none !important;
+}
+
+.ov.stack .ov-live .hand:nth-child(2) {
+  order: 3;
+  align-items: flex-start;
+  margin-top: 4px;
+}
+
+.ov.stack .ov-live .group:nth-child(n + 2) {
+  order: 4;
+  flex: none !important;
+}
+
 .ov {
   --see: 0.9;
   position: relative;
@@ -204,25 +286,57 @@
   overflow: hidden;
   font-size: 16px;
   font-weight: 800;
+  line-height: 20px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .ov-map .by {
-  margin-top: 2px;
   overflow: hidden;
   font-size: 12px;
   font-weight: 600;
+  line-height: 15px;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--osu-f1);
 }
 
+/* the name above the artist and the numbers, across the card on as many lines as it needs */
+.ov-map.wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.ov-map.wrap .what {
+  display: contents;
+}
+
+.ov-map.wrap .title {
+  grid-column: 1 / -1;
+  align-self: start;
+}
+
+.ov-map.wrap .title, .ov-map.wrap .by {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ov-map.wrap .by {
+  -webkit-line-clamp: 2;
+}
+
+/* as tall as the tallest dan badge, so the card is the same height whatever the map's badge, or none */
 .ov-map .numbers {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   gap: 10px;
+  height: 40px;
 }
 
 .ov-map .msd {
@@ -562,6 +676,17 @@
   color: var(--osu-f1);
 }
 
+/* as tall as its rows whatever the map has, a note or a short list, so the card keeps its height */
+.ov-board-body {
+  box-sizing: border-box;
+  min-height: calc(var(--rows) * 30px);
+}
+
+.ov-board-body.ov-empty {
+  margin: 0;
+  padding: 8px 0 2px;
+}
+
 .ov-standings {
   margin: 0;
   padding: 0;
@@ -656,14 +781,25 @@
   margin-top: 8px;
 }
 
+/* on a narrow card a control goes under its name, whole, rather than its options wrapping */
 .ov-setting {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px 12px;
   min-height: 28px;
   font-size: 12px;
   font-weight: 600;
+}
+
+.ov-setting > span {
+  white-space: nowrap;
+}
+
+.ov-setting .segs {
+  flex-wrap: nowrap;
+  margin-left: auto;
 }
 
 .ov-setting .skin-seek-bar {

@@ -6,13 +6,20 @@ const PIP = `<rect x=".5" y="1.5" width="9" height="7" rx="1"/><rect x="5" y="5"
 const DISC = `<circle cx="5" cy="5" r="4.5"/><circle cx="5" cy="5" r="1.3"/>`;
 const GRIP = `<path d="M9.5 4.5l-5 5M9.5 7.5l-2 2" stroke-linecap="round"/>`;
 const OV_KEY = "hashi-overlay";
-// the card is laid out this wide, and made bigger or smaller as a whole
+// the stream card's width as laid out, and the overlay's at its first size
 const OV_WIDTH = 340;
+// .overlay .ov's min-width in overlay.css. past the most, the card is made bigger rather than wider
+const OV_WIDTH_RANGE = [240, 900];
+// .ov.side's in overlay.css, a column each for the map and what's under it
+const OV_SIDE_WIDTH = 500;
+// the window's size at first, as big as the card at OV_WIDTH
+const OV_BOX = [340, 130];
 // .ov-standing's height in overlay.css
 const OV_ROW_PX = 30;
+const OV_LINES_MAX = 3;
 // below this the card is mostly see-through: nothing blurred behind it, a shadow under the text instead
 const OV_THIN_SEE = 45;
-const OV_ZOOM_RANGE = [60, 300];
+const OV_ZOOM_RANGE = [50, 300];
 const OV_ROWS_RANGE = [3, 30];
 const OV_PLAYING = [["show", "Show"], ["fade", "Fade"], ["hide", "Hide"]];
 const OV_ROWS = [[5, "5"], [8, "8"], [10, "10"], [15, "15"]];
@@ -39,14 +46,16 @@ function streamSettings() {
 }
 
 const ov = {
-  set: STREAM ? streamSettings() : { see: 90, zoom: 100, rows: 8, art: true, status: true, live: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
+  set: STREAM ? streamSettings() : { see: 90, box: null, rows: 8, art: true, status: true, live: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
-  sent: { size: "", zoom: 0, through: null, blur: null },
+  sent: { size: "", through: null, blur: null },
   // the window changing size because it was asked to, not because it was dragged
   askedAt: 0,
-  // a drag is under way, the window's size isn't asked for until it settles
-  dragging: false,
+  // how the card is fitted to the window: its zoom, and the layout that let it be the biggest
+  z: 1,
+  layout: { side: false, stack: false, above: false, lines: 1 },
+  fitKey: "",
   newest: undefined,
   art: { md5: null, src: null },
   card: null,
@@ -93,7 +102,8 @@ function ovMap(map) {
   const d = picked?.data ?? picked?.last;
   const showDans = snapshot.showDans !== false;
   const dans = d && showDans ? [d.dan, d.other].filter(Boolean) : [];
-  return el("div", { class: `ov-map${picked?.data ? "" : " stale"}` },
+  const above = !STREAM && ov.layout.above;
+  return el("div", { class: `ov-map${picked?.data ? "" : " stale"}${above ? " wrap" : ""}`, style: above && `--lines: ${ov.layout.lines}` },
     el("div", { class: "what" },
       map.id
         ? el("a", { class: "title", href: `${snapshot.connection.origin}/maps?map=${map.id}`, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, map.title ?? "Unknown")
@@ -192,20 +202,25 @@ function ovStanding(e, mine, still = false) {
 }
 
 function ovBoard(map) {
-  if (!map) return el("p", { class: "ov-empty" }, "Select a mania map in osu! to see its leaderboard.");
+  const body = (node) => {
+    node.classList.add("ov-board-body");
+    node.style.setProperty("--rows", ov.set.rows);
+    return node;
+  };
+  if (!map) return body(el("p", { class: "ov-empty" }, "Select a mania map in osu! to see its leaderboard."));
   if (!board || boardKey(board) !== boardKey(map)) setBoard(map, true);
   else boardChanged();
   const { data } = board;
   const head = el("div", { class: "ov-board-head" },
     el("span", { class: "title" }, map.title ?? "Unknown"),
     data?.entries?.length > 0 && el("span", { class: "count" }, `${data.total} ${data.total === 1 ? "player" : "players"}`));
-  let body;
-  if (board.error) body = el("p", { class: "ov-empty" }, board.error);
+  let list;
+  if (board.error) list = el("p", { class: "ov-empty" }, board.error);
   // the last board's rows, dimmed, until this one's come: the card keeps its height from map to map
-  else if (!data) body = ov.rows ? el("ol", { class: "ov-standings stale", "aria-label": "Loading" }, ov.rows.map((e) => ovStanding(e.e, e.mine, true)))
+  else if (!data) list = ov.rows ? el("ol", { class: "ov-standings stale", "aria-label": "Loading" }, ov.rows.map((e) => ovStanding(e.e, e.mine, true)))
     : el("ol", { class: "ov-standings", "aria-label": "Loading" }, Array.from({ length: ov.set.rows }, () => el("li", { class: "ov-standing" })));
-  else if (data.unsupported || data.unknown) body = el("p", { class: "ov-empty" }, "Mania Tracker has no leaderboard for this map.");
-  else if (!data.entries.length) body = el("p", { class: "ov-empty" }, "Nobody has played this map yet.");
+  else if (data.unsupported || data.unknown) list = el("p", { class: "ov-empty" }, "Mania Tracker has no leaderboard for this map.");
+  else if (!data.entries.length) list = el("p", { class: "ov-empty" }, "Nobody has played this map yet.");
   else {
     const mine = data.entries.findIndex((e) => e.username === snapshot.connection.username);
     const room = Math.max(1, ov.set.rows - (data.self && mine < 0 ? 1 : 0));
@@ -225,9 +240,9 @@ function ovBoard(map) {
       render();
     };
     ov.rows = [...data.entries.slice(board.from, board.from + room).map((e) => ({ e })), ...(data.self && mine < 0 ? [{ e: data.self, mine: true }] : [])];
-    body = el("ol", { class: "ov-standings", onwheel: wheel }, ov.rows.map((r) => ovStanding(r.e, r.mine)));
+    list = el("ol", { class: "ov-standings", onwheel: wheel }, ov.rows.map((r) => ovStanding(r.e, r.mine)));
   }
-  return [head, body];
+  return [head, body(list)];
 }
 
 function ovSettings() {
@@ -250,8 +265,7 @@ function ovSettings() {
     row("Map art", switchButton(s.art, "Map art", () => ovSave((x) => (x.art = !x.art)))),
     row("While playing", segs(OV_PLAYING, s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
     row("Live accuracy", switchButton(s.live, "Live accuracy", () => ovSave((x) => (x.live = !x.live)))),
-    row("Leaderboard rows", segs(OV_ROWS, s.rows, (r) => ovSave((x) => (x.rows = r)), "Leaderboard rows")),
-    el("p", { class: "ov-hint" }, "Drag the corner to make it bigger or smaller."),
+    el("p", { class: "ov-hint" }, "Drag its edges or corner to resize it."),
     el("button", { class: "link", onclick: () => ((ov.open = false), render()) }, "Done"));
 }
 
@@ -303,7 +317,7 @@ function overlayCard() {
   const playing = ovPlaying();
   // on stream, nothing at all rather than a card saying there's nothing
   const empty = STREAM && (view === "board" ? !map : !map && !(ovFresh(snapshot.plays[0]) && !playing));
-  card.className = `ov view-${view}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < OV_THIN_SEE ? " thin" : ""}${empty ? " empty" : ""}${ov.set.status || ov.open ? "" : " quiet"}${card.classList.contains("flash") ? " flash" : ""}`;
+  card.className = `ov view-${view}${!STREAM && view === "now" && ov.layout.side ? " side" : ""}${!STREAM && view === "now" && ov.layout.stack ? " stack" : ""}${playing ? ` playing ${ov.set.playing}` : ""}${ov.set.see < OV_THIN_SEE ? " thin" : ""}${empty ? " empty" : ""}${ov.set.status || ov.open ? "" : " quiet"}${card.classList.contains("flash") ? " flash" : ""}`;
   card.style.setProperty("--see", ov.set.see / 100);
   if (art) card.style.setProperty("--art", `url("${art}")`);
   else card.style.removeProperty("--art");
@@ -327,21 +341,114 @@ function overlayCard() {
   return card;
 }
 
-// the window is sized to the card at its zoom, as tall as what it shows
-function ovFit(card) {
-  const s = ov.set;
-  if (ov.dragging) return;
-  if (ov.sent.zoom !== s.zoom) {
-    ov.sent.zoom = s.zoom;
-    ov.askedAt = Date.now();
-    windowAction(`overlay-zoom/${s.zoom}`);
+function ovZoom() {
+  return STREAM ? innerWidth / OV_WIDTH : ov.z;
+}
+
+// a height on the card as laid out, before its zoom. engines differ on whether they report sizes
+// zoomed, so it goes by the card's width, which is the window's over the zoom laid out
+function ovUnzoomed(card, px) {
+  return (px * innerWidth) / ovZoom() / card.getBoundingClientRect().width;
+}
+
+const ovZoomIn = (z) => Math.max(OV_ZOOM_RANGE[0] / 100, Math.min(OV_ZOOM_RANGE[1] / 100, z));
+
+function ovSetZoom(card, z) {
+  ov.z = z;
+  card.style.zoom = z;
+}
+
+// the card at one layout, as big as it fits the window, and whether the map's name shows whole
+function ovTry(card, layout) {
+  card.classList.toggle("side", layout.side);
+  card.classList.toggle("stack", layout.stack);
+  const map = card.querySelector(".ov-map");
+  const title = map?.querySelector(".title");
+  const lines = (n) => {
+    map?.classList.toggle("wrap", layout.above);
+    map?.style.setProperty("--lines", n);
+  };
+  lines(layout.above ? OV_LINES_MAX : 1);
+  const [lo, hi] = layout.side ? [OV_SIDE_WIDTH, OV_WIDTH_RANGE[1] * 1.5] : OV_WIDTH_RANGE;
+  let z = ov.z;
+  // its height changes with the width the zoom leaves it, so it's measured until it holds
+  for (let i = 0; i < 3; i++) {
+    const h = ovUnzoomed(card, card.getBoundingClientRect().height);
+    if (!(h > 0)) break;
+    z = ovZoomIn(Math.max(innerWidth / hi, Math.min(innerWidth / lo, innerHeight / h)));
+    ovSetZoom(card, z);
+    // above the numbers it takes as many lines as it needs, and no more
+    if (layout.above && title) lines(Math.max(1, Math.min(OV_LINES_MAX, Math.round(title.scrollHeight / 20))));
   }
-  const h = Math.ceil(card.getBoundingClientRect().height);
-  const size = `${OV_WIDTH}x${h}`;
-  if (h > 0 && size !== ov.sent.size) {
-    ov.sent.size = size;
+  const whole = !title || (title.scrollWidth <= title.clientWidth + 1 && title.scrollHeight <= title.clientHeight + 1);
+  return { z, whole, lines: Number(map?.style.getPropertyValue("--lines")) || 1 };
+}
+
+// what's playing fills the window: of the ways it can be laid out, the one it's biggest in with the
+// map's name whole. side by side for a wide window, each hand over its columns for a tall one
+function ovFitNow(card) {
+  const under = card.querySelector(".ov-map ~ :is(.ov-live, .ov-result, .ov-last)");
+  const live = card.querySelector(".ov-live");
+  let best = null;
+  for (const side of under ? [false, true] : [false]) {
+    for (const stack of live ? [false, true] : [false]) {
+      for (const above of [false, true]) {
+        const got = ovTry(card, { side, stack, above });
+        const better = !best || (got.whole !== best.got.whole ? got.whole : got.z > best.got.z + 0.001);
+        if (better) best = { layout: { side, stack, above }, got };
+      }
+    }
+  }
+  const got = ovTry(card, best.layout);
+  ov.layout = { side: best.layout.side, stack: best.layout.stack, lines: best.layout.above ? got.lines : 1, above: best.layout.above };
+}
+
+// the leaderboard is as big as the window is wide, with as many rows as its height fits
+function ovFitBoard(card) {
+  ovSetZoom(card, ovZoomIn(innerWidth / OV_WIDTH));
+  const list = card.querySelector(".ov-board-body");
+  if (!list) return false;
+  const rest = ovUnzoomed(card, card.getBoundingClientRect().height - list.getBoundingClientRect().height);
+  let rows = Math.floor((innerHeight / ov.z - rest) / OV_ROW_PX);
+  // shorter than the fewest rows: smaller
+  if (rows < OV_ROWS_RANGE[0]) {
+    rows = OV_ROWS_RANGE[0];
+    ovSetZoom(card, ovZoomIn(innerHeight / (rest + rows * OV_ROW_PX)));
+  }
+  rows = Math.min(OV_ROWS_RANGE[1], rows);
+  if (rows === ov.set.rows) return false;
+  ov.set.rows = rows;
+  return true;
+}
+
+// the window is the box the player drags it to, and only a drag changes it: the card is fitted inside.
+// fitting tries layouts, so it's done again only when the window or what the card shows has changed.
+// true when the card has to be drawn again to take it
+function ovFitBox(card) {
+  const view = card.classList.contains("view-board") ? "board" : card.classList.contains("view-settings") ? "settings" : "now";
+  const key = [innerWidth, innerHeight, view, card.classList.contains("playing"),
+    ...Array.from(card.children, (c) => c.className.replace(/\s*\b(wrap)\b/, "")),
+    card.querySelector(".ov-map")?.textContent, card.querySelector(".ov-live .cols")?.childElementCount].join("|");
+  let again = false;
+  if (key !== ov.fitKey) {
+    card.style.height = "";
+    if (view === "now") ovFitNow(card);
+    else if (view === "board") again = ovFitBoard(card);
+    else ovSetZoom(card, ovZoomIn(innerWidth / OV_WIDTH));
+    ov.fitKey = again ? "" : key;
+  }
+  card.style.zoom = ov.z;
+  card.style.height = `${innerHeight / ov.z}px`;
+  return again;
+}
+
+function ovWindow() {
+  const s = ov.set;
+  if (!s.box) s.box = OV_BOX;
+  if (!ov.sent.size) {
+    ov.sent.size = `${s.box[0]}x${s.box[1]}x${Math.round(ov.z * 100)}`;
     ov.askedAt = Date.now();
-    windowAction(`overlay-size/${size}`);
+    windowAction(`overlay-size/${ov.sent.size}`);
   }
   const blur = s.see >= OV_THIN_SEE;
   if (blur !== ov.sent.blur) {
@@ -360,11 +467,16 @@ function drawOverlay() {
   if (STREAM) document.documentElement.classList.add("overlay-stream");
   // a redraw mid-drag would drop the slider under the pointer
   if (ov.holding) return;
-  artZoom = STREAM ? innerWidth / OV_WIDTH : ov.set.zoom / 100;
-  const card = overlayCard();
+  artZoom = ovZoom();
+  let card = overlayCard();
   if (app.firstChild !== card) app.replaceChildren(card);
-  if (STREAM) card.style.zoom = innerWidth / OV_WIDTH;
-  else ovFit(card);
+  card.style.zoom = ovZoom();
+  if (STREAM) return;
+  if (ovFitBox(card)) {
+    card = overlayCard();
+    ovFitBox(card);
+  }
+  ovWindow();
 }
 
 if (STREAM) addEventListener("resize", () => render());
@@ -372,30 +484,22 @@ if (STREAM) addEventListener("resize", () => render());
 if (OVERLAY && !STREAM) addEventListener("pointerup", () => ov.holding && ((ov.holding = false), render()));
 
 if (OVERLAY && !STREAM) {
-  // dragged bigger or smaller, from the corner or by the window manager: the width sets the scale
-  // and, on the leaderboard, the height how many rows fit. the page's own pixels are the window's
-  // over its zoom, so a window the size it was asked for is OV_WIDTH wide here
-  let settle = 0;
+  // the card follows the window as it's dragged, any way. a size the window wasn't asked for is the
+  // player's, kept once the drag stops
+  let keep = 0;
   addEventListener("resize", () => {
-    const asked = Number(ov.sent.size.split("x")[1]);
-    const same = Math.abs(innerWidth - OV_WIDTH) < 2 && Math.abs(innerHeight - asked) < 2;
-    if (!ov.dragging && (Date.now() - ov.askedAt < 800 || same)) return;
-    ov.dragging = true;
-    clearTimeout(settle);
-    settle = setTimeout(() => {
-      const s = ov.set;
-      const scale = innerWidth / OV_WIDTH;
-      const card = ov.card;
-      const list = card?.querySelector(".ov-standings");
-      if (list && card.classList.contains("view-board")) {
-        const rest = card.getBoundingClientRect().height - list.offsetHeight;
-        s.rows = Math.max(OV_ROWS_RANGE[0], Math.min(OV_ROWS_RANGE[1], Math.floor((innerHeight - rest) / OV_ROW_PX)));
-      }
-      s.zoom = Math.max(OV_ZOOM_RANGE[0], Math.min(OV_ZOOM_RANGE[1], Math.round(s.zoom * scale)));
-      store(OV_KEY, s);
-      ov.dragging = false;
-      ov.sent.size = "";
-      render();
+    if (ov.card && !ov.holding) render();
+    const [w, h] = ov.sent.size.split("x").map(Number);
+    const same = Math.abs(innerWidth - w) < 2 && Math.abs(innerHeight - h) < 2;
+    if (Date.now() - ov.askedAt < 800 || same) return;
+    clearTimeout(keep);
+    keep = setTimeout(() => {
+      ov.set.box = [innerWidth, innerHeight];
+      store(OV_KEY, ov.set);
+      // only so the window comes back this size: it's this size already, so nothing moves
+      ov.sent.size = `${innerWidth}x${innerHeight}x${Math.round(ov.z * 100)}`;
+      ov.askedAt = Date.now();
+      windowAction(`overlay-size/${ov.sent.size}`);
     }, 300);
   });
 }
