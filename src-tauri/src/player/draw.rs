@@ -472,7 +472,7 @@ impl Pen<'_> {
         }
         if let (Some(t), true) = (tail, tail_h > 0.0) {
             // lazer masks the hold at the head's centre
-            let clip = s.lazer_bodies.then(|| if up { [x, head_side, w, s.height - head_side] } else { [x, 0.0, w, head_side] });
+            let clip = s.lazer_bodies.then_some(if up { [x, head_side, w, s.height - head_side] } else { [x, 0.0, w, head_side] });
             self.sprite(t.s.unwrap(), [x, tail_top, w, tail_h], (!up).then_some(tail_top * 2.0 + tail_h), clip);
         }
         match head {

@@ -488,7 +488,7 @@ pub(super) fn texture(raw: Raw) -> Option<(Arc<Texture>, f64, f64, Option<f64>)>
         (rgba, w, h)
     };
     let mut data = rgba;
-    for p in data.chunks_exact_mut(4) {
+    for p in data.as_chunks_mut::<4>().0.iter_mut() {
         let a = p[3] as u32;
         if a < 255 {
             for c in &mut p[..3] {
@@ -638,7 +638,7 @@ pub(super) fn tiff(b: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         for r in 0..rows {
             let src = &b[start + r * row_bytes..][..row_bytes];
             let dst = &mut rgba[(row + r) * w * 4..][..w * 4];
-            for (px, out) in src.chunks_exact(samples).zip(dst.chunks_exact_mut(4)) {
+            for (px, out) in src.chunks_exact(samples).zip(dst.as_chunks_mut::<4>().0.iter_mut()) {
                 out[..3].copy_from_slice(&px[..3]);
                 out[3] = if samples == 4 { px[3] } else { 255 };
             }
@@ -649,7 +649,7 @@ pub(super) fn tiff(b: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         return None;
     }
     if premultiplied && samples == 4 {
-        for p in rgba.chunks_exact_mut(4) {
+        for p in rgba.as_chunks_mut::<4>().0.iter_mut() {
             let a = p[3] as u32;
             if a > 0 && a < 255 {
                 for c in &mut p[..3] {
@@ -905,14 +905,14 @@ pub(super) fn import_from(skin: &Skin, keys: usize) -> Result<(Settings, Profile
     let selected = blocks.iter().find(|(k, _)| *k == keys).unwrap_or(&blocks[0]);
 
     let default_base = |k: usize| if k == 4 { Profile::default_4k() } else { Profile::base(hex("#9cf2ae"), hex("#dfffe6"), 50.0, 0.0, 50.0) };
-    let declared = |k: usize| blocks.iter().find(|(bk, _)| *bk == k).map(|(_, b)| build(&skin, b, &parsed.fonts, &default_base(k), k).0);
+    let declared = |k: usize| blocks.iter().find(|(bk, _)| *bk == k).map(|(_, b)| build(skin, b, &parsed.fonts, &default_base(k), k).0);
     // stable plays undeclared keymodes from the default filenames, so a 4K-only skin still has
     // its art on 7K
     let mut kept = true;
     let mut profile = match declared(keys) {
         Some(p) => p,
         None => {
-            let (p, found) = build(&skin, &Block::new(), &parsed.fonts, &default_base(keys), keys);
+            let (p, found) = build(skin, &Block::new(), &parsed.fonts, &default_base(keys), keys);
             kept = found > 0 || keys == 4;
             if found > 0 {
                 p
@@ -928,7 +928,7 @@ pub(super) fn import_from(skin: &Skin, keys: usize) -> Result<(Settings, Profile
         }
     };
     // lazer's HUD editor's layout, which stable doesn't read
-    let hud = skin.is_lazer(&text).then(|| hud_combo(&skin)).flatten();
+    let hud = skin.is_lazer(&text).then(|| hud_combo(skin)).flatten();
     if kept {
         if let Some(scale) = hud.as_ref().and_then(|h| h.scale) {
             profile.combo_scale = scale;

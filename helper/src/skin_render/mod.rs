@@ -140,7 +140,9 @@ pub(crate) fn sprite(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Opt
 
 // the scene for the game size window, which draws it itself: what the page gets, with each
 // sprite's premultiplied RGBA pixels instead of a png
-pub(crate) fn player_scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool) -> Result<(Value, Vec<(u32, u32, Vec<u8>)>), String> {
+type Sprite = (u32, u32, Vec<u8>);
+
+pub(crate) fn player_scene(dir: &Path, keys: usize, at: &str, edits: &str, aspect: Option<f64>, lazer: bool) -> Result<(Value, Vec<Sprite>), String> {
     let scene = cached(dir, keys, at, edits, width_for(aspect), lazer)?;
     let sprites = scene.sprites.iter().map(|t| (t.pixmap.width(), t.pixmap.height(), t.pixmap.data().to_vec())).collect();
     Ok((scene.json(), sprites))

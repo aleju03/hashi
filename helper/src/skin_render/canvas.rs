@@ -62,14 +62,14 @@ impl Texture {
 
     // nothing under it shows through anywhere
     pub fn opaque(&self) -> bool {
-        self.pixmap.data().chunks_exact(4).all(|p| p[3] >= 250)
+        self.pixmap.data().as_chunks::<4>().0.iter().all(|p| p[3] >= 250)
     }
 
     // the first row with a visible pixel as a fraction of the height, None for blank art
     pub fn alpha_top(&self) -> Option<f64> {
         *self.alpha_top.get_or_init(|| {
             let w = self.pixmap.width() as usize * 4;
-            let top = self.pixmap.data().chunks_exact(w).position(|row| row.chunks_exact(4).any(|p| p[3] >= 25))?;
+            let top = self.pixmap.data().chunks_exact(w).position(|row| row.as_chunks::<4>().0.iter().any(|p| p[3] >= 25))?;
             Some(top as f64 / self.pixmap.height() as f64)
         })
     }
@@ -78,8 +78,8 @@ impl Texture {
     // blank art. Black doesn't count: receptor art often sits on a black panel that's lost on the stage
     pub fn alpha_bottom(&self) -> Option<f64> {
         let w = self.pixmap.width() as usize * 4;
-        let seen = |p: &[u8]| p[3] >= 25 && p[0].max(p[1]).max(p[2]) >= 48;
-        let last = self.pixmap.data().chunks_exact(w).rposition(|row| row.chunks_exact(4).any(seen))?;
+        let seen = |p: &[u8; 4]| p[3] >= 25 && p[0].max(p[1]).max(p[2]) >= 48;
+        let last = self.pixmap.data().chunks_exact(w).rposition(|row| row.as_chunks::<4>().0.iter().any(seen))?;
         Some((self.pixmap.height() as usize - last - 1) as f64 / self.pixmap.height() as f64)
     }
 
@@ -294,7 +294,7 @@ impl Canvas {
 // what Canvas2D's multiply-then-destination-in leaves when a white light texture is tinted
 pub(super) fn tinted(tex: &Texture, color: Rgba) -> Texture {
     let mut pixmap = tex.pixmap.clone();
-    for p in pixmap.data_mut().chunks_exact_mut(4) {
+    for p in pixmap.data_mut().as_chunks_mut::<4>().0.iter_mut() {
         let da = p[3] as f64 / 255.0;
         for c in 0..3 {
             let s = color[c] as f64 / 255.0;

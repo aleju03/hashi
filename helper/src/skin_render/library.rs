@@ -314,7 +314,7 @@ fn make_thumb(skin: &Skin, reference: &str) -> Option<Vec<u8>> {
     let row = w as usize * 4;
     let mut rgba = raw.rgba[top as usize * row..(top + rows) as usize * row].to_vec();
     // resized premultiplied, so transparent pixels don't bleed their colour into the edges
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0.iter_mut() {
         for c in 0..3 {
             p[c] = ((p[c] as u32 * p[3] as u32 + 127) / 255) as u8;
         }

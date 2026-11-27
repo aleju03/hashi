@@ -670,7 +670,7 @@ pub(super) fn pieces(src: &Raw) -> Vec<[u32; 4]> {
     let cell = (src.w.max(src.h)).div_ceil(SPLIT_CELLS).max(2);
     let (gw, gh) = (src.w.div_ceil(cell) as usize, src.h.div_ceil(cell) as usize);
     let mut seen = vec![false; gw * gh];
-    for (i, p) in src.rgba.chunks_exact(4).enumerate() {
+    for (i, p) in src.rgba.as_chunks::<4>().0.iter().enumerate() {
         if p[3] >= 25 {
             let (x, y) = (i % src.w as usize, i / src.w as usize);
             seen[(y / cell as usize) * gw + x / cell as usize] = true;
@@ -718,7 +718,7 @@ pub(super) fn pieces(src: &Raw) -> Vec<[u32; 4]> {
 // resized with its colour premultiplied, so see-through edges don't pick up a dark rim
 fn sized(src: &Raw, w: u32, h: u32) -> Option<image::RgbaImage> {
     let mut rgba = src.rgba.clone();
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0.iter_mut() {
         let a = p[3] as u32;
         for c in &mut p[..3] {
             *c = ((*c as u32 * a + 127) / 255) as u8;
@@ -855,7 +855,7 @@ fn outline(raw: &mut Raw, px: f64, color: Rgba, ends: bool, outside: bool) {
 fn room(raw: &Raw, ends: bool) -> f64 {
     let (w, h) = (raw.w as usize, raw.h as usize);
     let mut most = usize::MAX;
-    for (i, p) in raw.rgba.chunks_exact(4).enumerate() {
+    for (i, p) in raw.rgba.as_chunks::<4>().0.iter().enumerate() {
         if p[3] < 128 {
             continue;
         }
@@ -872,7 +872,7 @@ fn room(raw: &Raw, ends: bool) -> f64 {
 // either way, or a soft edge leaves it see-through and a white line shows grey
 fn inside_line(raw: &mut Raw, px: f64, color: Rgba, ends: bool) {
     let d = inside_distance(raw, ends);
-    for (p, dist) in raw.rgba.chunks_exact_mut(4).zip(d) {
+    for (p, dist) in raw.rgba.as_chunks_mut::<4>().0.iter_mut().zip(d) {
         if dist == 0.0 {
             continue;
         }
@@ -890,9 +890,9 @@ fn inside_line(raw: &mut Raw, px: f64, color: Rgba, ends: bool) {
 // around the solid part of the art, drawn under its soft edge so the two meet without a gap
 fn around_line(raw: &mut Raw, px: f64, color: Rgba) {
     let (w, h) = (raw.w as usize, raw.h as usize);
-    let clear: Vec<bool> = raw.rgba.chunks_exact(4).map(|p| p[3] < 128).collect();
+    let clear: Vec<bool> = raw.rgba.as_chunks::<4>().0.iter().map(|p| p[3] < 128).collect();
     let d = distance_from(&clear, w, h, f32::MAX / 2.0, f32::MAX / 2.0);
-    for (p, dist) in raw.rgba.chunks_exact_mut(4).zip(d) {
+    for (p, dist) in raw.rgba.as_chunks_mut::<4>().0.iter_mut().zip(d) {
         if dist == 0.0 {
             continue;
         }
@@ -942,7 +942,7 @@ pub(super) fn rim(raw: &Raw, ends: bool) -> Option<Rim> {
     let rings = inner.1 + 1;
     let mut sums = vec![[0.0f64; 4]; rings + 1];
     let mut counts = vec![0usize; rings + 1];
-    for (p, &dist) in raw.rgba.chunks_exact(4).zip(&d) {
+    for (p, &dist) in raw.rgba.as_chunks::<4>().0.iter().zip(&d) {
         if dist == 0.0 || dist >= f32::MAX / 4.0 {
             continue;
         }
@@ -1001,7 +1001,7 @@ pub(super) fn rim(raw: &Raw, ends: bool) -> Option<Rim> {
     // rings is only near even along a curve; past a couple of rings beyond it nothing counts
     let weight = raw
         .rgba
-        .chunks_exact(4)
+        .as_chunks::<4>().0.iter()
         .zip(&d)
         .map(|(p, &dist)| {
             if dist == 0.0 || dist >= f32::MAX / 4.0 || dist.ceil() as usize > px + 2 {
@@ -1061,7 +1061,7 @@ fn unrim(raw: &mut Raw, rim: &Rim, ends: bool) {
 // distance transform
 fn inside_distance(raw: &Raw, ends: bool) -> Vec<f32> {
     let (w, h) = (raw.w as usize, raw.h as usize);
-    let art: Vec<bool> = raw.rgba.chunks_exact(4).map(|p| p[3] >= 25).collect();
+    let art: Vec<bool> = raw.rgba.as_chunks::<4>().0.iter().map(|p| p[3] >= 25).collect();
     distance_from(&art, w, h, 0.0, if ends { 0.0 } else { f32::MAX / 2.0 })
 }
 
@@ -1154,7 +1154,7 @@ pub(super) fn luma(p: &[u8]) -> f64 {
 // looks the colour picked. Darker pixels are as much darker, lighter ones (a white rim, a shine)
 // as much nearer white
 fn tint(rgba: &mut [u8], color: Rgba, mid: f64) {
-    for p in rgba.chunks_exact_mut(4) {
+    for p in rgba.as_chunks_mut::<4>().0.iter_mut() {
         let l = luma(p);
         for i in 0..3 {
             let c = f64::from(color[i]);
@@ -1181,16 +1181,16 @@ pub(super) fn tone(lumas: impl Iterator<Item = f64>) -> f64 {
 }
 
 fn shown_tone(rgba: &[u8]) -> f64 {
-    tone(rgba.chunks_exact(4).filter(|p| p[3] >= 25).map(luma))
+    tone(rgba.as_chunks::<4>().0.iter().filter(|p| p[3] >= 25).map(|p| luma(p)))
 }
 
 // Coloured with the built-in outline left as it is: only the inside counts toward its tone, so it
 // takes the colour exactly, and the outline's pixels keep theirs by their share of it
 fn tinted_keeping(src: &Raw, color: Rgba, rim: &Rim) -> Raw {
-    let mid = tone(src.rgba.chunks_exact(4).zip(&rim.weight).filter(|(p, w)| p[3] >= 25 && **w < 0.5).map(|(p, _)| luma(p)));
+    let mid = tone(src.rgba.as_chunks::<4>().0.iter().zip(&rim.weight).filter(|(p, w)| p[3] >= 25 && **w < 0.5).map(|(p, _)| luma(p)));
     let mut rgba = src.rgba.clone();
     tint(&mut rgba, color, mid);
-    for ((p, o), &w) in rgba.chunks_exact_mut(4).zip(src.rgba.chunks_exact(4)).zip(&rim.weight) {
+    for ((p, o), &w) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(src.rgba.as_chunks::<4>().0.iter()).zip(&rim.weight) {
         if w > 0.0 {
             let t = f64::from(w);
             for c in 0..3 {
@@ -1219,7 +1219,7 @@ pub(super) fn rows_per_unit(scale: f64, full_height: f64, lazer: bool) -> f64 {
 }
 
 pub(super) fn lead_rows(rgba: &[u8], w: u32) -> Option<usize> {
-    rgba.chunks_exact(w as usize * 4).position(|row| row.chunks_exact(4).any(|p| p[3] >= 25))
+    rgba.chunks_exact(w as usize * 4).position(|row| row.as_chunks::<4>().0.iter().any(|p| p[3] >= 25))
 }
 
 // The image stretched to `rows` tall, mixed premultiplied so clear rows don't darken their neighbours
@@ -1310,7 +1310,7 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
     // the widest the art gets near its end: a skin's own cap narrows its first rows
     let extent = |y: usize| {
         let row = &src.rgba[y * row_bytes..(y + 1) * row_bytes];
-        Some((row.chunks_exact(4).position(|p| p[3] >= 25)?, row.chunks_exact(4).rposition(|p| p[3] >= 25)?))
+        Some((row.as_chunks::<4>().0.iter().position(|p| p[3] >= 25)?, row.as_chunks::<4>().0.iter().rposition(|p| p[3] >= 25)?))
     };
     let near_end = old_lead..h.min(old_lead + 400);
     let (left, right) = near_end.clone().filter_map(extent).max_by_key(|(l, r)| r - l)?;
@@ -1344,12 +1344,12 @@ fn body(src: &Raw, asset: &Asset, lazer: bool, width: f64, cut: Option<f64>, fad
         if let Some(f) = fade.filter(|f| f.length > 0.0) {
             let at = (k as f64 / rows / f.length).clamp(0.0, 1.0);
             let alpha = f.from.clamp(0.0, 1.0) + (1.0 - f.from.clamp(0.0, 1.0)) * at;
-            for p in row.chunks_exact_mut(4) {
+            for p in row.as_chunks_mut::<4>().0.iter_mut() {
                 p[3] = (p[3] as f64 * alpha).round() as u8;
             }
         }
         if let Some(c) = cap.filter(|c| (k as f64) < c.2) {
-            for (x, p) in row.chunks_exact_mut(4).enumerate() {
+            for (x, p) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 p[3] = (p[3] as f64 * cap_keep(x, k, c)).round() as u8;
             }
         }
@@ -1517,11 +1517,11 @@ mod tests {
     #[test]
     fn removing_the_rim_leaves_the_fill_and_the_size() {
         let mut raw = disc(128, [255, 235, 165], [255, 255, 255], 5.0);
-        let alpha: Vec<u8> = raw.rgba.chunks_exact(4).map(|p| p[3]).collect();
+        let alpha: Vec<u8> = raw.rgba.as_chunks::<4>().0.iter().map(|p| p[3]).collect();
         let r = rim(&raw, true).unwrap();
         unrim(&mut raw, &r, true);
-        assert_eq!(alpha, raw.rgba.chunks_exact(4).map(|p| p[3]).collect::<Vec<_>>());
-        for p in raw.rgba.chunks_exact(4).filter(|p| p[3] > 0) {
+        assert_eq!(alpha, raw.rgba.as_chunks::<4>().0.iter().map(|p| p[3]).collect::<Vec<_>>());
+        for p in raw.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0) {
             assert!(color_distance([p[0] as f64, p[1] as f64, p[2] as f64], [255.0, 235.0, 165.0]) < 12.0, "{p:?}");
         }
     }

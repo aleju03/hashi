@@ -171,6 +171,8 @@ fn judge_worker() -> (Sender<Job>, Receiver<(u64, f64, Judged)>) {
     (jobs, results)
 }
 
+type AutoPlay = (String, bool, Vec<(f64, f64, bool)>);
+
 struct App {
     args: Args,
     proxy: Option<EventLoopProxy<News>>,
@@ -207,7 +209,7 @@ struct App {
     pointer: bool,
     // screen pixels a scene unit, and where the scene starts
     view: (f64, f64, f64),
-    auto: Option<(String, bool, Vec<(f64, f64, bool)>)>,
+    auto: Option<AutoPlay>,
     game: Game,
     panel: bool,
     binding: Option<Binding>,

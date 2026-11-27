@@ -116,7 +116,7 @@ pub(crate) fn current(b: &Bridge) -> Result<Found, &'static str> {
         }
     }
     let game = game.unwrap_or_else(|| b.env.osu_dir.clone());
-    let stable = match skin.or_else(|| cfg_skin(&game)).filter(|s| s.trim_matches('.') != "") {
+    let stable = match skin.or_else(|| cfg_skin(&game)).filter(|s| !s.trim_matches('.').is_empty()) {
         Some(skin) if game.join("Skins").join(&skin).is_dir() => return Ok(Found { dir: game.join("Skins").join(&skin), name: skin, client: "stable", stored: false }),
         Some(_) => "missing",
         None => "unknown",
@@ -296,7 +296,7 @@ pub(crate) fn game_size(b: &Bridge) -> Option<GameSize> {
 }
 
 fn pixels(w: f64, h: f64) -> Option<GameSize> {
-    ((320.0..=16384.0).contains(&w) && (240.0..=16384.0).contains(&h)).then(|| GameSize::Pixels(w as u32, h as u32))
+    ((320.0..=16384.0).contains(&w) && (240.0..=16384.0).contains(&h)).then_some(GameSize::Pixels(w as u32, h as u32))
 }
 
 // from lazer's framework.ini, None when its WindowMode isn't one this knows
@@ -340,7 +340,7 @@ fn tiled_size() -> Option<GameSize> {
     let scale = monitors.as_array()?.iter().find(|m| m.get("id").and_then(Value::as_i64) == on).and_then(|m| m.get("scale")?.as_f64()).unwrap_or(1.0);
     let size = osu.get("size")?.as_array()?;
     let (w, h) = ((size.first()?.as_f64()? * scale).round(), (size.get(1)?.as_f64()? * scale).round());
-    ((320.0..=16384.0).contains(&w) && (240.0..=16384.0).contains(&h)).then(|| GameSize::Pixels(w as u32, h as u32))
+    ((320.0..=16384.0).contains(&w) && (240.0..=16384.0).contains(&h)).then_some(GameSize::Pixels(w as u32, h as u32))
 }
 
 // what the main window's skin page has on screen, for the game size window to follow
@@ -452,9 +452,10 @@ pub(crate) async fn chart(b: &std::sync::Arc<Bridge>, play: Option<&str>) -> (u1
 }
 
 // each play's long note releases as (column, ms late), judging a replay takes a moment
-static RELEASES: Mutex<Vec<(String, Arc<Vec<(usize, f64)>>)>> = Mutex::new(Vec::new());
+static RELEASES: Mutex<Vec<(String, Releases)>> = Mutex::new(Vec::new());
+type Releases = Arc<Vec<(usize, f64)>>;
 
-async fn releases(b: &Arc<Bridge>, item: &crate::types::Item) -> Arc<Vec<(usize, f64)>> {
+async fn releases(b: &Arc<Bridge>, item: &crate::types::Item) -> Releases {
     if let Some((_, r)) = RELEASES.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(id, _)| *id == item.id) {
         return r.clone();
     }

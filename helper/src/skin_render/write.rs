@@ -385,7 +385,7 @@ fn scaled_glyph(raw: &load::Raw, f: f64, overlap: f64) -> load::Raw {
 // resampled premultiplied, so clear pixels don't darken the edges
 fn resized(raw: &load::Raw, w: u32, h: u32) -> load::Raw {
     let mut pre = raw.rgba.clone();
-    for p in pre.chunks_exact_mut(4) {
+    for p in pre.as_chunks_mut::<4>().0.iter_mut() {
         for c in 0..3 {
             p[c] = ((u32::from(p[c]) * u32::from(p[3]) + 127) / 255) as u8;
         }

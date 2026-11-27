@@ -77,7 +77,7 @@ fn build<T: SizedSample + FromSample<f32>>(device: &cpal::Device, config: &Strea
     let out_rate = f64::from(config.sample_rate);
     device
         .build_output_stream(
-            config.clone(),
+            *config,
             move |data: &mut [T], info: &OutputCallbackInfo| {
                 let ts = info.timestamp();
                 let late = ts.playback.duration_since(ts.callback);
