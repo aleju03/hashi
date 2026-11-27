@@ -238,7 +238,9 @@ fn selected_map(raw: &Value) -> Option<Value> {
     }
     let md5 = bm.get("checksum").and_then(Value::as_str).filter(|c| crate::leaderboard::valid_md5(c))?.to_lowercase();
     let keys = bm.pointer("/stats/cs/original").and_then(Value::as_f64).map(f64::round);
-    let raw_mods = raw.pointer("/play/mods").unwrap_or(&Value::Null);
+    // the play's once it's started, before that the ones picked in song select, as only the play
+    // has its own
+    let raw_mods = raw.pointer("/play/mods").filter(|m| !m.is_null()).or_else(|| raw.pointer("/menu/mods")).unwrap_or(&Value::Null);
     let acronyms = crate::presence::mod_acronyms(raw_mods);
     let (speed, mods) = crate::leaderboard::variant(&acronyms);
     let has = |m: &str| acronyms.iter().any(|a| a == m);

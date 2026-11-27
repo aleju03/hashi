@@ -172,7 +172,8 @@ pub(crate) fn presence_body(s: &mut State) -> Option<Value> {
         .or(bm.pointer("/stats/cs/original").and_then(Value::as_f64))
         .unwrap_or(0.0)
         .round() as i64;
-    let mods_raw = raw.pointer("/play/mods").unwrap_or(&null);
+    // song select has only the picked ones, the play its own
+    let mods_raw = raw.pointer("/play/mods").filter(|m| !m.is_null()).or_else(|| raw.pointer("/menu/mods")).unwrap_or(&null);
     let mods = mod_acronyms(mods_raw);
     let rate = mod_rate(mods_raw, &mods);
     let beatmap = match md5 {
