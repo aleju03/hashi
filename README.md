@@ -103,7 +103,8 @@ For each play: the replay osu! saved, the chart file if Mania Tracker doesn't ha
 the app's version and whether it was stable or lazer. With rich presence on, also what you're
 doing in osu! and the current map, mods and speed. With Liveplay mode on, also your key presses,
 the song's time, your health and counts while you play, and the chart file when Mania Tracker asks
-for it, so anyone can spectate. To know what you're playing, the app reads osu!'s memory on your
+for it, so anyone can spectate. While someone is spectating, it also sends the song file of a map
+Mania Tracker has no song for. To know what you're playing, the app reads osu!'s memory on your
 computer, and only what's listed here leaves it. Apart from Mania Tracker, the app only talks to
 osu!'s servers for your avatar and GitHub for updates.
 

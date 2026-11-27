@@ -2,8 +2,9 @@
 // the song's clock, counts and map changes, so anyone can watch it from the player's profile
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
-use std::time::Duration;
+use std::path::Path;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use serde_json::{json, Value};
@@ -23,6 +24,13 @@ const GIVE_UP_MS: i64 = 25_000;
 const PAUSED_AFTER_MS: i64 = 400;
 const SEED_WAIT_MS: i64 = 2000;
 const EASY_EMPTY_MS: i64 = 1500;
+// a song for a map the site has none for, sent a little ahead of the play, not all of it at once
+const MAX_SONG_BYTES: u64 = 64 << 20;
+const SONG_PIECE: u64 = 256 << 10;
+const SONG_BYTES_PER_S: f64 = (256 << 10) as f64;
+const SONG_AHEAD_MS: i64 = 20_000;
+// browsers read an Ogg's length from its end
+const OGG_TAIL: u64 = 64 << 10;
 
 const HIT_KEYS: [(&str, &str); 6] = [("geki", "perfect"), ("300", "great"), ("katu", "good"), ("100", "ok"), ("50", "meh"), ("0", "miss")];
 
@@ -85,6 +93,11 @@ pub(crate) struct LiveState {
     reset_pending: bool,
     // the play failed and lazer's fail screen is up, the same attempt isn't a new play
     failed_attempt: bool,
+    // the song the site last asked for: the chart's md5 and how much it holds from the start
+    song: Option<(String, u64)>,
+    // the play a song is going out for, and one it was given up on
+    song_task: Option<String>,
+    song_given_up: Option<String>,
 }
 
 impl Default for LiveState {
@@ -112,6 +125,9 @@ impl Default for LiveState {
             still_seen: false,
             reset_pending: false,
             failed_attempt: false,
+            song: None,
+            song_task: None,
+            song_given_up: None,
         }
     }
 }
@@ -612,6 +628,7 @@ async fn open(b: &Arc<Bridge>) {
             s.live.stream = Some(Stream { id, key, seq: 0, outbox: VecDeque::new(), sent_at: 0, failing_since: None, frames_capped: false });
             s.live.charts.clear();
             s.live.viewers = 0;
+            s.live.song = None;
             resend_all(&mut s);
             log!("live: watchable at {}", s.live.watch_url.as_deref().unwrap_or("the profile"));
             set_status(b, &mut s, "live", None);
@@ -633,6 +650,7 @@ async fn close(b: &Arc<Bridge>, id: &str) {
     s.live.state = None;
     s.live.state_key = None;
     s.live.viewers = 0;
+    s.live.song = None;
 }
 
 // for when Hashi quits, the site would wait 30s otherwise
@@ -666,7 +684,7 @@ async fn send(b: &Arc<Bridge>, id: String, key: String, events: Vec<Value>) {
         }
         Err(e) => Err(e),
     };
-    let chart = {
+    let (chart, song) = {
         let mut s = b.st();
         s.live.busy = false;
         let Some(stream) = s.live.stream.as_mut().filter(|x| x.id == id) else { return };
@@ -682,28 +700,30 @@ async fn send(b: &Arc<Bridge>, id: String, key: String, events: Vec<Value>) {
                 stream.frames_capped |= body.get("frames_capped").and_then(Value::as_bool) == Some(true);
                 let viewers = body.get("viewers").and_then(Value::as_u64).unwrap_or(0);
                 let need = body.get("need_chart").and_then(Value::as_str).map(String::from);
+                s.live.song = body.get("need_song").and_then(|n| Some((n.get("md5")?.as_str()?.to_lowercase(), n.get("have").and_then(Value::as_u64).unwrap_or(0))));
                 if s.live.viewers != viewers {
                     s.live.viewers = viewers;
                     let b = b.clone();
                     tokio::spawn(async move { b.broadcast() });
                 }
                 set_status(b, &mut s, "live", None);
-                need.filter(|md5| s.live.charts.insert(md5.clone()))
+                let chart = need.filter(|md5| s.live.charts.insert(md5.clone()));
+                (chart, song_to_start(&mut s))
             }
             Ok(res) if res.status == 413 => {
                 s.live.max_per_batch = (events.len() / 2).max(1);
-                None
+                (None, None)
             }
             Ok(res) if res.status == 400 => {
                 // the site won't take these, sending them again won't change that
                 log!("live: a batch was refused: {}", String::from_utf8_lossy(&res.body));
                 let last = events.last().and_then(|e| e["seq"].as_u64()).unwrap_or(0);
                 stream.outbox.retain(|e| e["seq"].as_u64().unwrap_or(0) > last);
-                None
+                (None, None)
             }
             Ok(res) => {
                 answer(b, &mut s, &res);
-                None
+                (None, None)
             }
             Err(e) => {
                 let since = *stream.failing_since.get_or_insert(now_ms());
@@ -712,13 +732,17 @@ async fn send(b: &Arc<Bridge>, id: String, key: String, events: Vec<Value>) {
                     s.live.stream = None;
                 }
                 set_status(b, &mut s, "error", Some(crate::auth::net_message(&e)));
-                None
+                (None, None)
             }
         }
     };
     if let Some(md5) = chart {
-        let b = b.clone();
+        let (b, id, key) = (b.clone(), id.clone(), key.clone());
         tokio::spawn(async move { upload_chart(&b, &id, &key, &md5).await });
+    }
+    if let Some((play_id, md5)) = song {
+        let b = b.clone();
+        tokio::spawn(async move { upload_song(b, id, key, play_id, md5).await });
     }
 }
 
@@ -744,6 +768,161 @@ async fn upload_chart(b: &Arc<Bridge>, id: &str, key: &str, md5: &str) {
             log!("live: couldn't send the map: {}", crate::auth::net_message(&e));
         }
     }
+}
+
+fn song_to_start(s: &mut State) -> Option<(String, String)> {
+    let (md5, _) = s.live.song.as_ref()?;
+    let play = s.live.play.as_ref().filter(|p| p.md5.eq_ignore_ascii_case(md5))?;
+    if s.live.song_task.is_some() || s.live.song_given_up.as_deref() == Some(play.id.as_str()) {
+        return None;
+    }
+    s.live.song_task = Some(play.id.clone());
+    Some((play.id.clone(), md5.clone()))
+}
+
+#[derive(PartialEq)]
+enum SongEnd {
+    // not asked for now, it can be again
+    Stopped,
+    GaveUp,
+}
+
+async fn upload_song(b: Arc<Bridge>, id: String, key: String, play_id: String, md5: String) {
+    let end = send_song(&b, &id, &key, &play_id, &md5).await;
+    let mut s = b.st();
+    if s.live.song_task.as_deref() == Some(play_id.as_str()) {
+        s.live.song_task = None;
+    }
+    if end == SongEnd::GaveUp {
+        s.live.song_given_up = Some(play_id);
+    }
+}
+
+// the site has no song for this map: its file, a piece at a time and only a little ahead of
+// where the play is, so a short play of a long song doesn't send all of it
+async fn send_song(b: &Arc<Bridge>, id: &str, key: &str, play_id: &str, md5: &str) -> SongEnd {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let Some(base) = b.st().caps.as_ref().and_then(direct_base) else { return SongEnd::GaveUp };
+    let Some(path) = crate::practice::selected_audio(b, md5) else {
+        log!("live: couldn't find the song to send");
+        return SongEnd::GaveUp;
+    };
+    let Ok(mut file) = tokio::fs::File::open(&path).await else { return SongEnd::GaveUp };
+    let total = file.metadata().await.map_or(0, |m| m.len());
+    if total == 0 || total > MAX_SONG_BYTES {
+        return SongEnd::GaveUp;
+    }
+    let mut magic = [0u8; 4];
+    let ogg = file.read_exact(&mut magic).await.is_ok() && &magic == b"OggS";
+    let length = song_length_ms(b, md5, &path).await;
+    let mut have = 0;
+    let mut tail_due = ogg;
+    loop {
+        let wanted = {
+            let s = b.st();
+            let play = s.live.play.as_ref().filter(|p| p.id == play_id && s.live.stream.as_ref().is_some_and(|x| x.id == id));
+            let need = s.live.song.as_ref().filter(|(m, _)| m == md5);
+            play.zip(need).map(|(p, (_, have))| (*have, p.clock.map_or(0, |c| c.0)))
+        };
+        let Some((acked, time)) = wanted else { return SongEnd::Stopped };
+        have = have.max(acked);
+        if have >= total {
+            return SongEnd::Stopped;
+        }
+        let ahead = length.map_or(total, |len| (((time.max(0) + SONG_AHEAD_MS) as f64 / len) * total as f64).ceil() as u64);
+        let Some((start, end, tail)) = next_piece(have, total, ahead, tail_due) else {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            continue;
+        };
+        let mut piece = vec![0u8; (end - start + 1) as usize];
+        if file.seek(std::io::SeekFrom::Start(start)).await.is_err() || file.read_exact(&mut piece).await.is_err() {
+            return SongEnd::GaveUp;
+        }
+        let began = Instant::now();
+        let req = song_http()
+            .put(format!("{base}/live/{id}/song/{md5}"))
+            .header("authorization", format!("Live {key}"))
+            .header("content-range", format!("bytes {start}-{end}/{total}"))
+            .header("content-type", "application/octet-stream")
+            .timeout(Duration::from_secs(30))
+            .body(piece);
+        let wait = match req.send().await {
+            Ok(r) => {
+                let status = r.status().as_u16();
+                let retry_after = r.headers().get("retry-after").and_then(|h| h.to_str().ok()).and_then(|h| h.trim().parse::<f64>().ok());
+                let body: Value = r.json().await.unwrap_or(Value::Null);
+                match status {
+                    200..=299 => {
+                        if let Some(h) = body.get("have").and_then(Value::as_u64) {
+                            have = have.max(h);
+                        }
+                        tail_due &= !tail;
+                        None
+                    }
+                    429 => Some(Duration::from_secs_f64(retry_after.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(1.0).min(30.0))),
+                    // another play's map now, the stream's gone, or the site restarting
+                    409 | 401 | 404 => return SongEnd::Stopped,
+                    400 | 413 | 507 => {
+                        log!("live: the song wasn't taken ({status} {})", body.pointer("/error/code").and_then(Value::as_str).unwrap_or(""));
+                        return SongEnd::GaveUp;
+                    }
+                    _ => Some(Duration::from_secs(2)),
+                }
+            }
+            Err(_) => Some(Duration::from_secs(2)),
+        };
+        let pace = Duration::from_secs_f64((end - start + 1) as f64 / SONG_BYTES_PER_S);
+        tokio::time::sleep(wait.unwrap_or(pace.saturating_sub(began.elapsed()))).await;
+    }
+}
+
+// the next bytes to send, ends included: an Ogg's end once its start is there, then on from what
+// the site holds up to `ahead`
+fn next_piece(have: u64, total: u64, ahead: u64, tail_due: bool) -> Option<(u64, u64, bool)> {
+    if tail_due && have > 0 && have + OGG_TAIL < total {
+        return Some((total - OGG_TAIL, total - 1, true));
+    }
+    (have < ahead.min(total)).then(|| (have, (have + SONG_PIECE).min(total) - 1, false))
+}
+
+// pieces go on their own connection, not in line with the batches on the shared one
+fn song_http() -> &'static reqwest::Client {
+    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(format!("mania-bridge/{}", crate::VERSION))
+            .http1_only()
+            .build()
+            .unwrap_or_default()
+    })
+}
+
+// from the game when it says, else the file's own header, else the map's last note: too short
+// only sends it sooner
+async fn song_length_ms(b: &Bridge, md5: &str, path: &Path) -> Option<f64> {
+    let (game, last) = {
+        let s = b.st();
+        let raw = s.reader.last_frame.as_ref().filter(|r| r.pointer("/beatmap/checksum").and_then(Value::as_str).is_some_and(|c| c.eq_ignore_ascii_case(md5)));
+        let time = |k: &str| raw.and_then(|r| r.pointer(&format!("/beatmap/time/{k}"))).and_then(Value::as_f64).filter(|t| *t > 0.0);
+        (time("mp3Length"), time("lastObject"))
+    };
+    if game.is_some() {
+        return game;
+    }
+    let path = path.to_path_buf();
+    let file = tokio::task::spawn_blocking(move || file_length_ms(&path)).await.ok().flatten();
+    file.or(last)
+}
+
+fn file_length_ms(path: &Path) -> Option<f64> {
+    use symphonia::core::{formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint};
+    let src = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(src), Default::default());
+    let probed = symphonia::default::get_probe().format(&Hint::new(), mss, &FormatOptions::default(), &MetadataOptions::default()).ok()?;
+    let params = &probed.format.default_track()?.codec_params;
+    let ms = params.n_frames? as f64 * 1000.0 / params.sample_rate? as f64;
+    (ms > 0.0).then_some(ms)
 }
 
 fn answer(b: &Arc<Bridge>, s: &mut State, res: &Resp) {
@@ -803,5 +982,83 @@ mod tests {
         assert!(!same_play(&play, &play[..3]));
         assert!(!same_play(&[], &play));
         assert_eq!(changes(&[(0.0, 1)], &[(1.0, 1), (2.0, 0), (3.0, 0), (4.0, 2)]), [(2.0, 0), (4.0, 2)]);
+    }
+
+    #[test]
+    fn a_song_goes_a_piece_at_a_time_up_to_where_it_is_wanted() {
+        let mb = 1 << 20;
+        assert_eq!(next_piece(0, mb, 100, false), Some((0, SONG_PIECE - 1, false)));
+        assert_eq!(next_piece(SONG_PIECE, mb, 100, false), None);
+        // an Ogg's end right after its first piece
+        assert_eq!(next_piece(SONG_PIECE, mb, mb, true), Some((mb - OGG_TAIL, mb - 1, true)));
+        assert_eq!(next_piece(0, mb, mb, true), Some((0, SONG_PIECE - 1, false)));
+        assert_eq!(next_piece(mb - 10, mb, mb, true), Some((mb - 10, mb - 1, false)));
+        assert_eq!(next_piece(mb, mb, mb * 2, false), None);
+    }
+
+    fn stream() -> Stream {
+        Stream { id: "s1".into(), key: "k".into(), seq: 0, outbox: VecDeque::new(), sent_at: 0, failing_since: None, frames_capped: false }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_song_is_sent_as_the_play_goes_and_stops_when_whole() {
+        use axum::{extract::Path as At, http::HeaderMap, routing::put, Router};
+        use std::sync::Mutex;
+        type Got = Arc<Mutex<(Vec<(u64, u64)>, Vec<bool>)>>;
+        let total: u64 = 600 << 10;
+        let got: Got = Arc::new(Mutex::new((vec![], vec![false; total as usize])));
+        let app = Router::new().route("/live/{id}/song/{md5}", put({
+            let got = got.clone();
+            move |At((_, _)): At<(String, String)>, h: HeaderMap, body: Bytes| {
+                let got = got.clone();
+                async move {
+                    let range = h["content-range"].to_str().unwrap().trim_start_matches("bytes ").to_string();
+                    let (span, all) = range.split_once('/').unwrap();
+                    let (a, z) = span.split_once('-').unwrap();
+                    let (a, z, all): (u64, u64, u64) = (a.parse().unwrap(), z.parse().unwrap(), all.parse().unwrap());
+                    assert_eq!(z - a + 1, body.len() as u64);
+                    let mut g = got.lock().unwrap();
+                    g.0.push((a, z));
+                    g.1[a as usize..=z as usize].fill(true);
+                    let have = g.1.iter().position(|x| !x).unwrap_or(g.1.len());
+                    ([("content-type", "application/json")], json!({ "have": have, "total": all }).to_string())
+                }
+            }
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let (b, dir) = crate::auth::tests::test_bridge(&base);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut song = b"OggS".to_vec();
+        song.resize(total as usize, 7);
+        std::fs::write(dir.join("song"), &song).unwrap();
+        let md5 = "0123456789abcdef0123456789abcdef";
+        {
+            let mut s = b.st();
+            s.caps = Some(json!({ "api_base_url": base }));
+            s.reader.client = Some("lazer".into());
+            s.reader.lazer_files_dir = dir.clone();
+            s.reader.last_frame = Some(json!({ "client": "lazer", "beatmap": { "checksum": md5, "time": { "lastObject": 100_000.0 } }, "files": { "audio": "song" } }));
+            s.live.stream = Some(stream());
+            s.live.play = Some(Play { id: "p1".into(), md5: md5.into(), start: json!({}), sent: 0, clock: Some((0, false, false)), moved_at: 0, started: true, opened_at: 0, had_health: false, empty_since: None, stats: None });
+            s.live.song = Some((md5.into(), 0));
+        }
+        let task = tokio::spawn({
+            let b = b.clone();
+            async move { send_song(&b, "s1", "k", "p1", md5).await }
+        });
+        // at the start: the first 20 s of a 100 s song is one piece, then the Ogg's end
+        tokio::time::sleep(Duration::from_millis(1600)).await;
+        assert_eq!(got.lock().unwrap().0, [(0, SONG_PIECE - 1), (total - OGG_TAIL, total - 1)]);
+        // most of the way in, the rest goes, and then it's done
+        b.st().live.play.as_mut().unwrap().clock = Some((80_000, false, false));
+        let end = tokio::time::timeout(Duration::from_secs(10), task).await.unwrap().unwrap();
+        assert!(end == SongEnd::Stopped);
+        let g = got.lock().unwrap();
+        assert!(g.1.iter().all(|x| *x));
+        assert_eq!(g.0[2], (SONG_PIECE, 2 * SONG_PIECE - 1));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
