@@ -99,14 +99,14 @@ app only installs files signed with Hashi's release key.
 
 ## What gets sent
 
-For each play: the replay osu! saved, the chart file if Mania Tracker doesn't have that version,
-the app's version and whether it was stable or lazer. With rich presence on, also what you're
-doing in osu! and the current map, mods and speed. With Liveplay mode on, also your key presses,
-the song's time, your health and counts while you play, and the chart file when Mania Tracker asks
-for it, so anyone can spectate. While someone is spectating, it also sends the song file of a map
-Mania Tracker has no song for. To know what you're playing, the app reads osu!'s memory on your
-computer, and only what's listed here leaves it. Apart from Mania Tracker, the app only talks to
-osu!'s servers for your avatar and GitHub for updates.
+For each play: the replay osu! saved, the chart file if Mania Tracker doesn't have that version, the
+app's version and whether it was stable or lazer. With rich presence on, also what you're doing in
+osu! and the current map, mods and speed. With Liveplay mode on, also the play as it happens, so
+anyone can spectate: the replay osu! is recording (which columns are held and when), the song's
+time, your health and counts, and the chart file when Mania Tracker asks for it. While someone is
+spectating, it also sends the song file of a map Mania Tracker has no song for. To know what you're
+playing, the app reads osu!'s memory on your computer, and only what's listed here leaves it. Apart
+from Mania Tracker, the app only talks to osu!'s servers for your avatar and GitHub for updates.
 
 ## Troubleshooting
 
@@ -132,5 +132,6 @@ Uninstall it the usual way; on Windows the uninstaller asks whether to delete yo
 ## License
 
 MIT, see [LICENSE](LICENSE). Tracker Round in `counter/fonts`, built on Outfit, is under the SIL Open Font License.
-Reading osu!'s memory is built on [LeoBlack's osu!mania map analyser](https://github.com/LeoBlackMT/osumania_map_analyser),
-MIT, see [reader/LICENSE-LEOBLACK](reader/LICENSE-LEOBLACK).
+The part that reads osu!'s memory started from the reader in [LeoBlack's osu!mania map analyser](https://github.com/LeoBlackMT/osumania_map_analyser)
+(MIT, see [reader/LICENSE-LEOBLACK](reader/LICENSE-LEOBLACK)) and has since grown Linux support, live play data for
+spectating and the overlay, and a lot of fixes for both stable and lazer.
