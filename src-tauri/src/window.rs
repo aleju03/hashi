@@ -3,7 +3,7 @@
 
 use std::io::{BufRead, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,8 @@ static OVERLAY_AT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 // the card's size in the page's pixels, which its zoom makes bigger on screen
 static OVERLAY_SIZE: Mutex<(f64, f64)> = Mutex::new((320.0, 90.0));
 static OVERLAY_ZOOM: Mutex<f64> = Mutex::new(1.0);
+// the latest easing of the overlay's size, so an older one stops when a newer one starts
+static OVERLAY_EASING: AtomicU64 = AtomicU64::new(0);
 // windows: the background goes first, this one has to stay until the installer is started
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
@@ -236,6 +238,7 @@ fn overlay_size() -> (f64, f64) {
 }
 
 fn size_overlay(app: &AppHandle) {
+    OVERLAY_EASING.fetch_add(1, Ordering::SeqCst);
     #[cfg(target_os = "linux")]
     if hyprland() {
         let (w, h) = overlay_size();
@@ -250,6 +253,36 @@ fn size_overlay(app: &AppHandle) {
         }
         let _ = w.set_size(tauri::LogicalSize::new(width, height));
     }
+}
+
+// a size for a while, not the player's box: the settings open, and back to the box when they close.
+// eased there rather than snapped
+fn ease_overlay(app: &AppHandle, width: f64, height: f64) {
+    #[cfg(target_os = "linux")]
+    if hyprland() {
+        return hypr::resize(width, height);
+    }
+    let Some(w) = app.get_webview_window(OVERLAY) else { return };
+    let Some(from) = w.inner_size().ok().zip(w.scale_factor().ok()).map(|(s, f)| s.to_logical::<f64>(f)) else { return };
+    let run = OVERLAY_EASING.fetch_add(1, Ordering::SeqCst) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        const STEPS: u32 = 9;
+        for i in 1..=STEPS {
+            if OVERLAY_EASING.load(Ordering::SeqCst) != run {
+                return;
+            }
+            let t = 1.0 - (1.0 - f64::from(i) / f64::from(STEPS)).powi(3);
+            let size = tauri::LogicalSize::new(from.width + (width - from.width) * t, from.height + (height - from.height) * t);
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                if let Some(w) = handle.get_webview_window(OVERLAY) {
+                    let _ = w.set_size(size);
+                }
+            });
+            std::thread::sleep(Duration::from_millis(16));
+        }
+    });
 }
 
 fn hyprland() -> bool {
@@ -591,6 +624,11 @@ fn command(app: &AppHandle, line: &str) {
             // the card's, for hyprland's corners to match its own
             set(&OVERLAY_ZOOM, percent / 100.0);
             size_overlay(app);
+        }
+        "overlay-ease" => {
+            let mut n = rest.split(' ').map(str::parse::<f64>);
+            let (Some(Ok(w)), Some(Ok(h))) = (n.next(), n.next()) else { return };
+            ease_overlay(app, w, h);
         }
         "overlay-blur" => {
             #[cfg(target_os = "linux")]

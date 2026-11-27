@@ -49,7 +49,9 @@ const ov = {
   set: STREAM ? streamSettings() : { see: 100, box: null, rows: 8, art: true, status: true, live: true, last: true, playing: "show", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
-  sent: { size: "", through: null, blur: null },
+  sent: { size: "", through: null, blur: null, open: false },
+  // the settings' height in the window, which it grows to while they're open
+  settingsH: 0,
   // the window changing size because it was asked to, not because it was dragged
   askedAt: 0,
   // how the card is fitted to the window: its zoom, and the layout that let it be the biggest
@@ -433,7 +435,10 @@ function ovFitBox(card) {
     card.style.height = "";
     if (view === "now") ovFitNow(card);
     else if (view === "board") again = ovFitBoard(card);
-    else ovSetZoom(card, ovZoomIn(innerWidth / OV_WIDTH));
+    else {
+      ovSetZoom(card, ovZoomIn(innerWidth / OV_WIDTH));
+      ov.settingsH = Math.ceil(ovUnzoomed(card, card.getBoundingClientRect().height) * ov.z);
+    }
     ov.fitKey = again ? "" : key;
   }
   card.style.zoom = ov.z;
@@ -448,6 +453,12 @@ function ovWindow() {
     ov.sent.size = `${s.box[0]}x${s.box[1]}x${Math.round(ov.z * 100)}`;
     ov.askedAt = Date.now();
     windowAction(`overlay-size/${ov.sent.size}`);
+  }
+  // the settings take the room they need while they're open, then it's the player's box again
+  if (ov.open !== ov.sent.open && ov.settingsH) {
+    ov.sent.open = ov.open;
+    ov.askedAt = Date.now();
+    windowAction(`overlay-ease/${s.box[0]}x${ov.open ? ov.settingsH : s.box[1]}`);
   }
   const blur = s.see >= OV_THIN_SEE;
   if (blur !== ov.sent.blur) {
@@ -492,7 +503,8 @@ if (OVERLAY && !STREAM) {
     if (ov.card && !ov.holding) render();
     const [w, h] = ov.sent.size.split("x").map(Number);
     const same = Math.abs(innerWidth - w) < 2 && Math.abs(innerHeight - h) < 2;
-    if (Date.now() - ov.askedAt < 800 || same) return;
+    // the settings' own size isn't the player's
+    if (Date.now() - ov.askedAt < 800 || same || ov.open || ov.sent.open) return;
     clearTimeout(keep);
     keep = setTimeout(() => {
       ov.set.box = [innerWidth, innerHeight];
