@@ -454,7 +454,9 @@ function ovWindow() {
     ov.sent.blur = blur;
     windowAction(`overlay-blur/${blur ? "on" : "off"}`);
   }
-  const through = ovPlaying();
+  // mania takes no clicks, so the card can still be moved off a column mid-play. only a hidden one
+  // lets them through, or it'd catch clicks meant for the pause menu under it
+  const through = ovPlaying() && ov.set.playing === "hide";
   if (through !== ov.sent.through) {
     ov.sent.through = through;
     windowAction(`overlay-through/${through ? "on" : "off"}`);

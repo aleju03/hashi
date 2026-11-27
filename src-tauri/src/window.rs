@@ -206,6 +206,8 @@ fn overlay(app: &AppHandle, on: bool) {
             .always_on_top(true)
             // it comes up over the game without taking the keyboard from it
             .focused(false)
+            // nor when it's clicked or moved mid-play. windows only: no linux desktop's been tried
+            .focusable(!cfg!(windows))
             .disable_drag_drop_handler()
             .on_new_window(to_browser);
         let at = get(&OVERLAY_AT);

@@ -154,6 +154,10 @@
   opacity: 0.4;
 }
 
+.ov.playing.fade:hover {
+  opacity: 1;
+}
+
 .ov.playing.hide {
   opacity: 0;
 }
@@ -191,10 +195,6 @@
 .ov:hover .tools, .ov .tools:focus-within {
   opacity: 1;
   pointer-events: auto;
-}
-
-.ov.playing .tools {
-  display: none;
 }
 
 /* without the status line its buttons sit in the corner, over what the card shows */
@@ -835,10 +835,6 @@
 
 .ov:hover .grip {
   opacity: 0.8;
-}
-
-.ov.playing .grip {
-  display: none;
 }
 
 /* no bar on top on stream */
