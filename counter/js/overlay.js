@@ -46,7 +46,7 @@ function streamSettings() {
 }
 
 const ov = {
-  set: STREAM ? streamSettings() : { see: 90, box: null, rows: 8, art: true, status: true, live: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
+  set: STREAM ? streamSettings() : { see: 90, box: null, rows: 8, art: true, status: true, live: true, last: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
   sent: { size: "", through: null, blur: null },
@@ -183,7 +183,7 @@ function ovNow(map) {
   const live = playing && ov.set.live && snapshot.reader.live;
   return [
     map ? ovMap(map) : !STREAM && el("p", { class: "ov-empty" }, snapshot.reader.osu ? "Select a mania map in osu! to see it here." : "Open osu! to see your map here."),
-    live ? ovLive(live) : fresh ? ovResult(last, map) : last && !playing && ovLast(last),
+    live ? ovLive(live) : !STREAM && !ov.set.last ? null : fresh ? ovResult(last, map) : last && !playing && ovLast(last),
   ];
 }
 
@@ -265,6 +265,7 @@ function ovSettings() {
     row("Map art", switchButton(s.art, "Map art", () => ovSave((x) => (x.art = !x.art)))),
     row("While playing", segs(OV_PLAYING, s.playing, (p) => ovSave((x) => (x.playing = p)), "While playing")),
     row("Live accuracy", switchButton(s.live, "Live accuracy", () => ovSave((x) => (x.live = !x.live)))),
+    row("Last play", switchButton(s.last, "Last play", () => ovSave((x) => (x.last = !x.last)))),
     el("p", { class: "ov-hint" }, "Drag its edges or corner to resize it."),
     el("button", { class: "link", onclick: () => ((ov.open = false), render()) }, "Done"));
 }
