@@ -192,7 +192,8 @@
   transition: opacity 120ms;
 }
 
-.ov:hover .tools, .ov .tools:focus-within {
+/* only from the top of the card, where they show, so they don't cover it while it's read lower down */
+.ov .bar:hover .tools, .ov:has(> .ov-map:hover, > .ov-board-head:hover, > .ov-empty:hover) .tools, .ov .tools:focus-within {
   opacity: 1;
   pointer-events: auto;
 }
