@@ -165,6 +165,12 @@ fn is_hex(text: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+type FilesKey = (u64, u64, u64, i32);
+type Files = Vec<(String, String)>;
+/// the last set's files, by where its list and items are and how many: a set with keysounds has
+/// hundreds of files, too many to read again every tick
+static LAST_FILES: std::sync::Mutex<Option<(FilesKey, Files)>> = std::sync::Mutex::new(None);
+
 /// 从 BeatmapSetInfo.<Files> 读取文件表：`Vec<(filename, lazer_store_path)>`。
 pub fn read_beatmap_set_files(
     source: &dyn Source,
@@ -196,10 +202,16 @@ pub fn read_beatmap_set_files(
     if arr_len <= 0 {
         return files;
     }
+    let key = (beatmap_set, files_list, items_array, size);
+    if let Some((_, cached)) = LAST_FILES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(k, _)| *k == key) {
+        return cached.clone();
+    }
     let count = (size.min(arr_len) as usize).min(1000);
+    let mut whole = true;
     for i in 0..count {
         let elem_offset = 0x10 + (i as i64) * 8;
         let Some(usage_ptr) = read_ptr_field(source, items_array, elem_offset) else {
+            whole = false;
             continue;
         };
         let ptr_a = read_ptr_field(source, usage_ptr, 0x18);
@@ -216,10 +228,8 @@ pub fn read_beatmap_set_files(
             }
             _ => (None, None),
         };
-        let Some(filename) = filename_opt else {
-            continue;
-        };
-        let Some(file_ptr) = file_ptr_opt else {
+        let (Some(filename), Some(file_ptr)) = (filename_opt, file_ptr_opt) else {
+            whole = false;
             continue;
         };
         let hash_opt = read_ptr_field(source, file_ptr, 0x18)
@@ -229,11 +239,15 @@ pub fn read_beatmap_set_files(
                     .and_then(|h_ptr| read_string(source, h_ptr, layout))
             });
         let Some(hash) = hash_opt else {
+            whole = false;
             continue;
         };
         if let Some(lazer_path) = to_lazer_path(&hash) {
             files.push((filename, lazer_path));
         }
+    }
+    if whole {
+        *LAST_FILES.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, files.clone()));
     }
     files
 }
