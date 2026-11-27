@@ -1,7 +1,7 @@
 [
   {
     "version": "1.0.0",
-    "date": "2026-11-25",
+    "date": "2026-11-27",
     "changes": [
       { "kind": "new", "text": "Tosu is no longer required" },
       { "kind": "new", "text": "Added overlay mode" },
