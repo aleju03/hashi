@@ -432,6 +432,11 @@ pub struct StableReplayPollState {
 pub const MAX_NOTES: usize = 200_000;
 /// 连续失败多少拍后清空日志并请求页面重置。
 pub const NOTE_MAX_FAILURES: u32 = 50;
+/// how far past the song's time a note is looked at. well over the widest hit window, as the time
+/// comes from the last full read, up to ~350ms old, and goes up to twice as fast with a rate
+pub const NOTE_LOOKAHEAD_MS: i32 = 2_000;
+/// a note's fields read at once, from the first to the last; past this the table is wrong
+const NOTE_SPAN_MAX: usize = 512;
 
 /// `emitted[i]` 记录第 i 个 note 的 head/tail 是否已发过事件（bit0=head/tap，bit1=tail）。
 #[derive(Clone, Debug, Default)]
@@ -443,6 +448,9 @@ pub struct NoteJudgementPollState {
     size: usize,
 
     emitted: Vec<u8>,
+    /// each note's time once it's been read, `i32::MIN` until then: a note doesn't change time, so
+    /// one still ahead of the song needn't be read again until it's close
+    times: Vec<i32>,
     failures: u32,
 }
 
@@ -834,8 +842,11 @@ mod win_io {
 
     /// 读一拍 per-note 判定（`gameplay + note_list_from_gameplay` 的 `List<Note>`）。
     ///
-    /// 全表扫描 + `emitted` 去重：note 表 6.6k/15k 级别，单拍 ~5–15ms；不依赖判定顺序，
-    /// 能正确处理 LN 尾判晚于后续 tap 的情况。表缺 `notes` 段 ⇒ `Ok(0)`（不猜）。
+    /// 全表 + `emitted` 去重：不依赖判定顺序，能正确处理 LN 尾判晚于后续 tap 的情况。表缺
+    /// `notes` 段 ⇒ `Ok(0)`（不猜）。with the song's time, notes further ahead than
+    /// `NOTE_LOOKAHEAD_MS` aren't read, so a poll reads the few around it and any long note still
+    /// held, not the whole map. without it, every note not yet judged is read, as the results
+    /// screen's last pass does
     #[allow(clippy::too_many_arguments)]
     pub fn poll_note_judgements(
         target: &win::Target,
@@ -843,6 +854,7 @@ mod win_io {
         gameplay: u32,
         od: f64,
         mods_mask: u32,
+        now: Option<i32>,
         log: &crate::osu::lazer::HitEventLog,
         state: &mut NoteJudgementPollState,
     ) -> Result<usize, &'static str> {
@@ -878,6 +890,7 @@ mod win_io {
             || state.size != size;
         if reset {
             state.emitted = vec![0u8; size];
+            state.times = vec![i32::MIN; size];
             if let Some(windows) = v2.as_ref() {
                 crate::server::log::log_at(
                     "info",
@@ -889,56 +902,57 @@ mod win_io {
         }
         let mut events = Vec::new();
         let mut failed = false;
-        // 全表扫描：长 LN 会把 cursor 卡住，窗口外的 note 会漏判（V2 双事件尤甚）。
+        let horizon = now.map(|t| t.saturating_add(NOTE_LOOKAHEAD_MS));
+        // the notes' addresses in one read: the GC can move notes, so they're read every poll
+        let mut pointers = vec![0u8; size * 4];
+        if win::read_exact_chunked_at(target.handle(), items.wrapping_add(section.array_data) as usize, &mut pointers).is_err() {
+            failed = true;
+        }
+        // a note's fields in one read, from the first to the last
+        let fields = [
+            Some(section.note_judgement),
+            Some(section.note_time),
+            section.note_is_hold,
+            section.note_press,
+            section.note_release,
+            Some(column_offset),
+        ];
+        let lo = fields.iter().flatten().copied().min().unwrap_or(0);
+        let span = (fields.iter().flatten().copied().max().unwrap_or(0) - lo) as usize + 4;
+        if span > NOTE_SPAN_MAX {
+            return Err("note-fields-too-far-apart");
+        }
+        let mut buf = [0u8; NOTE_SPAN_MAX];
+        // 全表：长 LN 会把 cursor 卡住，窗口外的 note 会漏判（V2 双事件尤甚）。
         for index in 0..size {
+            if failed {
+                break;
+            }
             if state.emitted.get(index).copied().unwrap_or(0) != 0 {
                 continue;
             }
-            let note = match win::read_u32(
-                target,
-                items
-                    .wrapping_add(section.array_data)
-                    .wrapping_add((index as u32).wrapping_mul(4)),
-            ) {
-                Ok(note) if note != 0 => note,
-                _ => {
-                    failed = true;
-                    break;
-                }
+            let known = state.times.get(index).copied().unwrap_or(i32::MIN);
+            if horizon.is_some_and(|h| known != i32::MIN && known > h) {
+                continue;
+            }
+            let note = u32::from_le_bytes(pointers[index * 4..index * 4 + 4].try_into().unwrap());
+            if note == 0 || win::read_exact_at(target.handle(), note.wrapping_add(lo), &mut buf[..span]).is_err() {
+                failed = true;
+                break;
+            }
+            let at = |offset: u32| {
+                let i = (offset - lo) as usize;
+                i32::from_le_bytes(buf[i..i + 4].try_into().unwrap())
             };
-            let judgement = match win::read_i32(target, note.wrapping_add(section.note_judgement)) {
-                Ok(value) => value,
-                Err(_) => {
-                    failed = true;
-                    break;
-                }
-            };
-            let time = match win::read_i32(target, note.wrapping_add(section.note_time)) {
-                Ok(value) => value,
-                Err(_) => {
-                    failed = true;
-                    break;
-                }
-            };
-            let is_hold = section
-                .note_is_hold
-                .map(|offset| win::read_i32(target, note.wrapping_add(offset)).unwrap_or(0) != 0)
-                .unwrap_or(false);
-            let press = section
-                .note_press
-                .map(|offset| win::read_i32(target, note.wrapping_add(offset)).unwrap_or(0))
-                .unwrap_or(0);
-            let release = section
-                .note_release
-                .map(|offset| win::read_i32(target, note.wrapping_add(offset)).unwrap_or(0))
-                .unwrap_or(0);
-            let column = match win::read_i32(target, note.wrapping_add(column_offset)) {
-                Ok(value) => value,
-                Err(_) => {
-                    failed = true;
-                    break;
-                }
-            };
+            let judgement = at(section.note_judgement);
+            let time = at(section.note_time);
+            if let Some(slot) = state.times.get_mut(index) {
+                *slot = time;
+            }
+            let is_hold = section.note_is_hold.is_some_and(|offset| at(offset) != 0);
+            let press = section.note_press.map(at).unwrap_or(0);
+            let release = section.note_release.map(at).unwrap_or(0);
+            let column = at(column_offset);
             if !(0..=17).contains(&column) {
                 failed = true;
                 break;
@@ -1211,12 +1225,14 @@ pub fn poll_replay_frames(
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
+#[allow(clippy::too_many_arguments)]
 pub fn poll_note_judgements(
     _target: &win::Target,
     _topo: Option<&crate::osu::offsets::StableTopology>,
     _gameplay: u32,
     _od: f64,
     _mods_mask: u32,
+    _now: Option<i32>,
     _log: &crate::osu::lazer::HitEventLog,
     _state: &mut NoteJudgementPollState,
 ) -> Result<usize, &'static str> {

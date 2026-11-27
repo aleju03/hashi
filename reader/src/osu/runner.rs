@@ -69,6 +69,8 @@ pub fn run(
     let mut stable_od: f64 = 8.0;
     #[allow(unused_assignments)]
     let mut stable_mods: u32 = 0;
+    // the song's time at the last full read, so the note poll only reads notes near it
+    let mut stable_time: Option<i32>;
     let mut stable_note_state = stable::NoteJudgementPollState::default();
     let mut stable_replay_state = stable::StableReplayPollState::default();
     let mut regions: scan::RegionCache = scan::RegionCache::new();
@@ -440,6 +442,7 @@ pub fn run(
                         .map(|file| file.header.overall_difficulty)
                         .unwrap_or(8.0);
                     stable_mods = frame.snapshot.play_mods_mask.unwrap_or(0);
+                    stable_time = if stable_playable { frame.snapshot.play_time } else { None };
                     // 结算屏补一次最终全表扫描：最后一条 LN 尾常在 resultScreen 后一拍才落盘，
                     // 不补会稳定少 1 条（4K SV2 三次实测均少 1）。
                     if client == Client::Stable
@@ -461,6 +464,7 @@ pub fn run(
                                     gameplay,
                                     stable_od,
                                     stable_mods,
+                                    None,
                                     &hit_log,
                                     &mut stable_note_state,
                                 );
@@ -539,6 +543,7 @@ pub fn run(
                     stable_score = None;
                     stable_od = 8.0;
                     stable_mods = 0;
+                    stable_time = None;
                     stable_note_state = stable::NoteJudgementPollState::default();
                     stable_replay_state = stable::StableReplayPollState::default();
                     hit_log.clear();
@@ -577,6 +582,7 @@ pub fn run(
                             gameplay,
                             stable_od,
                             stable_mods,
+                            stable_time,
                             &hit_log,
                             &mut stable_note_state,
                         ) {
