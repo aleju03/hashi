@@ -46,7 +46,7 @@ function streamSettings() {
 }
 
 const ov = {
-  set: STREAM ? streamSettings() : { see: 90, box: null, rows: 8, art: true, status: true, live: true, last: true, playing: "fade", view: "now", ...stored(OV_KEY, {}) },
+  set: STREAM ? streamSettings() : { see: 100, box: null, rows: 8, art: true, status: true, live: true, last: true, playing: "show", view: "now", ...stored(OV_KEY, {}) },
   open: false,
   holding: false,
   sent: { size: "", through: null, blur: null },

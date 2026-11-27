@@ -100,7 +100,7 @@
 }
 
 .ov {
-  --see: 0.9;
+  --see: 1;
   position: relative;
   isolation: isolate;
   overflow: hidden;
