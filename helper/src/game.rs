@@ -662,8 +662,10 @@ pub(crate) fn watch_osu_frames(b: &Arc<Bridge>) {
             second.tick().await;
             let stopped = {
                 let mut s = b2.st();
-                let stopped = s.reader.osu && now_ms() - s.reader.last_frame_at > 3000;
+                let quiet = now_ms() - s.reader.last_frame_at;
+                let stopped = s.reader.osu && quiet > 3000;
                 if stopped {
+                    log!("nothing from the reader for {:.1}s in {}", quiet as f64 / 1000.0, s.reader.state.as_deref().unwrap_or("?"));
                     s.reader.gone();
                 }
                 stopped
