@@ -9,7 +9,10 @@
       { "kind": "new", "text": "Added a liveplay mode to stream your plays to Mania Tracker if you want a friend to spectate without opening osu!" },
       { "kind": "new", "text": "You can now click a player on a leaderboard to see their score" },
       { "kind": "new", "text": "Improved skin editor" },
-      { "kind": "fixed", "text": "Bugfixes" }
+      { "kind": "fixed", "text": "Wrong mods or speed on some plays" },
+      { "kind": "fixed", "text": "Some stable plays not being sent" },
+      { "kind": "fixed", "text": "Spectating someone on stable sending their play as yours" },
+      { "kind": "fixed", "text": "Lazer plays sometimes counted twice" }
     ]
   },
   {
