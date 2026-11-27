@@ -1,5 +1,5 @@
 use crate::osu::offsets::OffsetTable;
-use super::fields::{GAME_BASE_HOPS, LIVE_TIME_MAX_MS, MAX_RESOLUTION_LINES};
+use super::fields::{DRAW_SIZE_CONTAINER, GAME_BASE_HOPS, GAME_BASE_TYPE, LIVE_TIME_MAX_MS, MAX_RESOLUTION_LINES};
 use super::source::{field_addr, read_f64, read_ptr_field, read_u64, Source};
 use super::types::Resolved;
 
@@ -162,8 +162,43 @@ pub fn resolve_game_base(source: &dyn Source, modules: &[(u64, String)], anchors
             resolution.attempts.push(attempt);
         }
     }
+    if resolution.candidates.is_empty() {
+        if let Some(attempt) = anchors.iter().find_map(|anchor| climb_to_game(source, &mut layout, *anchor)) {
+            resolution.candidates.push(attempt);
+        }
+    }
     resolution
 }
+
+// from a container's TargetDrawSize up its parents to the game
+fn climb_to_game(source: &dyn Source, layout: &mut super::layout::Layout, hit: u64) -> Option<ResolveAttempt> {
+    let start = (0..=MAX_FIELD_BACK / 8).map(|k| (hit & !7).checked_sub(k * 8)).find_map(|start| {
+        let start = start.filter(|s| *s < hit)?;
+        (layout.object_offset(start, "TargetDrawSize") == Some((hit - start) as i64) && layout.is_a(start, DRAW_SIZE_CONTAINER)).then_some(start)
+    })?;
+    let mut at = start;
+    for _ in 0..MAX_DEPTH {
+        if layout.is_a(at, GAME_BASE_TYPE) {
+            let method_table = read_u64(source, at).filter(|mt| method_table_plausible(source, *mt))?;
+            return Some(ResolveAttempt {
+                anchor: hit,
+                site: Some(start),
+                game_base: Some(at),
+                method_table: Some(method_table),
+                resolved: true,
+                candidate: true,
+                verdict: format!("candidate: up the parents of the container at 0x{start:016X}"),
+                ..ResolveAttempt::default()
+            });
+        }
+        at = layout.follow(at, "parent")?;
+    }
+    None
+}
+
+// how far back from a field its object can start, and how deep the game's drawables nest
+const MAX_FIELD_BACK: u64 = 0x1000;
+const MAX_DEPTH: usize = 128;
 
 pub fn log_resolution(resolution: &Resolution) {
     match resolution.accepted() {

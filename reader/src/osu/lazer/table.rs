@@ -41,6 +41,7 @@ pub struct TargetEnv {
     pub exe_dir: PathBuf,
     pub storage_ini: Option<PathBuf>,
     pub arch: String,
+    pub torii: bool,
 }
 
 /// 目标环境的实测读数。
@@ -50,6 +51,8 @@ pub struct TargetInfo {
     pub runtime_version: String,
     pub arch: String,
     pub storage_root: Option<String>,
+    // torii, a lazer fork, keeps its data in osu-torii
+    pub torii: bool,
 }
 
 impl TargetInfo {
@@ -67,7 +70,7 @@ impl TargetInfo {
     /// 实际用于载荷 `folders.songs` 的目录：先信 `storage.ini`，
     /// 缺失/失效时回落到默认 Lazer 数据目录；两者都必须真实存在。
     pub fn effective_songs_folder(&self) -> Option<String> {
-        resolve_songs_folder(self.storage_root.as_deref(), default_lazer_files_dirs())
+        resolve_songs_folder(self.storage_root.as_deref(), default_lazer_files_dirs(self.torii))
     }
 
     /// 覆盖 `storage.ini` 的存储根（壳设置的 `lazerStorageRoot`）。
@@ -119,13 +122,16 @@ fn resolve_songs_folder(
 /// 默认安装不会生成 `storage.ini`，此时必须能回落到
 /// `%APPDATA%\osu\files`；旧版/便携环境可能使用带感叹号的
 /// `%APPDATA%\osu!\files`，一并作为候选（存在性由调用方检查）。
-fn default_lazer_files_dirs() -> Vec<PathBuf> {
+fn default_lazer_files_dirs(torii: bool) -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         let Some(appdata) = std::env::var_os("APPDATA") else {
             return Vec::new();
         };
         let appdata = PathBuf::from(appdata);
+        if torii {
+            return vec![appdata.join(TORII_DATA).join(FILES_DIR)];
+        }
         vec![
             appdata.join("osu").join(FILES_DIR),
             appdata.join("osu!").join(FILES_DIR),
@@ -133,7 +139,7 @@ fn default_lazer_files_dirs() -> Vec<PathBuf> {
     }
     #[cfg(target_os = "linux")]
     {
-        lazer_data_dirs().into_iter().map(|dir| dir.join(FILES_DIR)).collect()
+        lazer_data_dirs(torii).into_iter().map(|dir| dir.join(FILES_DIR)).collect()
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
@@ -143,22 +149,32 @@ fn default_lazer_files_dirs() -> Vec<PathBuf> {
 
 // lazer's data on linux: $XDG_DATA_HOME/osu, and the flatpak's own
 #[cfg(target_os = "linux")]
-fn lazer_data_dirs() -> Vec<PathBuf> {
+fn lazer_data_dirs(torii: bool) -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|d| d.is_absolute()).unwrap_or_else(|| home.join(".local/share"));
+    if torii {
+        return vec![data.join(TORII_DATA)];
+    }
     vec![data.join("osu"), home.join(".var/app/sh.ppy.osu/data/osu")]
+}
+
+const TORII_DATA: &str = "osu-torii";
+
+// the game the reader is on is torii, by its program's name
+pub fn is_torii(image_path: &Path) -> bool {
+    image_path.file_stem().is_some_and(|n| n.eq_ignore_ascii_case("torii"))
 }
 
 /// 不依赖读取器快照的存储根探测（设置页 `resolved` 与显式覆盖共用）：
 /// `storage.ini` 的 `FullPath` 优先，其次默认 `%APPDATA%\osu[!]\files` 的父目录。
 pub fn detected_lazer_storage_root() -> Option<PathBuf> {
-    let from_ini = storage_ini_path()
+    let from_ini = storage_ini_path(false)
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| ini_value(&text, "FullPath"))
         .map(PathBuf::from)
         .filter(|root| root.join(FILES_DIR).is_dir());
     from_ini.or_else(|| {
-        default_lazer_files_dirs()
+        default_lazer_files_dirs(false)
             .into_iter()
             .find(|files| files.is_dir())
             .and_then(|files| files.parent().map(|root| root.to_path_buf()))
@@ -186,6 +202,7 @@ pub fn target_from_files(files: &dyn TableFiles, env: &TargetEnv) -> TargetInfo 
         runtime_version,
         arch: env.arch.clone(),
         storage_root,
+        torii: env.torii,
     }
 }
 
@@ -557,8 +574,11 @@ pub fn arch_for_bitness(pe_machine: u16) -> &'static str {
 }
 
 #[cfg(windows)]
-pub fn storage_ini_path() -> Option<PathBuf> {
+pub fn storage_ini_path(torii: bool) -> Option<PathBuf> {
     let appdata = std::env::var_os("APPDATA").map(PathBuf::from)?;
+    if torii {
+        return Some(appdata.join(TORII_DATA).join("storage.ini"));
+    }
     let candidates = [
         appdata.join("osu").join("storage.ini"),
         appdata.join("osu!").join("storage.ini"),
@@ -572,13 +592,13 @@ pub fn storage_ini_path() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn storage_ini_path() -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = lazer_data_dirs().into_iter().map(|dir| dir.join("storage.ini")).collect();
+pub fn storage_ini_path(torii: bool) -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = lazer_data_dirs(torii).into_iter().map(|dir| dir.join("storage.ini")).collect();
     candidates.iter().find(|c| c.is_file()).cloned().or_else(|| candidates.into_iter().next())
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub fn storage_ini_path() -> Option<PathBuf> {
+pub fn storage_ini_path(_torii: bool) -> Option<PathBuf> {
     None
 }
 
@@ -593,6 +613,13 @@ pub fn env_table_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod optional_section_tests {
     use super::*;
+
+    #[test]
+    fn torii_is_told_by_its_program() {
+        assert!(is_torii(Path::new("/tmp/.mount_torii-x/usr/bin/torii")));
+        assert!(is_torii(Path::new("torii.exe")));
+        assert!(!is_torii(Path::new("/opt/osu-lazer/osu!")));
+    }
 
     #[test]
     fn full_table_outranks_a_partial_one() {
@@ -657,6 +684,7 @@ mod exact_selection_tests {
             runtime_version: "10.0.15".to_string(),
             arch: "x64".to_string(),
             storage_root: None,
+            torii: false,
         };
 
         let loaded = load_table(&files, None, &table_dir, &info, &prove).expect("load table");
@@ -680,6 +708,7 @@ mod exact_selection_tests {
             runtime_version: "10.0.15".to_string(),
             arch: "x64".to_string(),
             storage_root: None,
+            torii: false,
         };
 
         // 模拟启动时结构证明不可用（Lazer 尚未进入可读时钟状态）：

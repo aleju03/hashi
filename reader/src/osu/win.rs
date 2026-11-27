@@ -28,9 +28,12 @@ pub const OSU_EXE: &str = "osu!.exe";
 /// 不会因为名字不同而把 stable/lazer 混在一起。
 pub const OSU_EXE_ALT: &str = "osu.exe";
 
+/// torii, a lazer fork, under its own name. 64-bit, so it's taken as lazer
+pub const TORII_EXE: &str = "torii.exe";
+
 /// 是否为 osu! 的进程映像名（官方名或兼容名，大小写不敏感）。
 pub fn is_osu_exe_name(name: &str) -> bool {
-    name.eq_ignore_ascii_case(OSU_EXE) || name.eq_ignore_ascii_case(OSU_EXE_ALT)
+    name.eq_ignore_ascii_case(OSU_EXE) || name.eq_ignore_ascii_case(OSU_EXE_ALT) || name.eq_ignore_ascii_case(TORII_EXE)
 }
 
 /// `OpenProcess` 权限：读内存 + 查询（`VirtualQueryEx` / `QueryFullProcessImageNameW`）。
@@ -367,7 +370,7 @@ mod linux {
         pages * 4096
     }
 
-    // stable under wine shows as osu!.exe, lazer's own binary as osu!
+    // stable under wine shows as osu!.exe, lazer's own binary as osu!, torii's as torii
     fn candidates() -> (Vec<u32>, Vec<u32>) {
         let (mut stable, mut lazer) = (Vec::new(), Vec::new());
         let Ok(dir) = std::fs::read_dir("/proc") else { return (stable, lazer) };
@@ -376,7 +379,7 @@ mod linux {
             let Some(name) = comm(pid) else { continue };
             if is_osu_exe_name(&name) {
                 stable.push(pid);
-            } else if name == "osu!" {
+            } else if name == "osu!" || name == "torii" {
                 lazer.push(pid);
             }
         }

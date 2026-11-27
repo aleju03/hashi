@@ -3,6 +3,12 @@ use crate::osu::offsets::FieldLookup;
 // ---- 结构常数（来自我们自己的 P4/P4b 证据；不是偏移表的内容）----
 
 pub const MARKER_PATTERN: &str = "01 01 00 00 00 00 80 44 00 00 40 44";
+// a DrawSizePreservingFillContainer's TargetDrawSize, 1024x768: the game is up its parents. for a
+// fork, torii, that lays the game's own fields out otherwise and so has no marker
+pub const DRAW_SIZE_PATTERN: &str = "00 00 80 44 00 00 40 44";
+pub const DRAW_SIZE_CONTAINER: &str = "osu.Framework.Graphics.Containers.DrawSizePreservingFillContainer";
+pub const GAME_BASE_TYPE: &str = "osu.Game.OsuGameBase";
+pub const DRAW_SIZE_HIT_LIMIT: usize = 64;
 pub const ANCHOR_SITE_DELTA: i64 = 0x24;
 pub const SITE_DELTAS: &[i64] = &[0x24, 0x28, 0x2c, 0x20, 0x30, 0x1c, 0x34];
 // (label, offset, field name): the offset is used when the field can't be found by name in the running build

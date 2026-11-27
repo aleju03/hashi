@@ -586,37 +586,60 @@ pub fn scan_markers(
     found: &mut dyn FnMut(&[u64]) -> bool,
 ) -> Result<(Vec<u64>, u128), Reason> {
     use crate::osu::scan;
-    let pattern = scan::Pattern::parse(MARKER_PATTERN).map_err(|_| Reason::SignatureMiss(ANCHOR_KEY))?;
     let started = std::time::Instant::now();
     let mut stats = scan::ScanStats::default();
     let last = LAST_FOUND.load(std::sync::atomic::Ordering::Relaxed) as usize;
-    for mask in crate::osu::FILTER_READY {
-        let mut list = target.regions_cached(regions, *mask, crate::osu::REGION_LIMIT).to_vec();
-        list.sort_by_key(|r| (!(r.base..r.base + r.size).contains(&last), r.base));
-        let mut hits = Vec::new();
-        for region in &list {
-            let more = scan::find_in_regions64(target.handle(), std::slice::from_ref(region), &pattern, 0, limit - hits.len(), &mut stats);
-            if more.is_empty() {
+    let mut unresolved = Vec::new();
+    // torii has no marker, looking for it first would sweep all its memory for nothing
+    let patterns = match is_torii(&target.image_path) {
+        true => [DRAW_SIZE_PATTERN, MARKER_PATTERN],
+        false => [MARKER_PATTERN, DRAW_SIZE_PATTERN],
+    };
+    for text in patterns {
+        let pattern = scan::Pattern::parse(text).map_err(|_| Reason::SignatureMiss(ANCHOR_KEY))?;
+        // many containers aren't the game's, or not in it any more
+        let limit = if text == MARKER_PATTERN { limit } else { limit.max(DRAW_SIZE_HIT_LIMIT) };
+        for mask in crate::osu::FILTER_READY {
+            let mut list = target.regions_cached(regions, *mask, crate::osu::REGION_LIMIT).to_vec();
+            list.sort_by_key(|r| (!(r.base..r.base + r.size).contains(&last), r.base));
+            let mut hits = Vec::new();
+            let mut resolved = false;
+            for region in &list {
+                let more = scan::find_in_regions64(target.handle(), std::slice::from_ref(region), &pattern, 0, limit - hits.len(), &mut stats);
+                if more.is_empty() {
+                    continue;
+                }
+                hits.extend(more);
+                resolved = found(&hits);
+                if resolved || hits.len() >= limit {
+                    break;
+                }
+            }
+            if hits.is_empty() {
                 continue;
             }
-            hits.extend(more);
-            if found(&hits) || hits.len() >= limit {
-                break;
-            }
-        }
-        if !hits.is_empty() {
             eprintln!(
-                "[osu] lazer scan: filter#{} regions={} bytes={} hits={} elapsed={}ms",
+                "[osu] lazer scan: pattern={text} filter#{} regions={} bytes={} hits={} elapsed={}ms",
                 mask,
                 list.len(),
                 stats.bytes_read,
                 hits.len(),
                 started.elapsed().as_millis()
             );
-            return Ok((hits, started.elapsed().as_millis()));
+            if resolved {
+                return Ok((hits, started.elapsed().as_millis()));
+            }
+            if unresolved.is_empty() {
+                unresolved = hits;
+            }
+            break;
         }
     }
-    Err(Reason::SignatureMiss(ANCHOR_KEY))
+    // hits that lead nowhere still go back, for what the resolution logs of them
+    if unresolved.is_empty() {
+        return Err(Reason::SignatureMiss(ANCHOR_KEY));
+    }
+    Ok((unresolved, started.elapsed().as_millis()))
 }
 
 fn live_template() -> Option<&'static OffsetTable> {
@@ -663,8 +686,9 @@ pub fn attach(
             .parent()
             .map(|dir| dir.to_path_buf())
             .unwrap_or_default(),
-        storage_ini: storage_ini_path(),
+        storage_ini: storage_ini_path(is_torii(&target.image_path)),
         arch: arch_for_bitness(target.bitness).to_string(),
+        torii: is_torii(&target.image_path),
     };
     let files = RealFiles;
     let info = target_from_files(&files, &env)

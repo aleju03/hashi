@@ -153,12 +153,25 @@ impl<'a> Layout<'a> {
         self.fields(mt)?.iter().rev().find(|f| f.name == name).map(|f| f.offset)
     }
 
+    // the object's type is that one or derives from it
+    pub fn is_a(&mut self, object: u64, full_name: &str) -> bool {
+        let mut mt = self.u64(object);
+        for _ in 0..MAX_PARENTS {
+            let Some(at) = mt else { return false };
+            if self.type_name(at).as_deref() == Some(full_name) {
+                return true;
+            }
+            mt = self.parent(at);
+        }
+        false
+    }
+
     pub fn object_offset(&mut self, object: u64, name: &str) -> Option<i64> {
         let mt = self.u64(object)?;
         self.offset(mt, name)
     }
 
-    fn follow(&mut self, object: u64, name: &str) -> Option<u64> {
+    pub fn follow(&mut self, object: u64, name: &str) -> Option<u64> {
         let offset = self.object_offset(object, name)?;
         self.u64(object.checked_add(offset as u64)?).filter(|p| plausible_ptr(*p))
     }
