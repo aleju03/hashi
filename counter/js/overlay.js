@@ -105,9 +105,7 @@ function ovMap(map) {
   const above = !STREAM && ov.layout.above;
   return el("div", { class: `ov-map${picked?.data ? "" : " stale"}${above ? " wrap" : ""}`, style: above && `--lines: ${ov.layout.lines}` },
     el("div", { class: "what" },
-      map.id
-        ? el("a", { class: "title", href: `${snapshot.connection.origin}/maps?map=${map.id}`, target: "_blank", rel: "noreferrer", title: "Open on Mania Tracker" }, map.title ?? "Unknown")
-        : el("span", { class: "title" }, map.title ?? "Unknown"),
+      el("span", { class: "title" }, map.title ?? "Unknown"),
       el("span", { class: "by" }, [map.artist, diffName(map.keys, map.version)].filter(Boolean).join(" · "))),
     el("div", { class: "numbers" },
       el("span", { class: "msd" },
