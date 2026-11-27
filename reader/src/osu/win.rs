@@ -490,7 +490,7 @@ mod linux {
     }
 
     fn utf16(raw: &[u8]) -> Result<String, Reason> {
-        let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
         if units.contains(&0) {
             return Err(Reason::InvariantFailed("string-nul"));
         }
