@@ -589,12 +589,12 @@ fn slider_duration(
     let Some(beat_length) = beat_length_at(timing_points, object.time) else {
         return (0.0, None);
     };
-    if !(beat_length > 0.0) || !beat_length.is_finite() {
+    if !beat_length.is_finite() || beat_length <= 0.0 {
         return (0.0, None);
     }
     let sv = sv_at(timing_points, object.time);
     let velocity = 100.0 * slider_multiplier * LEGACY_SLIDER_MULTIPLIER * sv / beat_length;
-    if !(velocity > 0.0) || !velocity.is_finite() {
+    if !velocity.is_finite() || velocity <= 0.0 {
         return (0.0, None);
     }
     // 长度优先由路径串算出（osu! 的做法）；路径串缺失/为空时退回第 8 段的 `pixelLength`。
@@ -615,7 +615,7 @@ fn slider_duration(
 fn beat_length_at(timing_points: &[TimingPoint], time: f64) -> Option<f64> {
     let mut best: Option<&TimingPoint> = None;
     for point in timing_points {
-        if !point.uninherited || !point.time.is_finite() || !(point.beat_length > 0.0) {
+        if !point.uninherited || !point.time.is_finite() || point.beat_length.is_nan() || point.beat_length <= 0.0 {
             continue;
         }
         if point.time <= time && best.map(|b| point.time >= b.time).unwrap_or(true) {

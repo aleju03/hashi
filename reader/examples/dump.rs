@@ -17,7 +17,7 @@ fn main() {
             s.client,
             s.pid,
             s.lazer.as_ref().map(|l| l.gaps.clone()),
-            s.lazer.as_ref().and_then(|l| l.chain.clone()),
+            s.lazer.as_ref().and_then(|l| l.chain),
             s.packet.as_ref().map(|p| serde_json::to_string_pretty(p).unwrap_or_default()).unwrap_or_else(|| "(no packet)".into()),
         );
         if line != last {

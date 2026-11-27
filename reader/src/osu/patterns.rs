@@ -312,7 +312,7 @@ impl AnchorTable {
 
 /// 对齐检查：指针槽必然 4 字节对齐。不对齐 = 命中是假阳性（L1 结构校验的第一道）。
 pub fn is_aligned(addr: u32) -> bool {
-    addr % 4 == 0
+    addr.is_multiple_of(4)
 }
 
 /// 获取指定锚点键的 IDA 模式串与位移（优先查 StableTable，缺席时回退台账默认常量）。

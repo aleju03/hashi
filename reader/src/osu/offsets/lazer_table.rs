@@ -113,10 +113,10 @@ impl ResultsSection {
             || (self.statistics_dict_offset.is_some() && self.dict_entries_offset.is_some());
         in_range(self.score_offset)
             && has_hits_source
-            && self.player_offset.map_or(true, in_range)
-            && self.statistics_offset.map_or(true, in_range)
-            && self.statistics_dict_offset.map_or(true, in_range)
-            && self.dict_entries_offset.map_or(true, in_range)
+            && self.player_offset.is_none_or(in_range)
+            && self.statistics_offset.is_none_or(in_range)
+            && self.statistics_dict_offset.is_none_or(in_range)
+            && self.dict_entries_offset.is_none_or(in_range)
     }
 
     /// `<Hash>` 的位移：只接受域内且 8 字节对齐的值；缺省/坏值返回 `None`。
@@ -265,7 +265,7 @@ impl ScoreSection {
         };
         field(self.player_score_processor)
             && field(self.hit_events)
-            && self.score_result_counts.map_or(true, field)
+            && self.score_result_counts.is_none_or(field)
             && (super::lookup::MIN_FIELD_OFFSET..=super::lookup::MAX_FIELD_OFFSET)
                 .contains(&self.column)
             && self.column % 4 == 0

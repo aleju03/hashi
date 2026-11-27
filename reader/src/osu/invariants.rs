@@ -301,10 +301,7 @@ impl History {
     ///
     /// 返回 `Some(field)` = 本帧上报降级（调用方写进 `soft`，**不**累加 strike）。
     pub fn check_play_time(&mut self, live: Option<i32>, now_ms: u64) -> Option<&'static str> {
-        let current = match live {
-            Some(value) => value,
-            None => return None,
-        };
+        let current = live?;
         let previous = match self.last_play_time {
             Some(value) => value,
             None => {
@@ -488,12 +485,12 @@ pub fn i05_time_window(snapshot: &Snapshot) -> FrameVerdict {
 
 /// 单个指针是否合理（32 位用户态最小判据）：非空、4 字节对齐、≥ 64 KiB。
 pub fn pointer_is_plausible(pointer: u32) -> bool {
-    pointer != 0 && pointer % 4 == 0 && pointer >= 0x1_0000
+    pointer != 0 && pointer.is_multiple_of(4) && pointer >= 0x1_0000
 }
 
 /// 64 位指针的同一判据（lazer；x64 的引用字段 8 字节对齐）。
 pub fn pointer_is_plausible_u64(pointer: u64) -> bool {
-    pointer != 0 && pointer % 8 == 0 && pointer >= 0x1_0000
+    pointer != 0 && pointer.is_multiple_of(8) && pointer >= 0x1_0000
 }
 
 /// I-06：指针合理性（硬）的**状态相关期望集**：哪些指针在**当前状态**下必须存在且合理。
@@ -590,7 +587,7 @@ pub fn expected_pointers(snapshot: &Snapshot) -> ExpectedPointers {
 pub fn i06_pointers(snapshot: &Snapshot) -> FrameVerdict {
     let mut verdict = FrameVerdict::default();
     if snapshot.client == Some(crate::osu::model::Client::Lazer) {
-        let chain_ok = snapshot.lazer_chain.map_or(false, |chain| {
+        let chain_ok = snapshot.lazer_chain.is_some_and(|chain| {
             // L1 的两个结构落点：`game_base` 是多跳解析出的对象地址、`vtable` 是它的
             // MethodTable（(b) 判据在构造时就要求"对齐 + 可读"）。两者都在 ⇒ 本帧的对象
             // 是同一个（会话内的稳定性由 `lazer.rs::prove_object` 判）。
@@ -599,7 +596,7 @@ pub fn i06_pointers(snapshot: &Snapshot) -> FrameVerdict {
             let identity_expected = snapshot.checksum.is_some() || snapshot.filename.is_some();
             base_ok
                 && (!identity_expected
-                    || chain.beatmap_info.map_or(false, pointer_is_plausible_u64))
+                    || chain.beatmap_info.is_some_and(pointer_is_plausible_u64))
         });
         if !chain_ok {
             verdict.hard.push(invariant("I-06").field);
@@ -616,7 +613,7 @@ pub fn i06_pointers(snapshot: &Snapshot) -> FrameVerdict {
     ];
     if checks
         .into_iter()
-        .any(|(expected, pointer)| expected && !pointer.map_or(false, pointer_is_plausible))
+        .any(|(expected, pointer)| expected && !pointer.is_some_and(pointer_is_plausible))
     {
         verdict.hard.push(invariant("I-06").field);
     }
@@ -628,12 +625,12 @@ pub fn i06_pointers(snapshot: &Snapshot) -> FrameVerdict {
 /// 依赖字段 = `play.mods` 与 `play.hits`：链不可信时它们**不发布**（既不是"沿用上一帧"，
 /// 也不是"发半截"）——菜单/选歌里这条槽是残留指针，读出来的东西与当前局无关。
 pub fn play_chain_valid(snapshot: &Snapshot) -> bool {
-    snapshot.score_base.map_or(false, pointer_is_plausible)
+    snapshot.score_base.is_some_and(pointer_is_plausible)
 }
 
 /// 结算链（`result`）**结构可信**：结算对象指针非空/对齐/≥64 KiB。
 pub fn result_chain_valid(snapshot: &Snapshot) -> bool {
-    snapshot.result_base.map_or(false, pointer_is_plausible)
+    snapshot.result_base.is_some_and(pointer_is_plausible)
 }
 
 /// `play.hits` 的发布门（**三道门全过**，纯函数）：
@@ -656,7 +653,7 @@ pub fn result_hits_publishable(snapshot: &Snapshot) -> bool {
 
 /// I-07：id/set 范围（软）。`-1` 是"未提交"的合法值。
 pub fn id_in_range(id: i32) -> bool {
-    id >= -1 && id < ID_MAX
+    (-1..ID_MAX).contains(&id)
 }
 
 pub fn i07_id_range(snapshot: &Snapshot) -> FrameVerdict {
@@ -796,13 +793,12 @@ pub fn evaluate(
         }
     }
     // hits 键序未对拍（非不变量失败，但必须上报——读者要能一眼看出）
-    if snapshot.play_hits.is_some() || snapshot.result_hits.is_some() {
-        if !stable::HITS_MAPPING_VERIFIED {
+    if (snapshot.play_hits.is_some() || snapshot.result_hits.is_some())
+        && !stable::HITS_MAPPING_VERIFIED {
             verdict
                 .degraded_fields
                 .push("play.hits.mapping".to_string());
         }
-    }
     verdict
 }
 
@@ -1051,7 +1047,7 @@ impl Gate {
         // Step 9g：保持窗口与"最后一张好图"的身份作废——新进程的图不一定是上一张。
         self.clear_hold();
         self.held_identity = None;
-        if self.last_reason.as_ref().map_or(false, Reason::is_discovery) {
+        if self.last_reason.as_ref().is_some_and(Reason::is_discovery) {
             self.last_reason = None;
             self.freeze_reason = None;
             self.frozen = false;
@@ -1138,7 +1134,7 @@ impl Gate {
             }
             let reason = verdict
                 .hard_reason()
-                .unwrap_or_else(|| Reason::InvariantFailed("unknown"));
+                .unwrap_or(Reason::InvariantFailed("unknown"));
             self.freeze_reason = Some(reason.clone());
             self.last_reason = Some(reason.clone());
             self.degraded = verdict.degraded_fields.clone();
@@ -1205,7 +1201,7 @@ impl Gate {
                 && self
                     .held_identity
                     .as_deref()
-                    .map_or(false, |held| held != identity);
+                    .is_some_and(|held| held != identity);
             if corroborated_change {
                 // 换图（已对拍）⇒ 立刻发布新的那张；保持窗口就此结束。
                 self.clear_hold();

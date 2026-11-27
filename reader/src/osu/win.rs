@@ -1171,13 +1171,12 @@ mod win32 {
     }
 
     /// 每个位数桶各自按坐标去重（幻觉坐标指向同一进程 ⇒ 与真候选同桶 ⇒ 同键）。
+    type Rows = Vec<(u32, PathBuf, u64)>;
+
     fn dedupe_rows(
         stable: Vec<(u32, PathBuf, u64, usize)>,
         lazer: Vec<(u32, PathBuf, u64, usize)>,
-    ) -> (
-        Vec<(u32, PathBuf, u64)>,
-        Vec<(u32, PathBuf, u64)>,
-    ) {
+    ) -> (Rows, Rows) {
         let (stable, dropped_stable) = dedupe_by_coordinate(stable);
         let (lazer, dropped_lazer) = dedupe_by_coordinate(lazer);
         if !dropped_stable.is_empty() || !dropped_lazer.is_empty() {
@@ -1630,7 +1629,7 @@ mod win32 {
         read_exact_at64(target.handle(), body_addr, &mut raw)
             .map_err(Reason::from_win32_error)?;
         let units: Vec<u16> = raw
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         if units.contains(&0) {
@@ -1693,7 +1692,7 @@ mod win32 {
         let body_addr = addr.checked_add(8).ok_or(Reason::ReadError)?;
         read_exact_at(target.handle(), body_addr, &mut raw).map_err(Reason::from_win32_error)?;
         let units: Vec<u16> = raw
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
         if units.contains(&0) {

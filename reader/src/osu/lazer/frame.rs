@@ -959,7 +959,7 @@ fn carry_lazer_mods(
                 None => {
                     // 没有 play 帧就无法证明这局用了什么 mod；宁可让 /feedback 拒绝，
                     // 也不把结算屏残留/下一局预选的 SelectedMods 当成这局成绩。
-                    if mods.as_ref().map_or(true, |mods| mods.is_empty()) {
+                    if mods.as_ref().is_none_or(|mods| mods.is_empty()) {
                         *mods = None;
                         *complete = false;
                         true
@@ -1085,7 +1085,7 @@ pub fn read_lazer_mods(
         (list_or_array, size)
     };
 
-    if size < 0 || size > 64 {
+    if !(0..=64).contains(&size) {
         return None;
     }
     if size == 0 {
@@ -1150,7 +1150,7 @@ pub fn read_lazer_mods(
                 for offset in [0x10, 0x18, 0x20, 0x28, 0x30, 0x38] {
                     if let Some(bindable) = read_ptr_field(source, mod_obj, offset) {
                         if let Some(val) = read_f64(source, bindable + 0x20) {
-                            if val.is_finite() && val >= 0.25 && val <= 3.0 {
+                            if val.is_finite() && (0.25..=3.0).contains(&val) {
                                 speed_change = Some(val);
                                 break;
                             }

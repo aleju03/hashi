@@ -95,7 +95,7 @@ pub fn read_results(
                     read.replay = info
                         .type_name
                         .as_deref()
-                        .map_or(false, |name| name.contains("ReplayPlayer"));
+                        .is_some_and(|name| name.contains("ReplayPlayer"));
                 }
                 Err(_) => {
                     read.gap("player-type-unreadable");
@@ -202,7 +202,7 @@ pub fn read_dictionary_hits(
     }
     let entries = read_ptr_field(source, dict, entries_offset)?;
     let length = read_i32(source, entries + ARRAY_LENGTH_OFFSET)?;
-    if length < 0 || length > STATISTICS_ENTRY_MAX {
+    if !(0..=STATISTICS_ENTRY_MAX).contains(&length) {
         return None;
     }
     let mut counts: BTreeMap<u32, u32> = BTreeMap::new();

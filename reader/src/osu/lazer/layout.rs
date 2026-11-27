@@ -130,7 +130,7 @@ impl<'a> Layout<'a> {
             }
             let list = self.u64(class + CLASS_FIELDS).filter(|p| plausible_ptr(*p))?;
             let bytes = self.source.read(list, (count * FIELD_DESC) as usize)?;
-            for desc in bytes.chunks_exact(FIELD_DESC as usize) {
+            for desc in bytes.as_chunks::<{ FIELD_DESC as usize }>().0.iter() {
                 let owner = u64::from_le_bytes(desc[0..8].try_into().ok()?);
                 let word = u32::from_le_bytes(desc[8..12].try_into().ok()?);
                 let place = u32::from_le_bytes(desc[12..16].try_into().ok()?);
@@ -183,8 +183,8 @@ impl<'a> Layout<'a> {
         }
         let (Some(module), Some(row)) = (self.module_of(mt), self.row(mt)) else { return false };
         let Some(words) = self.source.read(module, MODULE_SPAN) else { return false };
-        for (i, word) in words.chunks_exact(8).enumerate() {
-            let pointer = u64::from_le_bytes(word.try_into().unwrap());
+        for (i, word) in words.as_chunks::<8>().0.iter().enumerate() {
+            let pointer = u64::from_le_bytes(*word);
             if plausible_ptr(pointer) && self.u64(pointer + 8 * u64::from(row)).is_some_and(|v| v & !7 == mt) {
                 self.typedef_map_at = Some((i * 8) as u64);
                 return true;
@@ -633,8 +633,8 @@ fn ruleset_modules(layout: &mut Layout, game_base: u64) -> Vec<u64> {
     };
     for i in 0..count as u64 {
         let Some(entry) = source.read(entries + 16 + i * size, size as usize) else { continue };
-        for word in entry.chunks_exact(8) {
-            let object = u64::from_le_bytes(word.try_into().unwrap());
+        for word in entry.as_chunks::<8>().0.iter() {
+            let object = u64::from_le_bytes(*word);
             if !plausible_ptr(object) {
                 continue;
             }

@@ -348,6 +348,7 @@ pub fn mod_codes_from_payload(payload: &Value, client: Client) -> Vec<&'static s
 /// - `speedRate = 1.5`（NC|DT）、`0.75`（HT|DC）、否则 `1.0`
 /// - `odFlag = "HR"` → `"EZ"` → 否则 `"none"`
 /// - `cvtFlag` 恒 `"none"`（`IN`/`HO` 是 lazer 专属分支）
+///
 /// lazer 的 `settings.speed_change` / `settings.overall_difficulty` 取值路径一并实现，
 /// 但 lazer 帧本步不产出（E 步接入）。
 fn mod_dimensions(
@@ -572,7 +573,7 @@ pub fn identity_from_payload(payload: &Value) -> String {
         .join("::")
         .to_lowercase();
         // `:262`：去掉冒号后仍有内容才算"有元信息身份"。
-        if meta.replace(':', "").len() > 0 {
+        if !meta.replace(':', "").is_empty() {
             parts.push(format!("meta:{meta}"));
         }
     }

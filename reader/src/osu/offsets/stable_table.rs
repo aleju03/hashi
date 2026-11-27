@@ -346,11 +346,10 @@ fn fill_embedded_optional_sections(mut table: StableTable, variant: &str) -> Sta
     } else {
         default_stable_table()
     };
-    if table.verified_build.eq_ignore_ascii_case(&embedded.verified_build) {
-        if table.topology.score_seed.is_none() {
+    if table.verified_build.eq_ignore_ascii_case(&embedded.verified_build)
+        && table.topology.score_seed.is_none() {
             table.topology.score_seed = embedded.topology.score_seed;
         }
-    }
     table
 }
 

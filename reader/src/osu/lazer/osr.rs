@@ -104,7 +104,7 @@ pub fn read_replay_pauses(bytes: &[u8]) -> Result<ReplayPauses, OsrError> {
         return Err(OsrError::Truncated("scoreInfoHeader"));
     }
     let raw_length = i64::from_le_bytes(info[5..13].try_into().expect("8 bytes"));
-    if raw_length < -1 || raw_length > MAX_DECOMPRESSED_BYTES {
+    if !(-1..=MAX_DECOMPRESSED_BYTES).contains(&raw_length) {
         return Err(OsrError::TooLarge);
     }
 
@@ -154,9 +154,7 @@ fn speed_rate_from_mods(mods: Option<&Value>) -> Option<f64> {
     let Some(mods) = mods else {
         return Some(1.0);
     };
-    let Some(array) = mods.as_array() else {
-        return None;
-    };
+    let array = mods.as_array()?;
     let mut rate = 1.0_f64;
     let mut found = false;
     for entry in array {
@@ -204,8 +202,7 @@ impl std::io::Write for LimitedBuffer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.data.len().saturating_add(buf.len()) > self.limit {
             self.limit_hit = true;
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "decompressed size limit",
             ));
         }

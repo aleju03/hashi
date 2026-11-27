@@ -747,7 +747,7 @@ pub fn publish_outcome(
     }
     match outcome.action {
         FrameAction::Stop => {
-            state.snapshot = snapshot.map(|snapshot| frozen_copy(snapshot));
+            state.snapshot = snapshot.map(frozen_copy);
             state.packet = None;
             state.holding = false;
             state.held_packet = None;
@@ -886,7 +886,7 @@ pub fn resolve_anchors(
             let chosen = candidates
                 .iter()
                 .copied()
-                .find(|addr| anchor_proves_out_with_topo(target, *key, *addr, &regions, topo));
+                .find(|addr| anchor_proves_out_with_topo(target, key, *addr, &regions, topo));
             eprintln!(
                 "[osu] scan {} -> {} hit(s) {} chosen={:?}",
                 key,

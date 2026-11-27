@@ -411,7 +411,7 @@ pub fn load_table(
             Some((_, best_table, best_score, best_dir_index)) => {
                 let candidate_proven = prove(&candidate.1);
                 let best_proven = prove(best_table);
-                candidate_proven > best_proven
+                candidate_proven & !best_proven
                     || (candidate_proven == best_proven && candidate.2 > *best_score)
                     // 证明和完整度都打平时，优先候选目录的后者（随包目录排在
                     // APPDATA 缓存之后），避免旧缓存表在无法现场自证时重新获胜。

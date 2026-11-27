@@ -113,7 +113,7 @@ pub(crate) fn found_image_base(source: &dyn Source, module: u64, modules: &[(u64
         return known(value);
     }
     let words = |addr: u64, span: usize| -> Vec<u64> {
-        source.read(addr, span).map(|b| b.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect()).unwrap_or_default()
+        source.read(addr, span).map(|b| b.as_chunks::<8>().0.iter().map(|c| u64::from_le_bytes(*c)).collect()).unwrap_or_default()
     };
     let outer = words(module, MODULE_SPAN);
     let remember = |found: (u64, Option<u64>)| *IMAGE_BASE_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);

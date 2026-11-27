@@ -101,7 +101,7 @@ pub fn read_string(source: &dyn Source, addr: u64, layout: StringLayout) -> Opti
     let body_addr = field_addr(addr, layout.chars)?;
     let bytes = source.read(body_addr, len as usize * 2)?;
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>().0.iter()
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
     if units.contains(&0) {

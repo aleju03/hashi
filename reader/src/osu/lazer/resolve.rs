@@ -5,7 +5,7 @@ use super::types::Resolved;
 
 /// x64 用户态指针的合理性判据。
 pub fn plausible_ptr(pointer: u64) -> bool {
-    pointer >= 0x1_0000 && pointer < 0x0000_8000_0000_0000 && pointer % 8 == 0
+    (0x1_0000..0x0000_8000_0000_0000).contains(&pointer) && pointer.is_multiple_of(8)
 }
 
 /// (b) 判据：[gameBase] 必须是结构上像 MethodTable 的值。
@@ -281,6 +281,22 @@ fn clock_value_is_sane(value: f64) -> bool {
         && (value == 0.0 || value.abs() >= 0.5)
 }
 
+pub fn vtable_witness_note(table: &OffsetTable, observed: u64) -> String {
+    match table.game_base_vtable {
+        Some(expected) if expected == observed => format!(
+            "vtable witness confirmed — table game_base_vtable=0x{expected:016X} == observed \
+             MethodTable (same-process regeneration)"
+        ),
+        Some(expected) => format!(
+            "vtable witness differs (expected across launches) — table 0x{expected:016X} vs \
+             observed 0x{observed:016X}"
+        ),
+        None => "table carries no game_base_vtable witness — the structural proof carries the \
+                 identification"
+            .to_string(),
+    }
+}
+
 #[cfg(test)]
 mod clock_probe_tests {
     use super::{clock_value_is_sane, LIVE_TIME_MAX_MS};
@@ -299,21 +315,5 @@ mod clock_probe_tests {
         assert!(!clock_value_is_sane(f64::NAN));
         assert!(!clock_value_is_sane(f64::INFINITY));
         assert!(!clock_value_is_sane(LIVE_TIME_MAX_MS + 1.0));
-    }
-}
-
-pub fn vtable_witness_note(table: &OffsetTable, observed: u64) -> String {
-    match table.game_base_vtable {
-        Some(expected) if expected == observed => format!(
-            "vtable witness confirmed — table game_base_vtable=0x{expected:016X} == observed \
-             MethodTable (same-process regeneration)"
-        ),
-        Some(expected) => format!(
-            "vtable witness differs (expected across launches) — table 0x{expected:016X} vs \
-             observed 0x{observed:016X}"
-        ),
-        None => "table carries no game_base_vtable witness — the structural proof carries the \
-                 identification"
-            .to_string(),
     }
 }

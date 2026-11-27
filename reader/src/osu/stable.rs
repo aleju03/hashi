@@ -240,7 +240,7 @@ pub fn paused_from_previous(previous: Option<i32>, current: Option<i32>) -> bool
 
 /// 音频时长的可用性（纯函数）：有限、非负、且 ≤ 24 h。
 pub fn mp3_length_is_sane(seconds_ms: f64) -> bool {
-    seconds_ms.is_finite() && seconds_ms >= 0.0 && seconds_ms <= MP3_LENGTH_MAX_MS
+    seconds_ms.is_finite() && (0.0..=MP3_LENGTH_MAX_MS).contains(&seconds_ms)
 }
 
 /// stable 安装目录里的**本机玩家名**候选（`osu!*.cfg` 里的 `Username = …`）。
@@ -792,7 +792,7 @@ mod win_io {
             let buttons = win::read_u32(target, frame.wrapping_add(section.frame_buttons)).unwrap_or(0);
             let y = f32::from_bits(win::read_u32(target, frame.wrapping_add(section.frame_y)).unwrap_or(0));
             // 加载期光标帧：y=-500、x=256；mania 帧 y 为列宽常量（>0）。
-            if buttons != 0 || !(y > 0.0) {
+            if buttons != 0 || y.is_nan() || y <= 0.0 {
                 tail = time;
                 index += 1;
                 continue;
