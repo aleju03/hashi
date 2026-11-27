@@ -10,6 +10,7 @@ const rateClamp = (r) => Math.min(RATE_MAX, Math.max(RATE_MIN, Math.round(r * 10
 const rateMod = (r, keep) => (r > 1 ? (keep ? "DT" : "NC") : (keep ? "HT" : "DC"));
 // what the helper adds to the difficulty's name
 const rateSuffix = (r) => (r === 1 ? "" : ` ${rateText(r)}x`);
+const rateName = (r, keep) => `${rateSuffix(r)}${r === 1 || keep ? "" : ` ${rateMod(r, keep)}`}`;
 const newRater = () => ({
   map: null, loading: true, error: null, busy: false, made: [], own: [], makeError: null,
   rate: 1,
@@ -54,7 +55,7 @@ async function loadRater(r) {
   render();
 }
 
-// osu! opens a map made here by itself, the page stays on the one it came from
+// picking a rate made here in osu! keeps the page on the map it came from
 function raterFollow() {
   const r = rater;
   const md5 = snapshot.reader.map?.md5;
@@ -322,7 +323,7 @@ function raterView() {
   const r = rater;
   const m = r.map;
   const up = r.rate > 1;
-  const version = `${m?.version ?? ""}${rateSuffix(r.rate)}`.trim();
+  const version = `${m?.version ?? ""}${rateName(r.rate, r.keep)}`.trim();
   const field = (label, ...control) => el("div", { class: "maker-field" }, el("span", { class: "maker-label" }, label), el("div", { class: "maker-control" }, control));
   const fact = (label, before, after) => el("div", { class: "rate-fact" },
     el("span", { class: "rate-fact-label" }, label),
@@ -352,11 +353,11 @@ function raterView() {
       el("div", { class: "rate-controls" },
         field("Rate", rateStepper(r), r.rate !== 1 && pitchSegs(r)),
         el("p", { class: "caption" },
-          r.rate === 1 ? "Pick a rate other than 1x." : `A new difficulty, “${version}”, with the whole map and its song at this rate.`),
+          r.rate === 1 ? "Pick a rate other than 1x." : `A new difficulty in this set, “${version}”, with the whole map and its song at this rate.`),
         el("button", { class: "primary maker-go", disabled: r.busy || r.rate === 1, onclick: () => makeRate(r) },
-          r.busy ? (up ? "Speeding up the song…" : "Slowing down the song…") : "Make it and open in osu!"),
+          r.busy ? (up ? "Speeding up the song…" : "Slowing down the song…") : "Make it"),
         r.makeError && el("p", { class: "status bad" }, r.makeError),
-        r.made.length > 0 && el("p", { class: "status good" }, `Sent to osu! as “${r.made[r.made.length - 1]}”.`),
+        r.made.length > 0 && el("p", { class: "status good" }, `Added to the set as “${r.made[r.made.length - 1]}”.`),
         r.made.length > 1 && el("p", { class: "caption" }, `Also made: ${r.made.slice(0, -1).join(", ")}.`)),
     ]);
 }

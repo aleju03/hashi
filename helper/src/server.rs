@@ -573,7 +573,7 @@ async fn route(b: &Arc<Bridge>, req: Request, has_origin: bool) -> Response<Body
             let q: Vec<(String, String)> = url::form_urlencoded::parse(req.uri().query().unwrap_or("").as_bytes()).into_owned().collect();
             let text = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
             let Some(rate) = text("rate").and_then(|v| v.parse::<f64>().ok()).filter(|r| r.is_finite()) else { return empty(400) };
-            let (status, body) = crate::rate::make(b, md5, rate, text("pitch").as_deref() == Some("keep")).await;
+            let (status, body) = crate::rate::make(md5, rate, text("pitch").as_deref() == Some("keep")).await;
             return json(status, &body);
         }
         // /goals/<id>/target/<percent>
