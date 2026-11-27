@@ -1,5 +1,12 @@
 [
   {
+    "version": "1.0.1",
+    "date": "2026-11-27",
+    "changes": [
+      { "kind": "new", "text": "Rate changes on stable now go in the map's own set" }
+    ]
+  },
+  {
     "version": "1.0.0",
     "date": "2026-11-27",
     "changes": [
