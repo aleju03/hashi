@@ -299,10 +299,12 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
     };
     let Some(item) = b.st().queue.items.iter().find(|i| i.id == id).cloned() else { return Ok(()) };
     if header.mode != 3 {
-        return Ok(queue::fail(b, id, "failed", "not_mania", "The replay is not a mania play."));
+        queue::fail(b, id, "failed", "not_mania", "The replay is not a mania play.");
+        return Ok(());
     }
     if header.beatmap_md5.as_deref().map(str::to_lowercase).as_deref() != Some(item.play.beatmap_md5.as_str()) {
-        return Ok(queue::fail(b, id, "failed", "replay_mismatch", "The replay header names a different chart."));
+        queue::fail(b, id, "failed", "replay_mismatch", "The replay header names a different chart.");
+        return Ok(());
     }
     // lazer's file for a replay downloaded just before watching it looks new, its date doesn't
     if header.played_at > 0 && header.played_at < item.detected_at_ms - OLD_REPLAY_MS {
@@ -311,7 +313,8 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
         return Ok(());
     }
     if header.mods & AUTOMATED_MODS != 0 {
-        return Ok(queue::fail(b, id, "failed", "automated", "The replay carries automated mods."));
+        queue::fail(b, id, "failed", "automated", "The replay carries automated mods.");
+        return Ok(());
     }
 
     let mut replay = keep_blob(b, &bytes).await?;
@@ -334,11 +337,13 @@ async fn attach_replay(b: &Arc<Bridge>, id: &str, file: Fresh) -> Result<(), Str
                 i.play.player_name = name.clone().into();
             }
         });
-        return Ok(queue::fail(b, id, "failed", "chart_not_found", msg));
+        queue::fail(b, id, "failed", "chart_not_found", msg);
+        return Ok(());
     };
     let chart_bytes = crate::read_capped(&chart_file, crate::MAX_CHART_BYTES).await.map_err(|e| e.to_string())?;
     if md5_hex(&chart_bytes) != item.play.beatmap_md5 {
-        return Ok(queue::fail(b, id, "failed", "chart_changed", "The chart changed while it was being read."));
+        queue::fail(b, id, "failed", "chart_changed", "The chart changed while it was being read.");
+        return Ok(());
     }
     let mut chart = keep_blob(b, &chart_bytes).await?;
     chart.md5 = Some(item.play.beatmap_md5.clone());

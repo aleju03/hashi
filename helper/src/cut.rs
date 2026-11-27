@@ -296,12 +296,12 @@ pub(crate) fn number(t: f64) -> String {
 #[allow(clippy::too_many_arguments)]
 fn timing(points: &[Point], seg_a: f64, seg_b: f64, map_end: f64, cut_end: f64, speed: f64, shift: impl Fn(f64) -> f64) -> Result<Vec<String>, String> {
     let mut placed: Vec<Point> = vec![];
-    let first_red = points.iter().filter(|p| p.red && p.time <= seg_a).last().or(points.iter().find(|p| p.red)).ok_or("The map has no timing.")?;
+    let first_red = points.iter().rfind(|p| p.red && p.time <= seg_a).or(points.iter().find(|p| p.red)).ok_or("The map has no timing.")?;
     if first_red.time <= seg_a {
         // whole beats, to keep the beat phase. It can come out before 0, which osu! takes
         let at = shift(first_red.time + ((seg_a - first_red.time) / first_red.beat).floor() * first_red.beat);
         placed.push(Point { time: at, ..first_red.clone() });
-        if let Some(g) = points.iter().filter(|p| !p.red && p.time <= seg_a && p.time >= first_red.time).last() {
+        if let Some(g) = points.iter().rfind(|p| !p.red && p.time <= seg_a && p.time >= first_red.time) {
             placed.push(Point { time: at, ..g.clone() });
         }
     }

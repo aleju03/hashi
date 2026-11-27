@@ -405,8 +405,7 @@ pub(crate) fn analyze(j: &Judged, thumb_left: bool, own_fingers: Option<&[String
                 chord_spreads.push((hi - lo, presses.len()));
             }
         }
-        for x in i..=k {
-            let n = &j.notes[x];
+        for (x, n) in j.notes.iter().enumerate().take(k + 1).skip(i) {
             let gap = last_in_column[n.column].map(|t| (n.time - t) / rate);
             let jack = last_was_tap[n.column] && gap.is_some_and(|g| g <= 200.0);
             if jack && !n.is_hold {
@@ -1427,8 +1426,8 @@ mod tests {
             o.sort_by(|&a, &b| notes[a].time.total_cmp(&notes[b].time));
             o
         };
-        let notes: Vec<Note> = order.iter().map(|&i| notes[i].clone()).collect();
-        let states: Vec<NoteState> = order.iter().map(|&i| states[i].clone()).collect();
+        let notes: Vec<Note> = order.iter().map(|&i| notes[i]).collect();
+        let states: Vec<NoteState> = order.iter().map(|&i| states[i]).collect();
         let judgments: Vec<Vec<u8>> = order.iter().map(|&i| judgments[i].clone()).collect();
         let n = notes.len();
         let j = super::Judged {
@@ -1466,7 +1465,7 @@ mod tests {
             }
         }
         rows.sort_by(|a, b| a.0.time.total_cmp(&b.0.time));
-        let notes: Vec<Note> = rows.iter().map(|r| r.0.clone()).collect();
+        let notes: Vec<Note> = rows.iter().map(|r| r.0).collect();
         let states: Vec<NoteState> = rows
             .iter()
             .map(|(n, judged, offset)| NoteState {

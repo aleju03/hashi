@@ -60,7 +60,7 @@ const SCOPES: [&str; 4] = [
 // dev builds talk to a local mania-hub, TRACKER_ORIGIN picks any other
 const DEFAULT_ORIGIN: &str = if cfg!(debug_assertions) { "http://localhost:3000" } else { "https://mania-tracker.com" };
 pub const COUNTER_PATH: &str = "/mania-bridge/";
-const RECENT_PLAYS_MS: i64 = 12 * 3600_000;
+const RECENT_PLAYS_MS: i64 = 12 * 3_600_000;
 // the latest plays the list shows however long ago they were
 const LATEST_PLAYS_SHOWN: usize = 20;
 pub const DEFAULT_PORT: u16 = 24071;
@@ -265,7 +265,7 @@ fn regex_local(origin: &str) -> bool {
         None => return false,
     };
     let host = rest.split(':').next().unwrap_or("");
-    let port_ok = rest.split_once(':').map_or(true, |(_, p)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
+    let port_ok = rest.split_once(':').is_none_or(|(_, p)| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()));
     (host == "localhost" || host == "127.0.0.1") && port_ok && !rest.contains('/')
 }
 
@@ -882,7 +882,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
                 _ = minute.tick() => {
                     minutes += 1;
                     // it can stay up for weeks in the tray
-                    if minutes % (24 * 60) == 0 {
+                    if minutes.is_multiple_of(24 * 60) {
                         let b = b.clone();
                         b.clone().spawn(async move {
                             if queue::prune_queue(&b).await {
@@ -892,7 +892,7 @@ pub async fn start(opts: Options) -> Result<Arc<Bridge>, String> {
                         });
                     }
                     // picks up a new api_base_url without a restart, keeps the old ones if the site is down
-                    if minutes % 60 == 0 {
+                    if minutes.is_multiple_of(60) {
                         let b = b.clone();
                         b.clone().spawn(async move {
                             if let Err(e) = auth::load_capabilities(&b).await {

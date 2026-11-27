@@ -152,9 +152,11 @@ pub struct Segment {
     pub start_previous: Option<f64>,
 }
 
+type Held = (Vec<f64>, f64, Option<f64>);
+
 pub fn build_segments(frames: &[Frame], keys: usize, total: f64) -> Vec<Vec<Segment>> {
     let mut segments: Vec<Vec<Segment>> = vec![vec![]; keys];
-    let mut active: Vec<Option<(Vec<f64>, f64, Option<f64>)>> = vec![None; keys];
+    let mut active: Vec<Option<Held>> = vec![None; keys];
     let mut previous: Vec<Option<f64>> = vec![None; keys];
     for frame in frames {
         for c in 0..keys {

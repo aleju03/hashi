@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use crate::{log, Bridge};
 
 const FILE: &str = "goals.json";
-const DONE_SHOWN_MS: i64 = 3 * 24 * 3600_000;
+const DONE_SHOWN_MS: i64 = 3 * 24 * 3_600_000;
 const MAX_TRIES: usize = 50;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -187,7 +187,7 @@ pub(crate) fn public(b: &Bridge) -> Value {
 
 pub(crate) fn for_map(b: &Bridge, md5: &str) -> Value {
     let list = goals(b).lock().unwrap_or_else(|e| e.into_inner());
-    list.iter().filter(|g| g.md5 == md5 && !g.dismissed).last().map(public_goal).unwrap_or(Value::Null)
+    list.iter().rfind(|g| g.md5 == md5 && !g.dismissed).map(public_goal).unwrap_or(Value::Null)
 }
 
 pub(crate) async fn on_play(b: &Arc<Bridge>, id: &str) {

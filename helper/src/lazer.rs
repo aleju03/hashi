@@ -218,10 +218,10 @@ fn runtime(b: &Bridge) -> Result<(PathBuf, Option<Mount>), String> {
     let torii = game_root(b).is_some_and(|r| is_torii(&r));
     #[cfg(windows)]
     {
-        return match windows_install(torii).map(|(d, _)| d).filter(|d| d.join(CORECLR).is_file()) {
+        match windows_install(torii).map(|(d, _)| d).filter(|d| d.join(CORECLR).is_file()) {
             Some(d) => Ok((d, None)),
             None => Err("Couldn't find lazer's install to save with.".into()),
-        };
+        }
     }
     #[cfg(target_os = "linux")]
     {

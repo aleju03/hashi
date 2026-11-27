@@ -237,8 +237,8 @@ fn render(item: &Item, replay: &[u8], chart: &[u8], lazer: bool, audio: &Path, b
     let mut objects = vec![];
     for &(at, f, _) in &placed {
         let t = |x: f64| at + (x - seg_a) / f;
-        let mut red = timing.iter().filter(|p| p.red && p.time <= seg_a).last().or(timing.iter().find(|p| p.red)).cloned().ok_or("The chart has no timing.")?;
-        let mut sv = timing.iter().filter(|p| !p.red && p.time <= seg_a && p.time >= red.time).last().map_or(1.0, |p| p.sv());
+        let mut red = timing.iter().rfind(|p| p.red && p.time <= seg_a).or(timing.iter().find(|p| p.red)).cloned().ok_or("The chart has no timing.")?;
+        let mut sv = timing.iter().rfind(|p| !p.red && p.time <= seg_a && p.time >= red.time).map_or(1.0, |p| p.sv());
         reds.push((t(seg_a), red.beat / f, red.meter));
         greens.push((t(seg_a), sv * base_in / red.beat, f));
         for p in timing.iter().filter(|p| p.time > seg_a && p.time < seg_b) {
@@ -279,7 +279,7 @@ fn render(item: &Item, replay: &[u8], chart: &[u8], lazer: bool, audio: &Path, b
     let mut all: Vec<(f64, String)> = reds.iter().map(|(t, beat, meter)| (*t, format!("{},{beat},{meter},1,0,40,1,0", t.round() as i64))).collect();
     for (t, velocity, _) in &greens {
         // velocity is relative to the play's base beat length, the practice map has its own
-        let beat_here = reds.iter().filter(|r| r.0 <= *t + 0.5).last().map_or(base_out, |r| r.1);
+        let beat_here = reds.iter().rfind(|r| r.0 <= *t + 0.5).map_or(base_out, |r| r.1);
         let sv = (velocity * beat_here / base_out).clamp(0.1, 10.0);
         all.push((*t + 0.001, format!("{},{},4,1,0,40,0,0", t.round() as i64, -100.0 / sv)));
     }
