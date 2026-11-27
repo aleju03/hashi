@@ -82,9 +82,12 @@ const SCREEN_SCAN_END: u64 = 0x800;
 const SCORE_SCAN_END: u64 = 0x40;
 const SCOREINFO_SCAN_END: u64 = 0x400;
 
-static LAST_MODS_JSON: Mutex<Option<(u64, Vec<LazerMod>)>> = Mutex::new(None);
+static LAST_MODS_JSON: Mutex<Option<(u64, Option<Vec<LazerMod>>)>> = Mutex::new(None);
 
 /// 正式读取当前 Player 的 `ScoreInfo.ModsJson`（含 RD seed）。同一屏幕缓存一次。
+///
+/// a miss is kept too: `ModsJson` is set once in `Player.load`, and with no mods it's `[]`,
+/// which is never taken, so each tick would scan the whole screen again
 pub fn read_play_mods(
     source: &dyn Source,
     table: &OffsetTable,
@@ -95,15 +98,15 @@ pub fn read_play_mods(
     if let Ok(cache) = LAST_MODS_JSON.lock() {
         if let Some((cached_screen, mods)) = cache.as_ref() {
             if *cached_screen == screen_top {
-                return Some(mods.clone());
+                return mods.clone();
             }
         }
     }
-    let mods = read_play_mods_json(source, table, screen_top, layout, modules)?;
+    let mods = read_play_mods_json(source, table, screen_top, layout, modules);
     if let Ok(mut cache) = LAST_MODS_JSON.lock() {
         *cache = Some((screen_top, mods.clone()));
     }
-    Some(mods)
+    mods
 }
 
 /// 结算屏直接从 `ResultsScreen.Score` 的 `ScoreInfo.ModsJson` 读 mods。
